@@ -19,7 +19,5 @@ Thumbs.db
 app/uploads/
 *.log
 
-# Large source data files (>1MB)
-data/Copy of Lager FATP*
-data/ETD_gated.xlsx
-data/~$*
+# Source data
+data/
