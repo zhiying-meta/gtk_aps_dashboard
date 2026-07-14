@@ -1,6 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# OS
 .DS_Store
-data/
-data-ref/
-*.xlsx
-*.docx
+Thumbs.db
+
+# IDE
 .idea/
+.vscode/
+*.swp
+
+# Temp
+app/uploads/
+*.log
+
+# Large source data files (>1MB)
+data/Copy of Lager FATP*
+data/ETD_gated.xlsx
+data/~$*

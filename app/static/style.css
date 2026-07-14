@@ -52,9 +52,68 @@ header .subtitle { font-size: 13px; color: #a8b2d1; margin-top: 3px; }
 .dropdown-all:hover { background: #f1f5f9; }
 .cfg-select {
   padding: 3px 6px; border: 1px solid #cbd5e1; border-radius: 4px;
-  font-size: 11px; background: #fff; cursor: pointer;
+  font-size: 12px; background: #fff; cursor: pointer; min-width: 80px;
 }
 .btn-sm { padding: 3px 10px; font-size: 11px; }
+
+/* Modal */
+.modal { position:fixed; top:0; left:0; right:0; bottom:0; z-index:999; display:flex; align-items:center; justify-content:center; }
+.modal-backdrop { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.4); }
+.modal-content { position:relative; background:#fff; border-radius:10px; max-width:700px; width:90%; max-height:80vh; overflow-y:auto; box-shadow:0 8px 30px rgba(0,0,0,0.2); }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid #e2e8f0; }
+.modal-title { font-size:16px; font-weight:600; }
+.modal-close { background:none; border:none; font-size:24px; cursor:pointer; color:#94a3b8; }
+.modal-close:hover { color:#1a1a2e; }
+.modal-body { padding:16px 20px; }
+.modal-body table { width:100%; border-collapse:collapse; font-size:13px; }
+.modal-body th { background:#f1f5f9; padding:8px 10px; text-align:left; font-weight:600; border-bottom:2px solid #e2e8f0; }
+.modal-body td { padding:6px 10px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+.modal-body .note { margin-top:12px; padding:10px; background:#f8fafc; border-radius:6px; font-size:12px; color:#64748b; }
+.btn-lg { padding: 8px 24px; font-size: 15px; }
+
+/* Section layout */
+.section { background:#fff; margin:12px 24px; border-radius:8px; padding:16px 20px; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+.section-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.section-title { font-size:16px; font-weight:600; color:#1a1a2e; }
+.section-actions { display:flex; gap:8px; align-items:center; }
+
+/* Upload grid */
+.upload-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.upload-card-main { grid-column:1/-1; }
+.upload-hint { font-size:11px; color:#64748b; margin-bottom:6px; }
+.upload-card {
+  border:2px dashed #cbd5e1; border-radius:8px; padding:12px;
+  text-align:center; transition:border-color 0.2s;
+}
+.upload-card:hover { border-color:#3b82f6; }
+.upload-card.has-file { border-color:#059669; border-style:solid; background:#f0fdf4; }
+.upload-label { font-size:13px; font-weight:600; margin-bottom:6px; }
+.upload-label .req { color:#dc2626; }
+.file-input { font-size:12px; margin-bottom:4px; max-width:100%; }
+.dl-link { font-size:11px; color:#3b82f6; text-decoration:none; cursor:pointer; }
+.dl-link:hover { text-decoration:underline; }
+.upload-links { display:flex; gap:8px; justify-content:center; margin-top:4px; }
+
+/* Config grid */
+.config-grid { display:flex; gap:20px; flex-wrap:wrap; }
+.config-item { display:flex; flex-direction:column; gap:4px; min-width:120px; }
+.config-item label { font-size:12px; font-weight:600; color:#64748b; }
+.config-actions { margin-top:12px; display:flex; align-items:center; gap:12px; }
+
+/* Filter & columns panels */
+.panels-row { display:flex; gap:10px; align-items:stretch; }
+.panel { border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; background:#fafbfc; }
+.panel-filter { flex:1; min-width:0; }
+.panel-cols { flex-shrink:0; }
+.panel-filter { }
+.panel-cols { }
+.panel-label { font-size:11px; font-weight:600; color:#475569; margin-bottom:4px; }
+.cols-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+/* Search in dropdown */
+.dropdown-search { padding:6px 8px; border-bottom:1px solid #e2e8f0; }
+.dropdown-search input { width:100%; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px; outline:none; }
+.dropdown-search input:focus { border-color:#3b82f6; }
 .tag-count {
   font-size: 10px; background: #3b82f6; color: #fff;
   padding: 0 5px; border-radius: 8px; font-weight: 400;

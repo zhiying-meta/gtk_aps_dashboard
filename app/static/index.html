@@ -3,86 +3,181 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多版本计划拼接结果展示</title>
+<title>多版本计划拼接 - 报表生成</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
   <h1>📊 多版本计划拼接结果展示</h1>
-  <p class="subtitle">基于排产结果 + Forecast + CTB 的灵活报表</p>
+  <p class="subtitle">上传数据 → 配置参数 → 生成报表</p>
 </header>
 
-<div class="toolbar">
-  <div class="filter-row">
-    <div class="filter-group dropdown-filter">
-      <label>Dim <span id="dim-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="dim-btn">All</button>
-      <div class="dropdown-menu" id="dim-menu"></div>
-    </div>
-    <div class="filter-group dropdown-filter">
-      <label>PN <span id="sku-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="sku-btn">All</button>
-      <div class="dropdown-menu" id="sku-menu"></div>
-    </div>
-    <div class="filter-group dropdown-filter">
-      <label>Usage <span id="usage-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="usage-btn">All</button>
-      <div class="dropdown-menu" id="usage-menu"></div>
-    </div>
-    <div class="filter-group dropdown-filter">
-      <label>Style <span id="style-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="style-btn">All</button>
-      <div class="dropdown-menu" id="style-menu"></div>
-    </div>
-    <div class="filter-group dropdown-filter">
-      <label>Color <span id="color-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="color-btn">All</button>
-      <div class="dropdown-menu" id="color-menu"></div>
-    </div>
-    <div class="filter-group dropdown-filter">
-      <label>Type <span id="type-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="type-btn">All</button>
-      <div class="dropdown-menu" id="type-menu"></div>
-    </div>
-    <div class="filter-group dropdown-filter">
-      <label>Detail <span id="detail-count" class="tag-count"></span></label>
-      <button class="dropdown-btn" id="detail-btn">All</button>
-      <div class="dropdown-menu" id="detail-menu"></div>
+<!-- ===== Upload Section ===== -->
+<div class="section" id="upload-section">
+  <div class="section-header">
+    <span class="section-title">📁 1. 上传数据文件</span>
+    <div class="section-actions">
+      <a href="/templates/input_template.xlsx" class="btn btn-sm">📄 下载模板</a>
+      <a href="/templates/zip" class="btn btn-sm">📦 模板+演示</a>
     </div>
   </div>
-  <div class="toolbar-actions">
-    <span id="row-count" class="row-count"></span>
-    <button id="btn-csv" class="btn">📥 下载 Excel</button>
-    <span id="status" class="status-msg"></span>
-  </div>
-  <div class="toolbar-divider"></div>
-  <div class="display-row">
-    <span class="display-label">显示列:</span>
-    <label class="toggle-label"><input type="checkbox" id="col-pn" checked> PN</label>
-    <label class="toggle-label"><input type="checkbox" id="col-usage" checked> Usage</label>
-    <label class="toggle-label"><input type="checkbox" id="col-style" checked> Style</label>
-    <label class="toggle-label"><input type="checkbox" id="col-color" checked> Color</label>
-    <label class="toggle-label"><input type="checkbox" id="col-cutday" checked> Cut Day</label>
-    <label class="toggle-label"><input type="checkbox" id="col-pallet" checked> Pallet</label>
-    <span class="display-label" style="margin-left:16px">分组:</span>
-    <select id="group-by">
-      <option value="">无分组</option>
-      <option value="Style">按 Style 分组</option>
-      <option value="Color">按 Color 分组</option>
-    </select>
+  <div class="upload-grid">
+    <div class="upload-card upload-card-main" data-key="main">
+      <div class="upload-label">📁 输入文件 (.xlsx) <span class="req">*</span></div>
+      <div class="upload-hint">包含6个Sheet：sku_master, plan_output_gated, plan_output_ungated, forecast, ctb_sku_cum, ctb_gb_cum</div>
+      <input type="file" class="file-input" accept=".xlsx">
+      <div class="upload-links">
+        <a href="#" class="dl-link schema-btn" data-file="sku_master">📋 sku_master</a>
+        <a href="#" class="dl-link schema-btn" data-file="plan_output_gated">📋 plan_gated</a>
+        <a href="#" class="dl-link schema-btn" data-file="plan_output_ungated">📋 plan_ungated</a>
+        <a href="#" class="dl-link schema-btn" data-file="forecast">📋 forecast</a>
+        <a href="#" class="dl-link schema-btn" data-file="ctb_sku_cum">📋 ctb_sku_cum</a>
+        <a href="#" class="dl-link schema-btn" data-file="ctb_gb_cum">📋 ctb_gb_cum</a>
+      </div>
+    </div>
   </div>
 </div>
 
-<div class="table-wrapper">
-  <table id="report-table">
-    <thead id="table-head"></thead>
-    <tbody id="table-body"></tbody>
-  </table>
+<!-- ===== Config Section ===== -->
+<div class="section" id="config-section">
+  <div class="section-header">
+    <span class="section-title">⚙️ 2. 配置 Cut Day of Week</span>
+  </div>
+  <div class="config-grid">
+    <div class="config-item">
+      <label>ExF (Forecast)</label>
+      <select id="cfg-exf" class="cfg-select">
+        <option value="Monday">周一</option><option value="Tuesday">周二</option>
+        <option value="Wednesday">周三</option><option value="Thursday">周四</option>
+        <option value="Friday">周五</option><option value="Saturday" selected>周六</option>
+        <option value="Sunday">周日</option>
+      </select>
+    </div>
+    <div class="config-item">
+      <label>ETD</label>
+      <select id="cfg-etd" class="cfg-select">
+        <option value="Monday">周一</option><option value="Tuesday">周二</option>
+        <option value="Wednesday">周三</option><option value="Thursday">周四</option>
+        <option value="Friday">周五</option><option value="Saturday" selected>周六</option>
+        <option value="Sunday">周日</option>
+      </select>
+    </div>
+    <div class="config-item">
+      <label>PKG Output</label>
+      <select id="cfg-output" class="cfg-select">
+        <option value="Monday">周一</option><option value="Tuesday">周二</option>
+        <option value="Wednesday" selected>周三</option><option value="Thursday">周四</option>
+        <option value="Friday">周五</option><option value="Saturday">周六</option>
+        <option value="Sunday">周日</option>
+      </select>
+    </div>
+    <div class="config-item">
+      <label>GB Output</label>
+      <select id="cfg-gb" class="cfg-select">
+        <option value="Monday">周一</option><option value="Tuesday" selected>周二</option>
+        <option value="Wednesday">周三</option><option value="Thursday">周四</option>
+        <option value="Friday">周五</option><option value="Saturday">周六</option>
+        <option value="Sunday">周日</option>
+      </select>
+    </div>
+  </div>
+  <div class="config-actions">
+    <button id="btn-generate" class="btn btn-lg">▶ 生成报表</button>
+    <span id="upload-status" class="status-msg"></span>
+  </div>
 </div>
 
-<div id="loading" class="loading">
+<!-- ===== Report Section ===== -->
+<div class="section" id="report-section" style="display:none">
+  <div class="section-header">
+    <span class="section-title">📊 3. 报表</span>
+    <div class="section-actions">
+      <button id="btn-dl-excel" class="btn btn-sm">📥 下载 Excel</button>
+      <span id="report-status" class="status-msg"></span>
+    </div>
+  </div>
+  <div class="toolbar" style="border:none;padding:8px 0">
+    <div class="panels-row">
+      <div class="panel panel-filter">
+        <div class="panel-label">🔍 筛选</div>
+        <div class="filter-row">
+          <div class="filter-group dropdown-filter">
+            <label>Dim <span id="dim-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="dim-btn">All</button>
+            <div class="dropdown-menu" id="dim-menu"></div>
+          </div>
+          <div class="filter-group dropdown-filter">
+            <label>PN <span id="sku-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="sku-btn">All</button>
+            <div class="dropdown-menu" id="sku-menu"></div>
+          </div>
+          <div class="filter-group dropdown-filter">
+            <label>Usage <span id="usage-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="usage-btn">All</button>
+            <div class="dropdown-menu" id="usage-menu"></div>
+          </div>
+          <div class="filter-group dropdown-filter">
+            <label>Style <span id="style-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="style-btn">All</button>
+            <div class="dropdown-menu" id="style-menu"></div>
+          </div>
+          <div class="filter-group dropdown-filter">
+            <label>Color <span id="color-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="color-btn">All</button>
+            <div class="dropdown-menu" id="color-menu"></div>
+          </div>
+          <div class="filter-group dropdown-filter">
+            <label>Type <span id="type-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="type-btn">All</button>
+            <div class="dropdown-menu" id="type-menu"></div>
+          </div>
+          <div class="filter-group dropdown-filter">
+            <label>Detail <span id="detail-count" class="tag-count"></span></label>
+            <button class="dropdown-btn" id="detail-btn">All</button>
+            <div class="dropdown-menu" id="detail-menu"></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel panel-cols">
+        <div class="panel-label">📋 显示列</div>
+        <div class="cols-row">
+          <label class="toggle-label"><input type="checkbox" id="col-pn" checked> PN</label>
+          <label class="toggle-label"><input type="checkbox" id="col-usage" checked> Usage</label>
+          <label class="toggle-label"><input type="checkbox" id="col-style" checked> Style</label>
+          <label class="toggle-label"><input type="checkbox" id="col-color" checked> Color</label>
+          <label class="toggle-label"><input type="checkbox" id="col-cutday" checked> Cut Day</label>
+          <label class="toggle-label"><input type="checkbox" id="col-pallet" checked> Pallet</label>
+          <span class="panel-label" style="margin-left:8px">分组:</span>
+          <select id="group-by" style="padding:2px 6px;font-size:12px">
+            <option value="">无分组</option>
+            <option value="Style">按 Style</option>
+            <option value="Color">按 Color</option>
+          </select>
+          <span id="row-count" style="margin-left:8px;font-size:12px;color:#64748b"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrapper" id="report-table-wrapper">
+    <table id="report-table"><thead id="table-head"></thead><tbody id="table-body"></tbody></table>
+  </div>
+</div>
+
+<div id="loading" class="loading" style="display:none">
   <div class="spinner"></div>
-  <p>正在加载数据...</p>
+  <p>正在生成报表...</p>
+</div>
+
+<!-- ===== Schema Modal ===== -->
+<div id="schema-modal" class="modal" style="display:none">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title" id="schema-title">字段说明</span>
+      <button class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body" id="schema-body"></div>
+  </div>
 </div>
 
 <script src="app.js"></script>
