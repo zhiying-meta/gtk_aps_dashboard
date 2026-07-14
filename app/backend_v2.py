@@ -76,27 +76,47 @@ def _to_saturday_label(ds):
 
 def aggregate_cumulative(daily, cut_day):
     """Compute cumulative sum up to each cut_day.
-    All week labels are normalized to Saturday for consistent column display.
+    Generates ALL week labels between first and last data point,
+    carrying forward the cumulative value even for weeks with no new data.
     """
     dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
     td = dow_map.get(cut_day, 5)
-
     date_list = sorted(daily.keys())
-    weeks = defaultdict(list)
-    for ds in date_list:
-        try: dt = datetime.strptime(ds, "%Y-%m-%d")
-        except: continue
+    if not date_list:
+        return {}
+
+    # Determine week range: from first data point's week to last data point's week
+    def date_to_week_label(ds):
+        dt = datetime.strptime(ds, "%Y-%m-%d")
         cd = dt.weekday()
         diff = (td - cd) % 7
         week_end = dt + timedelta(days=diff)
-        # Normalize to Saturday label
-        sat_label = _to_saturday_label(week_end.strftime("%Y-%m-%d"))
-        weeks[sat_label].append(ds)
+        return _to_saturday_label(week_end.strftime("%Y-%m-%d"))
+
+    first_dt = datetime.strptime(date_list[0], "%Y-%m-%d")
+    last_dt = datetime.strptime(date_list[-1], "%Y-%m-%d")
+
+    first_wl = date_to_week_label(date_list[0])
+    last_wl = date_to_week_label(date_list[-1])
+
+    # Build week label → list of dates in that week
+    weeks = defaultdict(list)
+    for ds in date_list:
+        wl = date_to_week_label(ds)
+        weeks[wl].append(ds)
+
+    # Generate all week labels from first to last
+    all_weeks = []
+    cur = datetime.strptime(first_wl, "%Y-%m-%d")
+    end = datetime.strptime(last_wl, "%Y-%m-%d")
+    while cur <= end:
+        all_weeks.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=7)
 
     result = {}
     running = 0.0
-    for wl in sorted(weeks.keys()):
-        for ds in weeks[wl]:
+    for wl in all_weeks:
+        for ds in weeks.get(wl, []):
             running += daily.get(ds, 0)
         if running > 0:
             result[wl] = round(running, 0)
