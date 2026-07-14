@@ -40,7 +40,10 @@ def download_template(name):
 
 @app.route("/demo")
 def download_demo():
-    fp = os.path.join(DATA_REF_XLSX, "input_demo.xlsx")
+    # Try templates/ first (tracked), fallback to data-ref-xlsx
+    fp = os.path.join(TEMPLATE_DIR, "input_demo.xlsx")
+    if not os.path.exists(fp):
+        fp = os.path.join(DATA_REF_XLSX, "input_demo.xlsx")
     if not os.path.exists(fp): return "Not found", 404
     return send_file(fp, as_attachment=True, download_name="input_demo.xlsx")
 
@@ -54,11 +57,9 @@ def get_schema():
 def download_all_templates():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Template
         fp = os.path.join(TEMPLATE_DIR, "input_template.xlsx")
         if os.path.exists(fp): zf.write(fp, "input_template.xlsx")
-        # Demo
-        fp2 = os.path.join(DATA_REF_XLSX, "input_demo.xlsx")
+        fp2 = os.path.join(TEMPLATE_DIR, "input_demo.xlsx")
         if os.path.exists(fp2): zf.write(fp2, "input_demo.xlsx")
     buf.seek(0)
     return send_file(buf, mimetype='application/zip', as_attachment=True, download_name='input_files.zip')
