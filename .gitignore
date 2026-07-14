@@ -22,3 +22,6 @@ app/uploads/
 # Source data
 data/
 data-ref-xlsx/
+
+# Office temp files
+~$*
