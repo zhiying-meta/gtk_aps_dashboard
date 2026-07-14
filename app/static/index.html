@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多版本计划拼接结果展示</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>📊 多版本计划拼接结果展示</h1>
+  <p class="subtitle">基于排产结果 + Forecast + CTB 的灵活报表</p>
+</header>
+
+<div class="toolbar">
+  <div class="filter-row">
+    <div class="filter-group dropdown-filter">
+      <label>Dim <span id="dim-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="dim-btn">All</button>
+      <div class="dropdown-menu" id="dim-menu"></div>
+    </div>
+    <div class="filter-group dropdown-filter">
+      <label>PN <span id="sku-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="sku-btn">All</button>
+      <div class="dropdown-menu" id="sku-menu"></div>
+    </div>
+    <div class="filter-group dropdown-filter">
+      <label>Usage <span id="usage-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="usage-btn">All</button>
+      <div class="dropdown-menu" id="usage-menu"></div>
+    </div>
+    <div class="filter-group dropdown-filter">
+      <label>Style <span id="style-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="style-btn">All</button>
+      <div class="dropdown-menu" id="style-menu"></div>
+    </div>
+    <div class="filter-group dropdown-filter">
+      <label>Color <span id="color-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="color-btn">All</button>
+      <div class="dropdown-menu" id="color-menu"></div>
+    </div>
+    <div class="filter-group dropdown-filter">
+      <label>Type <span id="type-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="type-btn">All</button>
+      <div class="dropdown-menu" id="type-menu"></div>
+    </div>
+    <div class="filter-group dropdown-filter">
+      <label>Detail <span id="detail-count" class="tag-count"></span></label>
+      <button class="dropdown-btn" id="detail-btn">All</button>
+      <div class="dropdown-menu" id="detail-menu"></div>
+    </div>
+  </div>
+  <div class="toolbar-actions">
+    <span id="row-count" class="row-count"></span>
+    <button id="btn-csv" class="btn">📥 下载 Excel</button>
+    <span id="status" class="status-msg"></span>
+  </div>
+  <div class="toolbar-divider"></div>
+  <div class="display-row">
+    <span class="display-label">显示列:</span>
+    <label class="toggle-label"><input type="checkbox" id="col-pn" checked> PN</label>
+    <label class="toggle-label"><input type="checkbox" id="col-usage" checked> Usage</label>
+    <label class="toggle-label"><input type="checkbox" id="col-style" checked> Style</label>
+    <label class="toggle-label"><input type="checkbox" id="col-color" checked> Color</label>
+    <label class="toggle-label"><input type="checkbox" id="col-cutday" checked> Cut Day</label>
+    <label class="toggle-label"><input type="checkbox" id="col-pallet" checked> Pallet</label>
+    <span class="display-label" style="margin-left:16px">分组:</span>
+    <select id="group-by">
+      <option value="">无分组</option>
+      <option value="Style">按 Style 分组</option>
+      <option value="Color">按 Color 分组</option>
+    </select>
+  </div>
+</div>
+
+<div class="table-wrapper">
+  <table id="report-table">
+    <thead id="table-head"></thead>
+    <tbody id="table-body"></tbody>
+  </table>
+</div>
+
+<div id="loading" class="loading">
+  <div class="spinner"></div>
+  <p>正在加载数据...</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
