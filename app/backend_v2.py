@@ -249,7 +249,6 @@ def process_uploaded_data(file_map, config):
     sku_data = {(r["PN"], r["Version-Type"], r["Version-Detail"]): {w: r.get(w) for w in all_weeks} for r in rows}
 
     for gb, skus in gb_groups.items():
-        if len(skus) < 2: continue
         sc = gb_style_color.get(gb, ("",""))
         # GB Usage = take first SKU's Usage
         gb_usage = ""
