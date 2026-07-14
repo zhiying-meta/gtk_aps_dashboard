@@ -25,3 +25,10 @@ data-ref-xlsx/
 
 # Office temp files
 ~$*
+
+# IDE
+.idea/
+
+# Static cache
+app/static/report_data.json
+app/static/meta.json
