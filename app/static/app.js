@@ -184,6 +184,24 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 // ===== Column toggles & group =====
 ['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet','group-by'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',renderTable);});
 
+// ===== Auto-load demo on startup =====
+(async function autoLoad() {
+  try {
+    const resp = await fetch('/demo');
+    const blob = await resp.blob();
+    const inp = document.querySelector('.file-input');
+    if (!inp) return;
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    inp.files = dt.files;
+    inp.closest('.upload-card').classList.add('has-file');
+    // Auto-generate
+    document.getElementById('btn-generate').click();
+  } catch(e) {
+    console.log('Auto-load demo failed:', e.message);
+  }
+})();
+
 // ===== Download Excel =====
 document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
   if(filteredRows.length===0)return;
