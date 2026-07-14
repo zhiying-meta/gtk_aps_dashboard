@@ -66,36 +66,60 @@ def read_sku_master_from_ws(ws):
             gb_style_color[gb] = (str(row["Style"]), str(row["Color"]))
     return sku_attrs, sku_to_gb, sku_pallet, gb_style_color
 
-def aggregate_weekly(daily, cut_day):
-    dow_map = {"Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
-               "Friday": 4, "Saturday": 5, "Sunday": 6}
+def _to_saturday_label(ds):
+    """Map any date string to the Saturday of its ISO week (Mon~Sun)"""
+    try: dt = datetime.strptime(ds, "%Y-%m-%d")
+    except: return ds
+    dow = dt.weekday()
+    sat = dt + timedelta(days=5 - dow)  # Mon(0)→Sat(5), Sun(6)→Sat(-1)
+    return sat.strftime("%Y-%m-%d")
+
+def aggregate_cumulative(daily, cut_day):
+    """Compute cumulative sum up to each cut_day.
+    All week labels are normalized to Saturday for consistent column display.
+    """
+    dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
     td = dow_map.get(cut_day, 5)
+
+    date_list = sorted(daily.keys())
     weeks = defaultdict(list)
-    for ds in daily:
+    for ds in date_list:
         try: dt = datetime.strptime(ds, "%Y-%m-%d")
         except: continue
         cd = dt.weekday()
         diff = (td - cd) % 7
-        weeks[(dt + timedelta(days=diff)).strftime("%Y-%m-%d")].append(ds)
+        week_end = dt + timedelta(days=diff)
+        # Normalize to Saturday label
+        sat_label = _to_saturday_label(week_end.strftime("%Y-%m-%d"))
+        weeks[sat_label].append(ds)
+
     result = {}
-    for wl, dl in weeks.items():
-        s = sum(daily[d] for d in dl if daily.get(d))
-        if s > 0: result[wl] = round(s, 0)
+    running = 0.0
+    for wl in sorted(weeks.keys()):
+        for ds in weeks[wl]:
+            running += daily.get(ds, 0)
+        if running > 0:
+            result[wl] = round(running, 0)
     return result
 
 def extract_weekly_cum(daily, cut_day):
-    """For cumulative data"""
+    """For already-cumulative data (CTB): take the value at each week end.
+    Weeks labeled by Saturday."""
     dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
     td = dow_map.get(cut_day, 5)
+    date_list = sorted(daily.keys())
     weeks = defaultdict(list)
-    for ds in daily:
+    for ds in date_list:
         try: dt = datetime.strptime(ds, "%Y-%m-%d")
         except: continue
         cd = dt.weekday()
         diff = (td - cd) % 7
-        weeks[(dt + timedelta(days=diff)).strftime("%Y-%m-%d")].append(ds)
+        week_end = dt + timedelta(days=diff)
+        sat_label = _to_saturday_label(week_end.strftime("%Y-%m-%d"))
+        weeks[sat_label].append(ds)
     result = {}
-    for wl, dl in weeks.items():
+    for wl in sorted(weeks.keys()):
+        dl = weeks[wl]
         dl.sort()
         if dl and daily.get(dl[-1]):
             result[wl] = round(daily[dl[-1]], 0)
@@ -144,10 +168,7 @@ def process_uploaded_data(file_map, config):
         agg[label] = {}
         for sku in all_skus:
             daily = data.get(sku, {})
-            if label == "FCST":
-                agg[label][sku] = extract_weekly_cum(daily, cut)
-            else:
-                agg[label][sku] = aggregate_weekly(daily, cut)
+            agg[label][sku] = aggregate_cumulative(daily, cut)
 
     # Collect all weeks
     all_weeks = set()
