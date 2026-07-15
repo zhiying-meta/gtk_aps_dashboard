@@ -116,6 +116,10 @@
         <button class="dim-tab active" data-dim="FG">FG (SKU)</button>
         <button class="dim-tab" data-dim="GB">GB</button>
       </div>
+      <div class="view-tabs">
+        <button class="view-tab active" data-view="detail">📋 明细</button>
+        <button class="view-tab" data-view="pivot">📊 透视</button>
+      </div>
       <div class="toolbar" style="border:none;padding:8px 0">
         <div class="panels-row">
           <div class="panel panel-filter">
@@ -171,6 +175,13 @@
               <span id="row-count" style="margin-left:8px;font-size:12px;color:#64748b"></span>
             </div>
           </div>
+        </div>
+        <div id="pivot-config" class="pivot-config" style="display:none">
+          <span class="panel-label">📊 透视行字段:</span>
+          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Style" checked> Style</label>
+          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Color" checked> Color</label>
+          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Usage"> Usage</label>
+          <span id="pivot-row-count" class="row-count" style="margin-left:8px"></span>
         </div>
       </div>
       <div class="table-wrapper" id="report-table-wrapper">

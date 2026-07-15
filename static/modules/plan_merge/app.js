@@ -10,7 +10,7 @@ const ALL_COLS = [
   { key:'Pallet_Qty', label:'Pallet', width:50, frozen:true, toggle:'col-pallet' },
 ];
 const DIVIDER = { key:'_divider', label:'', width:5, frozen:true };
-let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG';
+let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG', activeView='detail', pivotFields=['Style','Color'];
 
 // ===== Upload: mark files =====
 document.querySelectorAll('.file-input').forEach(inp => {
@@ -76,7 +76,8 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
     document.getElementById('upload-status').textContent = `✅ ${allRows.length} 行`;
-    setupDropdowns(); applyFilters(); renderTable();
+    setupDropdowns(); applyFilters();
+    if (activeView === 'pivot') renderPivotTable(); else renderTable();
   } catch(e) {
     status.textContent = `❌ ${e.message}`;
   } finally {
@@ -135,7 +136,7 @@ function getVals(name) {
   return c.length===total ? null : Array.from(c).map(cb=>cb.dataset.val);
 }
 let _ft=null;
-function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();renderTable();},80); }
+function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();if(activeView==='pivot')renderPivotTable();else renderTable();},80); }
 function getFilteredRows(useDim) {
   const s=getVals('sku'), u=getVals('usage'), st=getVals('style'), co=getVals('color'), t=getVals('type'), de=getVals('detail');
   return allRows.filter(r=>{
@@ -156,11 +157,75 @@ function applyFilters() {
 function setDimTab(dim) {
   activeDim = dim;
   document.querySelectorAll('.dim-tab').forEach(t => t.classList.toggle('active', t.dataset.dim === dim));
-  applyFilters(); renderTable();
+  applyFilters();
+  if (activeView === 'pivot') renderPivotTable(); else renderTable();
 }
 document.querySelectorAll('.dim-tab').forEach(tab => {
   tab.addEventListener('click', () => setDimTab(tab.dataset.dim));
 });
+
+// ===== View mode toggle =====
+document.querySelectorAll('.view-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    activeView = tab.dataset.view;
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === activeView));
+    document.getElementById('pivot-config').style.display = activeView === 'pivot' ? 'flex' : 'none';
+    if (activeView === 'pivot') renderPivotTable();
+    else renderTable();
+  });
+});
+document.querySelectorAll('.pivot-field').forEach(cb => {
+  cb.addEventListener('change', () => {
+    pivotFields = Array.from(document.querySelectorAll('.pivot-field:checked')).map(c => c.value);
+    if (pivotFields.length === 0) { pivotFields = ['Style']; document.querySelector('.pivot-field[value="Style"]').checked = true; }
+    renderPivotTable();
+  });
+});
+
+function renderPivotTable() {
+  const th=document.getElementById('table-head'), tb=document.getElementById('table-body');
+  const rows = getFilteredRows(true);
+  if (rows.length === 0) {
+    th.innerHTML=''; tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">无匹配数据</td></tr>';
+    document.getElementById('pivot-row-count').textContent = '';
+    return;
+  }
+
+  const groups = {};
+  for (const r of rows) {
+    const key = pivotFields.map(f => r[f] || '(blank)').join('\x00');
+    if (!groups[key]) {
+      groups[key] = { fields: pivotFields.map(f => r[f] || '(blank)'), weeks: {} };
+    }
+    for (const w of allWeeks) {
+      const v = r[w];
+      if (v != null && v !== '' && !isNaN(Number(v))) {
+        groups[key].weeks[w] = (groups[key].weeks[w] || 0) + Number(v);
+      }
+    }
+  }
+
+  const groupKeys = Object.keys(groups).sort();
+  let h = '<tr>';
+  for (const f of pivotFields) h += `<th style="min-width:90px">${f}</th>`;
+  for (const w of allWeeks) h += `<th style="min-width:78px">${weekLabels[w]||w}</th>`;
+  th.innerHTML = h + '</tr>';
+
+  document.getElementById('pivot-row-count').textContent = `${groupKeys.length} 行`;
+
+  let html = '';
+  for (const gk of groupKeys) {
+    const g = groups[gk];
+    html += '<tr>';
+    for (const fv of g.fields) html += `<td class="data-cell" style="font-weight:500">${esc(fv)}</td>`;
+    for (const w of allWeeks) {
+      const v = g.weeks[w];
+      html += `<td class="data-cell ${numCls(v)}">${fmtNum(v)}</td>`;
+    }
+    html += '</tr>';
+  }
+  tb.innerHTML = html;
+}
 
 function isVis(c) { if(!c.toggle) return true; const e=document.getElementById(c.toggle); return !e||e.checked; }
 
@@ -193,7 +258,7 @@ function renderTable() {
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';}
 
 // ===== Column toggles & group =====
-['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet','group-by'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',renderTable);});
+['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet','group-by'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',()=>{if(activeView==='pivot')renderPivotTable();else renderTable();});});
 
 // ===== Auto-load demo on startup =====
 (async function autoLoad() {
