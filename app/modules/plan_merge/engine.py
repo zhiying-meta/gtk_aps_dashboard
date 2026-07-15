@@ -83,7 +83,6 @@ def extract_weekly_cum(daily, cut_day):
 
 def process_uploaded_data(file_map, config):
     from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
-    import openpyxl
 
     cfg = {
         "exf_cut": config.get("exf_cut", "Saturday"),
@@ -96,9 +95,12 @@ def process_uploaded_data(file_map, config):
     if not fp:
         raise ValueError("No file uploaded")
 
-    sheets = read_uploaded_xlsx(fp)
-    wb = openpyxl.load_workbook(fp, data_only=True)
-    sku_ws = wb["sku_master"] if "sku_master" in [s.title for s in wb.worksheets] else wb.active
+    sheets, missing_sheets = read_uploaded_xlsx(fp)
+
+    if "sku" not in sheets:
+        raise ValueError("Missing required sheet: sku_master")
+
+    sku_ws = sheets["sku"]
     sku_attrs, sku_to_gb, sku_pallet, gb_style_color = read_sku_master_from_ws(sku_ws)
     all_skus = set(sku_attrs.keys())
 
@@ -136,6 +138,8 @@ def process_uploaded_data(file_map, config):
 
     def fill(vals): return {w: vals.get(w, None) for w in all_weeks}
     def diff(b, s):
+        if not b:
+            return {}
         ks = set(list(b.keys()) + list(s.keys()))
         return {k: ((b.get(k) or 0) - (s.get(k) or 0)) for k in ks}
 
@@ -216,7 +220,13 @@ def process_uploaded_data(file_map, config):
             wl[w] = f"{dt.strftime('%b')} Wk{wk} ({dt.strftime('%b %d')})"
         except:
             wl[w] = w
-    return {"rows": rows, "weeks": all_weeks, "week_labels": wl, "config": cfg}
+    warnings = []
+    if missing_sheets:
+        warnings.append(f"Missing optional sheets (left empty): {', '.join(missing_sheets)}")
+    else:
+        warnings.append("All 6 sheets present ✓")
+
+    return {"rows": rows, "weeks": all_weeks, "week_labels": wl, "config": cfg, "warnings": warnings}
 
 
 def _write_sheet(ws, rows, weeks, fixed, flabels, fills, hf, hfl, hb, cf, cb, nf, wlabels):

@@ -82,10 +82,19 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   form.append('gb_cut', document.getElementById('cfg-gb').value);
 
   document.getElementById('loading').style.display = 'flex';
+  const warnEl = document.getElementById('upload-warnings');
+  if (warnEl) { warnEl.style.display = 'none'; warnEl.innerHTML = ''; }
   try {
     const resp = await fetch('/api/process', { method:'POST', body: form });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+
+    if (data.warnings && data.warnings.length > 0 && warnEl) {
+      const isWarn = data.warnings.some(w => w.toLowerCase().includes('missing'));
+      warnEl.className = 'warnings ' + (isWarn ? 'warn' : 'success');
+      warnEl.innerHTML = data.warnings.map(w => '<div>' + esc(w) + '</div>').join('');
+      warnEl.style.display = 'block';
+    }
 
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
@@ -450,8 +459,6 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
     dt.items.add(new File([blob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
     inp.files = dt.files;
     inp.closest('.upload-card').classList.add('has-file');
-    // Auto-generate
-    document.getElementById('btn-generate').click();
   } catch(e) {
     console.log('Auto-load demo failed:', e.message);
   }

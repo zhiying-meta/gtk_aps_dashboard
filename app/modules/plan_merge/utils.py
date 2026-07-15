@@ -42,7 +42,7 @@ def read_sku_master_from_ws(ws):
 
 
 def read_uploaded_xlsx(fp):
-    """Read single xlsx with 6 sheets → dict of data"""
+    """Read single xlsx → (data_dict, missing_optional_sheets_list)"""
     import openpyxl
     wb = openpyxl.load_workbook(fp, data_only=True)
     sheet_names = [s.title for s in wb.worksheets]
@@ -61,4 +61,16 @@ def read_uploaded_xlsx(fp):
             result["ctb"] = read_sheet(ws, "SKU")
         elif sn in ("ctb_gb_cum", "ctb_gb"):
             result["ctb_gb"] = read_sheet(ws)
-    return result
+
+    optional_groups = [
+        (["plan_output_gated"], "gated"),
+        (["plan_output_ungated"], "ungated"),
+        (["forecast"], "fcst"),
+        (["ctb_sku_cum", "ctb_cum"], "ctb"),
+        (["ctb_gb_cum", "ctb_gb"], "ctb_gb"),
+    ]
+    missing = []
+    for names, _key in optional_groups:
+        if not any(n in sheet_names for n in names):
+            missing.append(names[0])
+    return result, missing
