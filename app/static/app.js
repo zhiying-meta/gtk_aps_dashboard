@@ -214,3 +214,8 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
   }catch(e){alert('下载失败: '+e.message);}
   finally{btn.textContent='📥 下载 Excel';btn.disabled=false;}
 });
+
+// ===== Sidebar Toggle =====
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+});
