@@ -10,7 +10,7 @@ const ALL_COLS = [
   { key:'Pallet_Qty', label:'Pallet', width:50, frozen:true, toggle:'col-pallet' },
 ];
 const DIVIDER = { key:'_divider', label:'', width:5, frozen:true };
-let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[];
+let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG';
 
 // ===== Upload: mark files =====
 document.querySelectorAll('.file-input').forEach(inp => {
@@ -87,7 +87,6 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 // ===== Filters =====
 function setupDropdowns() {
   for (const [name, opts] of Object.entries({
-    dim: { items:extractUnique('_dim'), map:{FG:'FG (SKU)',GB:'GB'} },
     sku: { items:extractUnique('PN') },
     usage: { items:extractUnique('Usage').filter(Boolean) },
     style: { items:extractUnique('Style') },
@@ -138,9 +137,9 @@ function getVals(name) {
 let _ft=null;
 function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();renderTable();},80); }
 function applyFilters() {
-  const d=getVals('dim'), s=getVals('sku'), u=getVals('usage'), st=getVals('style'), co=getVals('color'), t=getVals('type'), de=getVals('detail');
+  const s=getVals('sku'), u=getVals('usage'), st=getVals('style'), co=getVals('color'), t=getVals('type'), de=getVals('detail');
   filteredRows=allRows.filter(r=>{
-    if(d&&d.length&&!d.includes(r._dim)) return false;
+    if(activeDim&&r._dim!==activeDim) return false;
     if(s&&s.length&&!s.includes(r.PN)) return false;
     if(u&&u.length&&!u.includes(r.Usage)) return false;
     if(st&&st.length&&!st.includes(r.Style)) return false;
@@ -151,6 +150,15 @@ function applyFilters() {
   });
   document.getElementById('row-count').textContent=`${filteredRows.length} 行`;
 }
+function setDimTab(dim) {
+  activeDim = dim;
+  document.querySelectorAll('.dim-tab').forEach(t => t.classList.toggle('active', t.dataset.dim === dim));
+  applyFilters(); renderTable();
+}
+document.querySelectorAll('.dim-tab').forEach(tab => {
+  tab.addEventListener('click', () => setDimTab(tab.dataset.dim));
+});
+
 function isVis(c) { if(!c.toggle) return true; const e=document.getElementById(c.toggle); return !e||e.checked; }
 
 function fmtNum(v) { if(v==null||v==='') return ''; const n=Number(v); if(isNaN(n)) return ''; return n===0?'0':Math.round(n).toLocaleString(); }

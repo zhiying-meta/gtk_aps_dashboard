@@ -15,9 +15,9 @@
       <span class="sidebar-title">模块导航</span>
     </div>
     <nav class="sidebar-nav">
-      <a href="#" class="nav-item active" data-module="split-report">
+      <a href="#" class="nav-item active" data-module="plan-merge">
         <span class="nav-icon">📊</span>
-        <span class="nav-text">gated/ungated/ctb拼接报表</span>
+        <span class="nav-text">gated/ungated/ctb report</span>
       </a>
     </nav>
   </aside>
@@ -112,16 +112,15 @@
           <span id="report-status" class="status-msg"></span>
         </div>
       </div>
+      <div class="dim-tabs">
+        <button class="dim-tab active" data-dim="FG">FG (SKU)</button>
+        <button class="dim-tab" data-dim="GB">GB</button>
+      </div>
       <div class="toolbar" style="border:none;padding:8px 0">
         <div class="panels-row">
           <div class="panel panel-filter">
             <div class="panel-label">🔍 筛选</div>
             <div class="filter-row">
-              <div class="filter-group dropdown-filter">
-                <label>Dim <span id="dim-count" class="tag-count"></span></label>
-                <button class="dropdown-btn" id="dim-btn">All</button>
-                <div class="dropdown-menu" id="dim-menu"></div>
-              </div>
               <div class="filter-group dropdown-filter">
                 <label>PN <span id="sku-count" class="tag-count"></span></label>
                 <button class="dropdown-btn" id="sku-btn">All</button>
