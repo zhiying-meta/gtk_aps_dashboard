@@ -1,4 +1,4 @@
-// ===== Global: Sidebar Toggle =====
+// ===== Global: Sidebar Toggle & Header Title =====
 document.addEventListener('DOMContentLoaded', () => {
   function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
@@ -13,4 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const toggleAlt = document.getElementById('sidebar-toggle-alt');
   if (toggleAlt) toggleAlt.addEventListener('click', toggleSidebar);
+
+  // Set header title from active nav item
+  const activeNav = document.querySelector('.nav-item.active');
+  const headerTitle = document.getElementById('header-title');
+  if (activeNav && headerTitle) {
+    const text = activeNav.querySelector('.nav-text');
+    if (text) headerTitle.textContent = text.textContent;
+  }
 });

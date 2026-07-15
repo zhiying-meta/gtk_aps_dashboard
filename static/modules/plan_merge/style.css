@@ -3,7 +3,7 @@
 /* Toolbar */
 .toolbar {
   background: #fff; border-bottom: 1px solid #e2e8f0; padding: 8px 24px;
-  position: sticky; top: 0; z-index: 100;
+  position: sticky; top: 48px; z-index: 30;
 }
 .filter-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .filter-group {
