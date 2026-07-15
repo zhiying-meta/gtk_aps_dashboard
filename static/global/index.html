@@ -113,10 +113,6 @@
         <button class="dim-tab active" data-dim="FG">FG (SKU)</button>
         <button class="dim-tab" data-dim="GB">GB</button>
       </div>
-      <div class="view-tabs">
-        <button class="view-tab active" data-view="detail">📋 Detail</button>
-        <button class="view-tab" data-view="pivot">📊 Pivot</button>
-      </div>
       <div class="toolbar" style="border:none;padding:8px 0">
         <div class="panels-row">
           <div class="panel panel-filter">
@@ -163,21 +159,15 @@
               <label class="toggle-label"><input type="checkbox" id="col-color" checked> Color</label>
               <label class="toggle-label"><input type="checkbox" id="col-cutday" checked> Cut Day</label>
               <label class="toggle-label"><input type="checkbox" id="col-pallet" checked> Pallet</label>
-              <span class="panel-label" style="margin-left:8px">Group:</span>
-              <select id="group-by" style="padding:2px 6px;font-size:12px">
-                <option value="">None</option>
-                <option value="Style">By Style</option>
-                <option value="Color">By Color</option>
-              </select>
               <span id="row-count" style="margin-left:8px;font-size:12px;color:#64748b"></span>
             </div>
           </div>
         </div>
-        <div id="pivot-config" class="pivot-config" style="display:none">
-          <span class="panel-label">📊 Group by (aggregate PNs):</span>
-          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Usage" checked> Usage</label>
-          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Style" checked> Style</label>
-          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Color" checked> Color</label>
+        <div id="pivot-config" class="pivot-config">
+          <span class="panel-label">📊 Aggregate by:</span>
+          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Usage"> Usage</label>
+          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Style"> Style</label>
+          <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Color"> Color</label>
           <span id="pivot-row-count" class="row-count" style="margin-left:8px"></span>
         </div>
       </div>

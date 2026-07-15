@@ -10,7 +10,7 @@ const ALL_COLS = [
   { key:'Pallet_Qty', label:'Pallet', width:50, frozen:true, toggle:'col-pallet' },
 ];
 const DIVIDER = { key:'_divider', label:'', width:5, frozen:true };
-let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG', activeView='detail', pivotFields=['Usage','Style','Color'];
+let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG', pivotFields=[];
 
 // ===== Upload: mark files =====
 document.querySelectorAll('.file-input').forEach(inp => {
@@ -90,8 +90,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
     document.getElementById('upload-status').textContent = `✅ ${allRows.length} rows`;
-    setupDropdowns(); applyFilters();
-    if (activeView === 'pivot') renderPivotTable(); else renderTable();
+    setupDropdowns(); applyFilters(); render();
   } catch(e) {
     status.textContent = `❌ ${e.message}`;
   } finally {
@@ -150,7 +149,8 @@ function getVals(name) {
   return c.length===total ? null : Array.from(c).map(cb=>cb.dataset.val);
 }
 let _ft=null;
-function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();if(activeView==='pivot')renderPivotTable();else renderTable();},80); }
+function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();render();},80); }
+function render() { if (pivotFields.length>0) renderPivotTable(); else renderTable(); }
 function getFilteredRows(useDim) {
   const s=getVals('sku'), u=getVals('usage'), st=getVals('style'), co=getVals('color'), t=getVals('type'), de=getVals('detail');
   return allRows.filter(r=>{
@@ -167,32 +167,21 @@ function getFilteredRows(useDim) {
 function applyFilters() {
   filteredRows = getFilteredRows(true);
   document.getElementById('row-count').textContent=`${filteredRows.length} rows`;
+  document.getElementById('pivot-row-count').textContent = '';
 }
 function setDimTab(dim) {
   activeDim = dim;
   document.querySelectorAll('.dim-tab').forEach(t => t.classList.toggle('active', t.dataset.dim === dim));
-  applyFilters();
-  if (activeView === 'pivot') renderPivotTable(); else renderTable();
+  applyFilters(); render();
 }
 document.querySelectorAll('.dim-tab').forEach(tab => {
   tab.addEventListener('click', () => setDimTab(tab.dataset.dim));
 });
 
-// ===== View mode toggle =====
-document.querySelectorAll('.view-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    activeView = tab.dataset.view;
-    document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.view === activeView));
-    document.getElementById('pivot-config').style.display = activeView === 'pivot' ? 'flex' : 'none';
-    if (activeView === 'pivot') renderPivotTable();
-    else renderTable();
-  });
-});
 document.querySelectorAll('.pivot-field').forEach(cb => {
   cb.addEventListener('change', () => {
     pivotFields = Array.from(document.querySelectorAll('.pivot-field:checked')).map(c => c.value);
-    if (pivotFields.length === 0) { pivotFields = ['Usage']; document.querySelector('.pivot-field[value="Usage"]').checked = true; }
-    renderPivotTable();
+    render();
   });
 });
 
@@ -379,13 +368,9 @@ function renderTable() {
   for(const w of allWeeks) h+=`<th style="min-width:78px">${weekLabels[w]||w}</th>`;
   th.innerHTML=h+'</tr>';
   if(filteredRows.length===0){tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">No matching data</td></tr>';return;}
-  const grp=document.getElementById('group-by').value; let dr=filteredRows,gh=[];
-  if(grp){const gs={};for(const r of filteredRows){(gs[r[grp]||'(blank)']=gs[r[grp]||'(blank)']||[]).push(r);}dr=[];for(const k of Object.keys(gs).sort()){gh.push({label:`${grp}: ${k}`,count:gs[k].length});dr.push(...gs[k]);}}
-  let html='',gi=0,ri=0,lpn=null;
-  for(let i=0;i<dr.length;i++){
-    const r=dr[i],tp=r['Version-Type'],dm=r._dim||'FG';
-    if(grp&&gh.length>0&&gi<gh.length){if(ri===0){html+='<tr class="row-group">';for(let ci=0;ci<vc.length;ci++){const c=vc[ci];const ex=c.key==='_divider'?' divider-col':'';const s=c.frozen?` style="left:${c._left}px" class="frozen${ex}"`:'';html+=`<td${s}>${ci===0?`📁 ${gh[gi].label} (${gh[gi].count})`:''}</td>`;}for(const w of allWeeks)html+='<td></td>';html+='</tr>';}if(++ri>=gh[gi].count){gi++;ri=0;}}
-    const isNP=r.PN!==lpn;if(isNP)lpn=r.PN;
+  let html='',lpn=null;
+  for(const r of filteredRows){
+    const tp=r['Version-Type'],dm=r._dim||'FG',isNP=r.PN!==lpn;if(isNP)lpn=r.PN;
     html+=`<tr class="row-${tp}${isNP?' row-newpn':''}">`;
     for(let ci=0;ci<vc.length;ci++){const c=vc[ci];const isDiv=c.key==='_divider';const ex=isDiv?' divider-col':(ci===vc.length-1||!vc[ci+1].frozen?' frozen-last':'');const s=c.frozen?` style="left:${c._left}px" class="frozen data-cell${ex}"`:' class="data-cell"';let inn='';if(!isDiv){const v=r[c.key];if(c.key==='_dim')inn=`<span class="dim-badge dim-${dm}">${dm}</span>`;else if(c.key==='Version-Type')inn=`<span class="type-badge type-${tp}">${tp}</span>`;else if(c.key==='PN')inn=esc(String(v??''));else if(['Pallet_Qty','Cut Day','Usage'].includes(c.key))inn=v!=null?String(v):'';else inn=esc(String(v??''));}html+=`<td${s}>${inn}</td>`;}
     for(const w of allWeeks){const v=r[w];html+=`<td class="data-cell ${numCls(v)}">${fmtNum(v)}</td>`;}
@@ -395,8 +380,8 @@ function renderTable() {
 }
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';}
 
-// ===== Column toggles & group =====
-['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet','group-by'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',()=>{if(activeView==='pivot')renderPivotTable();else renderTable();});});
+// ===== Column toggles =====
+['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',render);});
 
 // ===== Auto-load demo on startup =====
 (async function autoLoad() {
