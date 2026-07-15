@@ -143,10 +143,10 @@ function setupDropdowns() {
     style: { items:extractUnique('Style', activeDim) },
     color: { items:extractUnique('Color', activeDim) },
     type: { items:extractUnique('Version-Type', activeDim) },
-    detail: { items:extractUnique('Version-Detail', activeDim).filter(Boolean) },
+    detail: { items: extractUnique('Version-Detail', activeDim, true), map: {'':'ExF / CTB'} },
   })) setupDropdown(name, opts.items, opts.map);
 }
-function extractUnique(f, dim) { const s=new Set(); for(const r of allRows){ if(dim && r._dim!==dim) continue; const v=r[f]; if(v!=null&&v!=='') s.add(v); } return [...s].sort(); }
+function extractUnique(f, dim, keepEmpty) { const s=new Set(); for(const r of allRows){ if(dim && r._dim!==dim) continue; const v=r[f]; if(v!=null&&(keepEmpty||v!=='')) s.add(v); } return [...s].sort(); }
 
 function setupDropdown(name, vals, labelMap) {
   const btn=document.getElementById(name+'-btn'), menu=document.getElementById(name+'-menu'), cnt=document.getElementById(name+'-count');
