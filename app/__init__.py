@@ -8,6 +8,8 @@ def create_app():
 
     from app.modules.plan_merge import plan_merge_bp
     app.register_blueprint(plan_merge_bp)
+    from app.modules.io_report.routes import io_bp
+    app.register_blueprint(io_bp)
 
     @app.after_request
     def no_cache(resp):

@@ -1,0 +1,27 @@
+/* ===== I/O Report Module Styles ===== */
+
+.io-toolbar {
+  background: #fff; border-bottom: 1px solid #e2e8f0; padding: 8px 0;
+  position: sticky; top: 48px; z-index: 30;
+}
+.io-controls {
+  display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px;
+}
+.io-control-group {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.io-control-group label {
+  font-size: 11px; font-weight: 600; color: #64748b;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+
+.io-report-tabs {
+  display: flex; gap: 4px; margin: 4px 0;
+}
+.io-report-tab {
+  padding: 4px 14px; font-size: 12px; font-weight: 500;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px;
+  cursor: pointer; color: #64748b; transition: all 0.15s;
+}
+.io-report-tab:hover { background: #e2e8f0; }
+.io-report-tab.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
