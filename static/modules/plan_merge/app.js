@@ -90,7 +90,44 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
     document.getElementById('upload-status').textContent = `✅ ${allRows.length} rows`;
+
+    // Save filter & aggregate state
+    const savedFilter = {};
+    for (const n of ['sku','usage','style','color','type','detail']) {
+      const m = document.getElementById(n+'-menu');
+      if (!m) continue;
+      savedFilter[n] = Array.from(m.querySelectorAll('input[data-val]:checked')).map(cb => cb.dataset.val);
+      const menu = m;
+      const total = parseInt(menu.dataset.totalVals) || 0;
+      savedFilter[n]._all = savedFilter[n].length === total;
+    }
+    const savedAgg = Array.from(document.querySelectorAll('.pivot-field:checked')).map(cb => cb.value);
+
     setupDropdowns(); applyFilters(); render();
+
+    // Restore filter state
+    for (const n of ['sku','usage','style','color','type','detail']) {
+      const vals = savedFilter[n];
+      if (!vals) continue;
+      const m = document.getElementById(n+'-menu');
+      if (!m) continue;
+      const total = parseInt(m.dataset.totalVals) || 0;
+      if (vals._all || vals.length === total) continue;
+      // Uncheck "All" first
+      const allCb = m.querySelector('.dropdown-all input');
+      if (allCb && allCb.checked) { allCb.checked = false; allCb.dispatchEvent(new Event('change')); }
+      // Check each saved value (re-query menu after each click since rndr() rebuilds it)
+      for (const val of vals) {
+        const menuEl = document.getElementById(n+'-menu');
+        const cb = Array.from(menuEl.querySelectorAll('input[data-val]')).find(c => c.dataset.val === val);
+        if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+      }
+    }
+    // Restore aggregate state
+    document.querySelectorAll('.pivot-field').forEach(cb => {
+      const shouldCheck = savedAgg.includes(cb.value);
+      if (cb.checked !== shouldCheck) { cb.checked = shouldCheck; cb.dispatchEvent(new Event('change')); }
+    });
   } catch(e) {
     status.textContent = `❌ ${e.message}`;
   } finally {
