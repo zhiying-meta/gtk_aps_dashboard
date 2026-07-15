@@ -280,16 +280,18 @@ function renderPivotTable() {
     return 0;
   });
 
-  // Build column definitions with widths for frozen
+  // Build column definitions with widths for frozen — match detail order: Dim, PN, Usage, Style, Color, Version-Type, Version-Detail, Cut Day, Pallet
   const pivotCols = [];
   pivotCols.push({ key:'_exp', label:'', width:30, frozen:true });
-  for (const f of pivotFields) pivotCols.push({ key:f, label:f, width:90, frozen:true, toggle:'col-'+f.toLowerCase() });
+  pivotCols.push({ key:'_dim', label:'Dim', width:50, frozen:true });
+  if (!pivotFields.includes('PN')) pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true, toggle:'col-pn' });
+  for (const f of pivotFields) if (f !== 'PN') pivotCols.push({ key:f, label:f, width:85, frozen:true, toggle:'col-'+f.toLowerCase() });
   for (const k of PIVOT_KEEP) {
     const togg = k === 'Cut Day' ? 'col-cutday' : null;
     pivotCols.push({ key:k, label:k === 'Version-Type' ? 'Version-Type' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true, toggle: togg });
   }
+  if (pivotFields.includes('PN')) pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true, toggle:'col-pn' });
   pivotCols.push({ key:'Pallet_Qty', label:'Pallet', width:70, frozen:true, toggle:'col-pallet' });
-  pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true, toggle:'col-pn' });
   // Apply column visibility using same isVis as detail view
   const pivotColsFiltered = pivotCols.filter(c => isVis(c));
   const pivotDiv = { key:'_divider', label:'', width:5, frozen:true };
@@ -332,6 +334,9 @@ function renderPivotTable() {
       const s = `left:${c._left}px`;
       if (c.key === '_exp') {
         html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:13px">${isExp?'▾':'▸'}</td>`;
+      } else if (c.key === '_dim') {
+        const dm = g.children[0]?._dim || 'FG';
+        html += `<td class="data-cell frozen${ex}" style="${s}"><span class="dim-badge dim-${dm}">${dm}</span></td>`;
       } else if (c.key === 'PN') {
         html += `<td class="data-cell frozen${ex}" style="${s};color:#64748b;font-size:11px">${g.children.length} SKUs</td>`;
       } else if (c.key === 'Pallet_Qty') {
@@ -365,6 +370,9 @@ function renderPivotTable() {
           const s = `left:${c._left}px`;
           if (c.key === '_exp') {
             html += `<td class="data-cell frozen${ex}" style="${s};text-align:center;font-size:11px;color:#94a3b8">↳</td>`;
+          } else if (c.key === '_dim') {
+            const dm = child._dim || 'FG';
+            html += `<td class="data-cell frozen${ex}" style="${s}"><span class="dim-badge dim-${dm}">${dm}</span></td>`;
           } else if (c.key === 'PN') {
             html += `<td class="data-cell frozen${ex}" style="${s};font-weight:500">${esc(child.PN||'')}</td>`;
           } else if (c.key === 'Pallet_Qty') {
