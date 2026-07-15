@@ -204,7 +204,7 @@ function getFilteredRows(useDim) {
 function applyFilters() {
   filteredRows = getFilteredRows(true);
   document.getElementById('row-count').textContent=`${filteredRows.length} rows`;
-  document.getElementById('pivot-row-count').textContent = '';
+  document.getElementById('pivot-row-count').textContent = pivotFields.length ? '' : `${filteredRows.length} rows (no aggregate)`;
 }
 function setDimTab(dim) {
   activeDim = dim;
