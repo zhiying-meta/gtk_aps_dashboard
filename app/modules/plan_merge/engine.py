@@ -219,37 +219,7 @@ def process_uploaded_data(file_map, config):
     return {"rows": rows, "weeks": all_weeks, "week_labels": wl, "config": cfg}
 
 
-def generate_excel(data):
-    """Generate formatted xlsx from report data"""
-    import openpyxl as xl
-    from openpyxl.styles import Font as F, PatternFill as PF, Border as B, Side as S, Alignment as A
-
-    rows, weeks = data["rows"], data["weeks"]
-    wb = xl.Workbook()
-    ws = wb.active
-    ws.title = "Report"
-
-    hf = F(name="微软雅黑", bold=True, color="FFFFFF", size=11)
-    hfl = PF("solid", fgColor="1E293B")
-    hb = B(left=S(style='thin'),right=S(style='thin'),top=S(style='thin'),bottom=S(style='thin'))
-    cf = F(name="微软雅黑", size=10)
-    cb = B(left=S(style='thin'),right=S(style='thin'),top=S(style='thin'),bottom=S(style='thin'))
-    nf = '#,##0'
-    fills = {"ExF": PF("solid", fgColor="F0F9FF"), "Ungated": PF("solid", fgColor="F0FDF4"),
-             "Gated": PF("solid", fgColor="FFFBEB"), "CTB": PF("solid", fgColor="FAF5FF")}
-
-    fixed = ["_dim","PN","Usage","Style","Color","Version-Type","Version-Detail","Cut Day","Pallet_Qty"]
-    flabels = ["Dim","PN","Usage","Style","Color","Version-Type","Version-Detail","Cut Day","Pallet"]
-    from datetime import datetime as dt2
-    wlabels = []
-    for w in weeks:
-        try:
-            d = dt2.strptime(w, "%Y-%m-%d")
-            wk = (d.day - 1)//7 + 1
-            wlabels.append(f"{d.strftime('%b')} Wk{wk} ({d.strftime('%b %d')})")
-        except:
-            wlabels.append(w)
-
+def _write_sheet(ws, rows, weeks, fixed, flabels, fills, hf, hfl, hb, cf, cb, nf, wlabels):
     for ci, lab in enumerate(flabels + wlabels, 1):
         c = ws.cell(1, ci, lab)
         c.font = hf; c.fill = hfl; c.border = hb
@@ -260,9 +230,9 @@ def generate_excel(data):
     for ri, r in enumerate(rows, 2):
         vals = []
         for k in fixed:
-            if k == "_dim": vals.append(r.get("_dim",""))
+            if k == "_dim": vals.append(r.get("_dim", ""))
             elif k == "Pallet_Qty": vals.append(r.get("Pallet_Qty") or "")
-            else: vals.append(str(r.get(k,"") or ""))
+            else: vals.append(str(r.get(k, "") or ""))
         for w in weeks:
             v = r.get(w)
             vals.append(v if v is not None else "")
@@ -273,8 +243,10 @@ def generate_excel(data):
             if ci > len(fixed) and isinstance(val, (int, float)):
                 cell.number_format = nf
                 cell.alignment = A(horizontal='right', vertical='center')
-                if val > 0: cell.font = F(name="微软雅黑", size=10, color="059669")
-                elif val < 0: cell.font = F(name="微软雅黑", size=10, color="DC2626")
+                if val > 0:
+                    cell.font = F(name="微软雅黑", size=10, color="059669")
+                elif val < 0:
+                    cell.font = F(name="微软雅黑", size=10, color="DC2626")
         ft = fills.get(r.get("Version-Type"))
         if ft:
             for ci in range(1, len(fixed) + len(weeks) + 1):
@@ -283,11 +255,52 @@ def generate_excel(data):
         if is_new and ri > 2:
             for ci in range(1, len(fixed) + len(weeks) + 1):
                 c = ws.cell(ri, ci)
-                c.border = B(left=S(style='thin'),right=S(style='thin'),
-                              top=S(style='medium', color="94A3B8"), bottom=S(style='thin'))
+                c.border = B(left=S(style='thin'), right=S(style='thin'),
+                             top=S(style='medium', color="94A3B8"), bottom=S(style='thin'))
         last_pn = r.get("PN")
-
     ws.freeze_panes = ws.cell(2, len(fixed) + 1)
+
+
+def generate_excel(data):
+    """Generate formatted xlsx from report data — split into FG and GB sheets"""
+    import openpyxl as xl
+    from openpyxl.styles import Font as F, PatternFill as PF, Border as B, Side as S, Alignment as A
+    from datetime import datetime as dt2
+
+    rows, weeks = data["rows"], data["weeks"]
+    fg_rows = [r for r in rows if r.get("_dim") == "FG"]
+    gb_rows = [r for r in rows if r.get("_dim") == "GB"]
+
+    wb = xl.Workbook()
+
+    hf = F(name="微软雅黑", bold=True, color="FFFFFF", size=11)
+    hfl = PF("solid", fgColor="1E293B")
+    hb = B(left=S(style='thin'), right=S(style='thin'), top=S(style='thin'), bottom=S(style='thin'))
+    cf = F(name="微软雅黑", size=10)
+    cb = B(left=S(style='thin'), right=S(style='thin'), top=S(style='thin'), bottom=S(style='thin'))
+    nf = '#,##0'
+    fills = {"ExF": PF("solid", fgColor="F0F9FF"), "Ungated": PF("solid", fgColor="F0FDF4"),
+             "Gated": PF("solid", fgColor="FFFBEB"), "CTB": PF("solid", fgColor="FAF5FF")}
+
+    fixed = ["_dim", "PN", "Usage", "Style", "Color", "Version-Type", "Version-Detail", "Cut Day", "Pallet_Qty"]
+    flabels = ["Dim", "PN", "Usage", "Style", "Color", "Version-Type", "Version-Detail", "Cut Day", "Pallet"]
+
+    wlabels = []
+    for w in weeks:
+        try:
+            d = dt2.strptime(w, "%Y-%m-%d")
+            wk = (d.day - 1) // 7 + 1
+            wlabels.append(f"{d.strftime('%b')} Wk{wk} ({d.strftime('%b %d')})")
+        except:
+            wlabels.append(w)
+
+    ws_fg = wb.active
+    ws_fg.title = "FG"
+    _write_sheet(ws_fg, fg_rows, weeks, fixed, flabels, fills, hf, hfl, hb, cf, cb, nf, wlabels)
+
+    ws_gb = wb.create_sheet("GB")
+    _write_sheet(ws_gb, gb_rows, weeks, fixed, flabels, fills, hf, hfl, hb, cf, cb, nf, wlabels)
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)

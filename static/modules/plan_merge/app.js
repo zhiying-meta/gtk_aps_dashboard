@@ -136,10 +136,10 @@ function getVals(name) {
 }
 let _ft=null;
 function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();renderTable();},80); }
-function applyFilters() {
+function getFilteredRows(useDim) {
   const s=getVals('sku'), u=getVals('usage'), st=getVals('style'), co=getVals('color'), t=getVals('type'), de=getVals('detail');
-  filteredRows=allRows.filter(r=>{
-    if(activeDim&&r._dim!==activeDim) return false;
+  return allRows.filter(r=>{
+    if(useDim && activeDim && r._dim!==activeDim) return false;
     if(s&&s.length&&!s.includes(r.PN)) return false;
     if(u&&u.length&&!u.includes(r.Usage)) return false;
     if(st&&st.length&&!st.includes(r.Style)) return false;
@@ -148,6 +148,9 @@ function applyFilters() {
     if(de&&de.length&&!de.includes(r['Version-Detail'])) return false;
     return true;
   });
+}
+function applyFilters() {
+  filteredRows = getFilteredRows(true);
   document.getElementById('row-count').textContent=`${filteredRows.length} 行`;
 }
 function setDimTab(dim) {
@@ -212,11 +215,12 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 
 // ===== Download Excel =====
 document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
-  if(filteredRows.length===0)return;
+  const allData=getFilteredRows(false);
+  if(allData.length===0)return;
   const btn=document.getElementById('btn-dl-excel');
   btn.textContent='⏳ 生成中...';btn.disabled=true;
   try{
-    const resp=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:filteredRows,weeks:allWeeks,week_labels:weekLabels})});
+    const resp=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:allData,weeks:allWeeks,week_labels:weekLabels})});
     if(!resp.ok)throw new Error(`HTTP ${resp.status}`);
     const blob=await resp.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='report.xlsx';a.click();URL.revokeObjectURL(a.href);
   }catch(e){alert('下载失败: '+e.message);}
