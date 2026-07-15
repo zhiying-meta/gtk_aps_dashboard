@@ -52,7 +52,10 @@ body {
 .sidebar-toggle:hover { background: rgba(0,212,255,0.1); color: #00d4ff; }
 .sidebar.collapsed .sidebar-toggle { transform: rotate(180deg); }
 
-.sidebar-nav { flex: 1; padding: 8px 8px; }
+.sidebar-nav { flex: 1; padding: 4px 8px; }
+.sidebar-nav-label { font-size: 10px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.8px; padding: 12px 16px 4px; overflow: hidden; }
+.sidebar.collapsed .sidebar-nav-label { opacity: 0; }
+.sidebar-nav-label { transition: opacity 0.2s; }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; color: #64748b;
