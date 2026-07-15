@@ -1,91 +1,29 @@
 """
-Process uploaded xlsx files → report data
+Plan merge engine: process uploaded xlsx data → report rows + generate formatted Excel
 """
-import openpyxl, io, csv
+import io
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-def read_sheet(ws, key_col=None):
-    """Read a worksheet → {PN: {date_str: value}}"""
-    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-    if key_col is None:
-        key_col = "PN" if "PN" in headers else ("SKU" if "SKU" in headers else headers[0])
-    ki = headers.index(key_col) if key_col in headers else 0
-    result = {}
-    for r in range(2, ws.max_row + 1):
-        pn = str(ws.cell(r, ki + 1).value or "").strip()
-        if not pn: continue
-        vals = {}
-        for ci, h in enumerate(headers):
-            if ci == ki: continue
-            v = ws.cell(r, ci + 1).value
-            h_str = str(h).strip() if h else ""
-            if h_str and v is not None and isinstance(v, (int, float)):
-                vals[h_str] = float(v)
-        if vals:
-            result[pn] = vals
-    return result
+from app.modules.plan_merge.config import DEFAULT_PALLET_QTY
 
-def read_uploaded_xlsx(fp):
-    """Read single xlsx with 6 sheets → dict of data"""
-    wb = openpyxl.load_workbook(fp, data_only=True)
-    sheet_names = [s.title for s in wb.worksheets]
-    result = {}
-    # Map known sheet names
-    for sn in sheet_names:
-        ws = wb[sn]
-        if sn == "sku_master":
-            result["sku"] = ws  # special: read separately
-        elif sn == "plan_output_gated":
-            result["gated"] = read_sheet(ws)
-        elif sn == "plan_output_ungated":
-            result["ungated"] = read_sheet(ws)
-        elif sn == "forecast":
-            result["fcst"] = read_sheet(ws)
-        elif sn in ("ctb_sku_cum", "ctb_cum"):
-            result["ctb"] = read_sheet(ws, "SKU")
-        elif sn in ("ctb_gb_cum", "ctb_gb"):
-            result["ctb_gb"] = read_sheet(ws)
-    return result
-
-def read_sku_master_from_ws(ws):
-    """Read sku_master sheet → attributes dict"""
-    headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column + 1)]
-    sku_attrs, sku_to_gb, sku_pallet, gb_style_color = {}, {}, {}, {}
-    for r in range(2, ws.max_row + 1):
-        row = {headers[ci]: ws.cell(r, ci + 1).value for ci in range(len(headers))}
-        sku = str(row.get("SKU", "") or "").strip()
-        if not sku: continue
-        sku_attrs[sku] = {"Style": str(row.get("Style","") or ""),
-                           "Color": str(row.get("Color","") or ""),
-                           "Usage": str(row.get("Usage","") or "")}
-        gb = str(row.get("GB_PN","") or "").strip()
-        sku_to_gb[sku] = gb
-        sku_pallet[sku] = int(row.get("Pallet_Qty", 864) or 864)
-        if gb and row.get("Style") and row.get("Color"):
-            gb_style_color[gb] = (str(row["Style"]), str(row["Color"]))
-    return sku_attrs, sku_to_gb, sku_pallet, gb_style_color
 
 def _to_saturday_label(ds):
-    """Map any date string to the Saturday of its ISO week (Mon~Sun)"""
     try: dt = datetime.strptime(ds, "%Y-%m-%d")
     except: return ds
     dow = dt.weekday()
-    sat = dt + timedelta(days=5 - dow)  # Mon(0)→Sat(5), Sun(6)→Sat(-1)
+    sat = dt + timedelta(days=5 - dow)
     return sat.strftime("%Y-%m-%d")
 
+
 def aggregate_cumulative(daily, cut_day):
-    """Compute cumulative sum up to each cut_day.
-    Generates ALL week labels between first and last data point,
-    carrying forward the cumulative value even for weeks with no new data.
-    """
+    """Compute cumulative sum up to each cut_day."""
     dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
     td = dow_map.get(cut_day, 5)
     date_list = sorted(daily.keys())
     if not date_list:
         return {}
 
-    # Determine week range: from first data point's week to last data point's week
     def date_to_week_label(ds):
         dt = datetime.strptime(ds, "%Y-%m-%d")
         cd = dt.weekday()
@@ -95,17 +33,14 @@ def aggregate_cumulative(daily, cut_day):
 
     first_dt = datetime.strptime(date_list[0], "%Y-%m-%d")
     last_dt = datetime.strptime(date_list[-1], "%Y-%m-%d")
-
     first_wl = date_to_week_label(date_list[0])
     last_wl = date_to_week_label(date_list[-1])
 
-    # Build week label → list of dates in that week
     weeks = defaultdict(list)
     for ds in date_list:
         wl = date_to_week_label(ds)
         weeks[wl].append(ds)
 
-    # Generate all week labels from first to last
     all_weeks = []
     cur = datetime.strptime(first_wl, "%Y-%m-%d")
     end = datetime.strptime(last_wl, "%Y-%m-%d")
@@ -122,9 +57,9 @@ def aggregate_cumulative(daily, cut_day):
             result[wl] = round(running, 0)
     return result
 
+
 def extract_weekly_cum(daily, cut_day):
-    """For already-cumulative data (CTB): take the value at each week end.
-    Weeks labeled by Saturday."""
+    """For already-cumulative data (CTB): take the value at each week end."""
     dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
     td = dow_map.get(cut_day, 5)
     date_list = sorted(daily.keys())
@@ -145,7 +80,11 @@ def extract_weekly_cum(daily, cut_day):
             result[wl] = round(daily[dl[-1]], 0)
     return result
 
+
 def process_uploaded_data(file_map, config):
+    from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
+    import openpyxl
+
     cfg = {
         "exf_cut": config.get("exf_cut", "Saturday"),
         "etd_cut": config.get("etd_cut", "Saturday"),
@@ -153,14 +92,11 @@ def process_uploaded_data(file_map, config):
         "gb_cut": config.get("gb_cut", "Tuesday"),
     }
 
-    # Read single xlsx
     fp = file_map.get("main") or file_map.get("sku") or next(iter(file_map.values()), None)
     if not fp:
         raise ValueError("No file uploaded")
-    
+
     sheets = read_uploaded_xlsx(fp)
-    
-    # Read master from the workbook directly
     wb = openpyxl.load_workbook(fp, data_only=True)
     sku_ws = wb["sku_master"] if "sku_master" in [s.title for s in wb.worksheets] else wb.active
     sku_attrs, sku_to_gb, sku_pallet, gb_style_color = read_sku_master_from_ws(sku_ws)
@@ -172,13 +108,11 @@ def process_uploaded_data(file_map, config):
     ctb_sku = sheets.get("ctb", {})
     ctb_gb = sheets.get("ctb_gb", {})
 
-    # Only process SKUs from master that have data
     all_pns = set(sku_attrs.keys())
     for d in [plan_gated, plan_ungated, plan_fcst, ctb_sku]:
         all_pns.update(k for k in d if k in sku_attrs)
     all_skus = sorted(s for s in all_pns if s in sku_attrs)
 
-    # Aggregate
     agg = {}
     for label, data, cut in [("GATED_ETD", plan_gated, cfg["etd_cut"]),
                               ("UNGATED_ETD", plan_ungated, cfg["etd_cut"]),
@@ -190,12 +124,10 @@ def process_uploaded_data(file_map, config):
             daily = data.get(sku, {})
             agg[label][sku] = aggregate_cumulative(daily, cut)
 
-    # Collect all weeks
     all_weeks = set()
     for a in agg.values():
         for v in a.values():
             all_weeks.update(v.keys())
-    # Also from CTB
     for sku in all_skus:
         if sku in ctb_sku:
             w = extract_weekly_cum(ctb_sku[sku], cfg["etd_cut"])
@@ -212,7 +144,7 @@ def process_uploaded_data(file_map, config):
         a = sku_attrs.get(sku, {})
         style, color, usage = a.get("Style",""), a.get("Color",""), a.get("Usage","")
         gb = sku_to_gb.get(sku, "")
-        pallet = sku_pallet.get(sku, 864)
+        pallet = sku_pallet.get(sku, DEFAULT_PALLET_QTY)
 
         ue = agg["UNGATED_ETD"].get(sku, {})
         up = agg["UNGATED_PACK"].get(sku, {})
@@ -240,7 +172,6 @@ def process_uploaded_data(file_map, config):
         rows.append({**base, "Version-Type": "Gated", "Version-Detail": "Packout vs ExF", "Cut Day": cfg["output_cut"], **fill(diff(gp, exf))})
         rows.append({**base, "Version-Type": "CTB", "Version-Detail": "", "Cut Day": "", **fill(ctb)})
 
-    # GB dimension
     gb_groups = defaultdict(list)
     for sku in all_skus:
         g = sku_to_gb.get(sku, "")
@@ -250,14 +181,12 @@ def process_uploaded_data(file_map, config):
 
     for gb, skus in gb_groups.items():
         sc = gb_style_color.get(gb, ("",""))
-        # GB Usage = take first SKU's Usage
         gb_usage = ""
         for s in skus:
             u = sku_attrs.get(s, {}).get("Usage", "")
             if u: gb_usage = u; break
         base = {"PN": gb, "Usage": gb_usage, "Style": sc[0], "Color": sc[1],
-                "GB_PN": gb, "Pallet_Qty": 864, "_dim": "GB"}
-        # GB: no ETD modules, only Packout
+                "GB_PN": gb, "Pallet_Qty": DEFAULT_PALLET_QTY, "_dim": "GB"}
         for vt, vd in [("ExF",""),
                        ("Ungated","Packout"), ("Ungated","Packout vs ExF"),
                        ("Gated","Packout"), ("Gated","Packout vs ExF"),
@@ -279,7 +208,6 @@ def process_uploaded_data(file_map, config):
             cd = "" if vt == "CTB" else cfg["gb_cut"]
             rows.append({**base, "Version-Type": vt, "Version-Detail": vd, "Cut Day": cd, **fill(vals)})
 
-    # Week labels
     wl = {}
     for w in all_weeks:
         try:
@@ -289,6 +217,7 @@ def process_uploaded_data(file_map, config):
         except:
             wl[w] = w
     return {"rows": rows, "weeks": all_weeks, "week_labels": wl, "config": cfg}
+
 
 def generate_excel(data):
     """Generate formatted xlsx from report data"""

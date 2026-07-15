@@ -5,7 +5,6 @@ import openpyxl, os, json
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
 
 HDR_Fill = PatternFill("solid", fgColor="1E293B")
 HDR_Font = Font(name="微软雅黑", bold=True, color="FFFFFF", size=11)

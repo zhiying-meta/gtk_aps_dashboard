@@ -15,7 +15,7 @@ echo "📦 安装依赖..."
 pip3 install -r requirements.txt -q
 
 echo "🚀 启动服务..."
-python3 app/server.py &
+python3 run.py &
 
 sleep 2
 

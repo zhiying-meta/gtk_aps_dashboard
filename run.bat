@@ -24,7 +24,7 @@ if %errorlevel% neq 0 (
 echo [3/3] Starting server...
 timeout /t 1 /nobreak >nul
 start "" "http://localhost:8501"
-call python app/server.py
+call python run.py
 
 echo.
 echo Server has stopped. You may close this window.

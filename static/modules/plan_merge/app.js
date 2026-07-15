@@ -215,7 +215,4 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
   finally{btn.textContent='📥 下载 Excel';btn.disabled=false;}
 });
 
-// ===== Sidebar Toggle =====
-document.getElementById('sidebar-toggle').addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('collapsed');
-});
+
