@@ -457,9 +457,53 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
   }
 })();
 
+function getPivotDownloadRows() {
+  const rows = getFilteredRows(true);
+  const groups = {};
+  for (const r of rows) {
+    const grpKey = pivotFields.map(f => r[f] || '(blank)').concat(
+      PIVOT_KEEP.map(k => r[k] != null ? String(r[k]) : '')
+    ).join('||');
+    if (!groups[grpKey]) {
+      const g = { fields: {}, weeks: {}, children: [] };
+      for (const f of pivotFields) g.fields[f] = r[f] || '(blank)';
+      for (const k of PIVOT_KEEP) g.fields[k] = r[k] != null ? r[k] : '';
+      groups[grpKey] = g;
+    }
+    groups[grpKey].children.push(r);
+    for (const w of allWeeks) {
+      const v = r[w];
+      if (v != null && v !== '' && !isNaN(Number(v))) {
+        groups[grpKey].weeks[w] = (groups[grpKey].weeks[w] || 0) + Number(v);
+      }
+    }
+  }
+
+  const result = [];
+  for (const gk of Object.keys(groups).sort()) {
+    const g = groups[gk];
+    const first = g.children[0];
+    const pals = [...new Set(g.children.map(c => c.Pallet_Qty != null && c.Pallet_Qty !== '' ? String(c.Pallet_Qty) : '').filter(Boolean))];
+    const row = {
+      _dim: first._dim,
+      PN: `${g.children.length} SKUs`,
+      Usage: g.fields.Usage || '',
+      Style: g.fields.Style || '',
+      Color: g.fields.Color || '',
+      'Version-Type': g.fields['Version-Type'] || '',
+      'Version-Detail': g.fields['Version-Detail'] || '',
+      'Cut Day': g.fields['Cut Day'] || '',
+      Pallet_Qty: pals.length ? pals.join('/') : '',
+    };
+    for (const w of allWeeks) row[w] = g.weeks[w] || null;
+    result.push(row);
+  }
+  return result;
+}
+
 // ===== Download Excel =====
 document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
-  const allData=getFilteredRows(false);
+  const allData = pivotFields.length > 0 ? getPivotDownloadRows() : getFilteredRows(false);
   if(allData.length===0)return;
   const btn=document.getElementById('btn-dl-excel');
   btn.textContent='⏳ Generating...';btn.disabled=true;
