@@ -281,14 +281,15 @@ function renderPivotTable() {
   });
 
   // Build column definitions with widths for frozen
+  const PIVOT_TOGGLE = {'PN':'col-pn','Usage':'col-usage','Style':'col-style','Color':'col-color','Cut Day':'col-cutday','Pallet_Qty':'col-pallet'};
+  function pVis(k) { const t=PIVOT_TOGGLE[k]; return !t||!document.getElementById(t)||document.getElementById(t).checked; }
   const pivotCols = [];
   pivotCols.push({ key:'_exp', label:'', width:30, frozen:true });
-  for (const f of pivotFields) pivotCols.push({ key:f, label:f, width:90, frozen:true });
-  for (const k of PIVOT_KEEP) {
+  for (const f of pivotFields) if (pVis(f)) pivotCols.push({ key:f, label:f, width:90, frozen:true });
+  for (const k of PIVOT_KEEP) if (pVis(k))
     pivotCols.push({ key:k, label:k === 'Version-Type' ? 'Version-Type' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true });
-  }
-  pivotCols.push({ key:'Pallet_Qty', label:'Pallet', width:70, frozen:true });
-  pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true });
+  if (pVis('Pallet_Qty')) pivotCols.push({ key:'Pallet_Qty', label:'Pallet', width:70, frozen:true });
+  if (pVis('PN')) pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true });
   const pivotDiv = { key:'_divider', label:'', width:5, frozen:true };
 
   // Compute frozen left offsets
