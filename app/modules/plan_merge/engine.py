@@ -220,6 +220,7 @@ def process_uploaded_data(file_map, config):
 
 
 def _write_sheet(ws, rows, weeks, fixed, flabels, fills, hf, hfl, hb, cf, cb, nf, wlabels):
+    from openpyxl.styles import Alignment as A, Font as F, Border as B, Side as S
     for ci, lab in enumerate(flabels + wlabels, 1):
         c = ws.cell(1, ci, lab)
         c.font = hf; c.fill = hfl; c.border = hb
