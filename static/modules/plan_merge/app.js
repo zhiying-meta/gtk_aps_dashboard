@@ -183,7 +183,15 @@ document.querySelectorAll('.pivot-field').forEach(cb => {
 });
 
 const PIVOT_KEEP = ['Version-Type','Version-Detail','Cut Day','Pallet_Qty'];
+const VT_ORDER = {'ExF':0,'Ungated':1,'Gated':2,'CTB':3};
 let pivotExpanded = new Set();
+
+function pivotSortKey(row) {
+  const vt = VT_ORDER[row.fields['Version-Type']] ?? 99;
+  const pf = pivotFields.map(f => row.fields[f] || '');
+  const rest = PIVOT_KEEP.filter(k => k !== 'Version-Type').map(k => row.fields[k] != null ? String(row.fields[k]) : '');
+  return [vt, ...pf, ...rest];
+}
 
 function renderPivotTable() {
   const th=document.getElementById('table-head'), tb=document.getElementById('table-body');
@@ -214,31 +222,78 @@ function renderPivotTable() {
     }
   }
 
-  const groupKeys = Object.keys(groups).sort();
-  let h = '<tr>';
-  h += '<th style="min-width:30px;text-align:center"></th>';
-  for (const f of pivotFields) h += `<th style="min-width:85px">${f}</th>`;
+  const groupKeys = Object.keys(groups).sort((a,b) => {
+    const ga = groups[a], gb = groups[b];
+    const sa = pivotSortKey(ga), sb = pivotSortKey(gb);
+    for (let i = 0; i < sa.length; i++) {
+      if (sa[i] < sb[i]) return -1;
+      if (sa[i] > sb[i]) return 1;
+    }
+    return 0;
+  });
+
+  // Build column definitions with widths for frozen
+  const pivotCols = [];
+  pivotCols.push({ key:'_exp', label:'', width:30, frozen:true });
+  for (const f of pivotFields) pivotCols.push({ key:f, label:f, width:90, frozen:true });
   for (const k of PIVOT_KEEP) {
-    const lbl = k === 'Pallet_Qty' ? 'Pallet' : k;
-    h += `<th style="min-width:${k==='Version-Detail'?100:80}px">${lbl}</th>`;
+    pivotCols.push({ key:k, label:k === 'Pallet_Qty' ? 'Pallet' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true });
   }
+  pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true });
+  const pivotDiv = { key:'_divider', label:'', width:5, frozen:true };
+
+  // Compute frozen left offsets
+  let left = 0;
+  for (const c of pivotCols) { c._left = left; left += c.width; }
+  pivotDiv._left = left;
+
+  // Header
+  let h = '<tr>';
+  for (const c of pivotCols) {
+    const isLast = c === pivotCols[pivotCols.length - 1];
+    const ex = isLast || !c.frozen ? ' frozen-last' : '';
+    h += `<th style="left:${c._left}px;min-width:${c.width}px" class="frozen${ex}">${c.label}</th>`;
+  }
+  h += `<th style="left:${pivotDiv._left}px;min-width:5px" class="frozen divider-col"></th>`;
   for (const w of allWeeks) h += `<th style="min-width:78px">${weekLabels[w]||w}</th>`;
   th.innerHTML = h + '</tr>';
 
   document.getElementById('pivot-row-count').textContent = `${groupKeys.length} 行 (聚合)`;
 
-  let html = '';
+  // Data rows
+  let html = '', lastGroupStr = '';
   for (const gk of groupKeys) {
     const g = groups[gk];
     const isExp = pivotExpanded.has(gk);
-    html += `<tr class="pivot-group-row${isExp?' pivot-expanded':''}" data-pkey="${esc(gk)}">`;
-    html += `<td class="data-cell pivot-toggle" style="text-align:center;cursor:pointer;font-size:13px">${isExp?'▾':'▸'}</td>`;
-    for (const f of pivotFields) html += `<td class="data-cell" style="font-weight:600">${esc(String(g.fields[f]))}</td>`;
-    for (const k of PIVOT_KEEP) {
-      let val = g.fields[k];
-      if (k === 'Pallet_Qty') val = val != null && val !== '' ? String(val) : '';
-      html += `<td class="data-cell">${k==='Version-Type'?`<span class="type-badge type-${g.fields[k]}">${esc(String(val))}</span>`:esc(String(val))}</td>`;
+
+    // Detect aggregate group change for separator
+    const curGroupStr = pivotFields.map(f => g.fields[f]).join('\x00');
+    const isNewGroup = curGroupStr !== lastGroupStr;
+    lastGroupStr = curGroupStr;
+
+    const rowCls = `pivot-group-row${isExp?' pivot-expanded':''}${isNewGroup?' pivot-new-group':''}`;
+    html += `<tr class="${rowCls}" data-pkey="${esc(gk)}">`;
+    for (const c of pivotCols) {
+      const isLast = c === pivotCols[pivotCols.length - 1];
+      const ex = isLast || !c.frozen ? ' frozen-last' : '';
+      const s = `left:${c._left}px`;
+      if (c.key === '_exp') {
+        html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:13px">${isExp?'▾':'▸'}</td>`;
+      } else if (c.key === 'PN') {
+        html += `<td class="data-cell frozen${ex}" style="${s};color:#64748b;font-size:11px">${g.children.length} 个SKU</td>`;
+      } else if (pivotFields.includes(c.key)) {
+        html += `<td class="data-cell frozen${ex}" style="${s};font-weight:600">${esc(String(g.fields[c.key]))}</td>`;
+      } else if (PIVOT_KEEP.includes(c.key)) {
+        let val = g.fields[c.key];
+        if (c.key === 'Pallet_Qty') val = val != null && val !== '' ? String(val) : '';
+        if (c.key === 'Version-Type') {
+          html += `<td class="data-cell frozen${ex}" style="${s}"><span class="type-badge type-${g.fields[c.key]}">${esc(String(val))}</span></td>`;
+        } else {
+          html += `<td class="data-cell frozen${ex}" style="${s}">${esc(String(val))}</td>`;
+        }
+      }
     }
+    html += `<td class="divider-col frozen" style="left:${pivotDiv._left}px"></td>`;
     for (const w of allWeeks) {
       const v = g.weeks[w];
       html += `<td class="data-cell ${numCls(v)}">${fmtNum(v)}</td>`;
@@ -247,16 +302,27 @@ function renderPivotTable() {
 
     if (isExp) {
       for (const child of g.children) {
-        const tp = child['Version-Type'], dm = child._dim || 'FG';
         html += `<tr class="pivot-child-row">`;
-        html += `<td class="data-cell" style="text-align:center;font-size:11px;color:#94a3b8">↳</td>`;
-        for (const f of pivotFields) html += `<td class="data-cell" style="color:#64748b">${esc(String(child[f]||''))}</td>`;
-        for (const k of PIVOT_KEEP) {
-          let val = child[k];
-          if (k === 'Pallet_Qty') val = val != null && val !== '' ? String(val) : '';
-          html += `<td class="data-cell">${k==='Version-Type'?`<span class="type-badge type-${child[k]}">${esc(String(val))}</span>`:esc(String(val))}</td>`;
+        for (const c of pivotCols) {
+          const isLast = c === pivotCols[pivotCols.length - 1];
+          const ex = isLast || !c.frozen ? ' frozen-last' : '';
+          const s = `left:${c._left}px`;
+          if (c.key === '_exp') {
+            html += `<td class="data-cell frozen${ex}" style="${s};text-align:center;font-size:11px;color:#94a3b8">↳</td>`;
+          } else if (c.key === 'PN') {
+            html += `<td class="data-cell frozen${ex}" style="${s};font-weight:500">${esc(child.PN||'')}</td>`;
+          } else if (pivotFields.includes(c.key)) {
+            html += `<td class="data-cell frozen${ex}" style="${s};color:#64748b">${esc(String(child[c.key]||''))}</td>`;
+          } else if (c.key === 'Version-Type') {
+            html += `<td class="data-cell frozen${ex}" style="${s}"><span class="type-badge type-${child[c.key]}">${esc(String(child[c.key]||''))}</span></td>`;
+          } else if (c.key === 'Pallet_Qty') {
+            const val = child[c.key] != null && child[c.key] !== '' ? String(child[c.key]) : '';
+            html += `<td class="data-cell frozen${ex}" style="${s}">${val}</td>`;
+          } else {
+            html += `<td class="data-cell frozen${ex}" style="${s}">${esc(String(child[c.key]||''))}</td>`;
+          }
         }
-        html += `<td class="data-cell" style="font-weight:500">${esc(child.PN)}</td>`;
+        html += `<td class="divider-col frozen" style="left:${pivotDiv._left}px"></td>`;
         for (const w of allWeeks) {
           const v = child[w];
           html += `<td class="data-cell ${numCls(v)}">${fmtNum(v)}</td>`;
@@ -267,15 +333,17 @@ function renderPivotTable() {
   }
   tb.innerHTML = html;
 
-  tb.querySelectorAll('.pivot-toggle').forEach(td => {
-    td.addEventListener('click', () => {
-      const tr = td.closest('tr');
-      const key = tr.dataset.pkey;
-      if (pivotExpanded.has(key)) pivotExpanded.delete(key);
-      else pivotExpanded.add(key);
-      renderPivotTable();
-    });
-  });
+  // Delegated toggle click
+  tb.onclick = (e) => {
+    const td = e.target.closest('.pivot-toggle');
+    if (!td) return;
+    const tr = td.closest('tr');
+    const key = tr.dataset.pkey;
+    if (!key) return;
+    if (pivotExpanded.has(key)) pivotExpanded.delete(key);
+    else pivotExpanded.add(key);
+    renderPivotTable();
+  };
 }
 
 function isVis(c) { if(!c.toggle) return true; const e=document.getElementById(c.toggle); return !e||e.checked; }
