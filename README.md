@@ -1,4 +1,4 @@
-# Gated/Ungated/CTB Report
+# Production Plan Review
 
 Upload production plan data → Configure Cut Day → Auto-generate comparison report (ExF / Ungated / Gated / CTB)
 
