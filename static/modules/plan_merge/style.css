@@ -45,6 +45,7 @@
   font-size: 12px; background: #fff; cursor: pointer; min-width: 80px;
 }
 .btn-sm { padding: 3px 10px; font-size: 11px; }
+.offset-badge { font-size: 10px; font-weight: 400; color: #64748b; margin-left: 4px; }
 
 /* Search in dropdown */
 .dropdown-search { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }

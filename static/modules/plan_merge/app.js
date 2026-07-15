@@ -20,6 +20,20 @@ document.querySelectorAll('.file-input').forEach(inp => {
   });
 });
 
+// ===== Cut Day Offset =====
+const DOW_IDX = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6};
+function updateOffset(id) {
+  const sel = document.getElementById(id);
+  const span = document.getElementById('offset-' + id.replace('cfg-', ''));
+  if (!sel || !span) return;
+  const offset = DOW_IDX[sel.value] - 5;
+  span.textContent = offset === 0 ? '同周六' : offset < 0 ? `提前${-offset}天` : `延后${offset}天`;
+}
+['cfg-etd','cfg-output','cfg-gb'].forEach(id => {
+  const sel = document.getElementById(id);
+  if (sel) { sel.addEventListener('change', () => updateOffset(id)); updateOffset(id); }
+});
+
 // ===== Schema Modal =====
 const modal = document.getElementById('schema-modal');
 document.querySelectorAll('.schema-btn').forEach(btn => {
@@ -187,10 +201,10 @@ const VT_ORDER = {'ExF':0,'Ungated':1,'Gated':2,'CTB':3};
 let pivotExpanded = new Set();
 
 function pivotSortKey(row) {
-  const vt = VT_ORDER[row.fields['Version-Type']] ?? 99;
   const pf = pivotFields.map(f => row.fields[f] || '');
+  const vt = VT_ORDER[row.fields['Version-Type']] ?? 99;
   const rest = PIVOT_KEEP.filter(k => k !== 'Version-Type').map(k => row.fields[k] != null ? String(row.fields[k]) : '');
-  return [vt, ...pf, ...rest];
+  return [...pf, vt, ...rest];
 }
 
 function renderPivotTable() {

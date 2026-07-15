@@ -61,16 +61,13 @@
       </div>
       <div class="config-grid">
         <div class="config-item">
-          <label>ExF (Forecast)</label>
-          <select id="cfg-exf" class="cfg-select">
-            <option value="Monday">周一</option><option value="Tuesday">周二</option>
-            <option value="Wednesday">周三</option><option value="Thursday">周四</option>
-            <option value="Friday">周五</option><option value="Saturday" selected>周六</option>
-            <option value="Sunday">周日</option>
+          <label>ExF (Forecast) <span class="offset-badge">基准</span></label>
+          <select id="cfg-exf" class="cfg-select" disabled>
+            <option value="Saturday" selected>周六</option>
           </select>
         </div>
         <div class="config-item">
-          <label>ETD</label>
+          <label>ETD <span class="offset-badge" id="offset-etd">Offset: 0</span></label>
           <select id="cfg-etd" class="cfg-select">
             <option value="Monday">周一</option><option value="Tuesday">周二</option>
             <option value="Wednesday">周三</option><option value="Thursday">周四</option>
@@ -79,7 +76,7 @@
           </select>
         </div>
         <div class="config-item">
-          <label>PKG Output</label>
+          <label>PKG Output <span class="offset-badge" id="offset-output">Offset: 0</span></label>
           <select id="cfg-output" class="cfg-select">
             <option value="Monday">周一</option><option value="Tuesday">周二</option>
             <option value="Wednesday" selected>周三</option><option value="Thursday">周四</option>
@@ -88,7 +85,7 @@
           </select>
         </div>
         <div class="config-item">
-          <label>GB Output</label>
+          <label>GB Output <span class="offset-badge" id="offset-gb">Offset: 0</span></label>
           <select id="cfg-gb" class="cfg-select">
             <option value="Monday">周一</option><option value="Tuesday" selected>周二</option>
             <option value="Wednesday">周三</option><option value="Thursday">周四</option>
