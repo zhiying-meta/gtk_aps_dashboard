@@ -281,26 +281,28 @@ function renderPivotTable() {
   });
 
   // Build column definitions with widths for frozen
-  const PIVOT_TOGGLE = {'PN':'col-pn','Usage':'col-usage','Style':'col-style','Color':'col-color','Cut Day':'col-cutday','Pallet_Qty':'col-pallet'};
-  function pVis(k) { const t=PIVOT_TOGGLE[k]; return !t||!document.getElementById(t)||document.getElementById(t).checked; }
   const pivotCols = [];
   pivotCols.push({ key:'_exp', label:'', width:30, frozen:true });
-  for (const f of pivotFields) if (pVis(f)) pivotCols.push({ key:f, label:f, width:90, frozen:true });
-  for (const k of PIVOT_KEEP) if (pVis(k))
-    pivotCols.push({ key:k, label:k === 'Version-Type' ? 'Version-Type' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true });
-  if (pVis('Pallet_Qty')) pivotCols.push({ key:'Pallet_Qty', label:'Pallet', width:70, frozen:true });
-  if (pVis('PN')) pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true });
+  for (const f of pivotFields) pivotCols.push({ key:f, label:f, width:90, frozen:true, toggle:'col-'+f.toLowerCase() });
+  for (const k of PIVOT_KEEP) {
+    const togg = k === 'Cut Day' ? 'col-cutday' : null;
+    pivotCols.push({ key:k, label:k === 'Version-Type' ? 'Version-Type' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true, toggle: togg });
+  }
+  pivotCols.push({ key:'Pallet_Qty', label:'Pallet', width:70, frozen:true, toggle:'col-pallet' });
+  pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true, toggle:'col-pn' });
+  // Apply column visibility using same isVis as detail view
+  const pivotColsFiltered = pivotCols.filter(c => isVis(c));
   const pivotDiv = { key:'_divider', label:'', width:5, frozen:true };
 
   // Compute frozen left offsets
   let left = 0;
-  for (const c of pivotCols) { c._left = left; left += c.width; }
+  for (const c of pivotColsFiltered) { c._left = left; left += c.width; }
   pivotDiv._left = left;
 
   // Header
   let h = '<tr>';
-  for (const c of pivotCols) {
-    const isLast = c === pivotCols[pivotCols.length - 1];
+  for (const c of pivotColsFiltered) {
+    const isLast = c === pivotColsFiltered[pivotColsFiltered.length - 1];
     const ex = isLast || !c.frozen ? ' frozen-last' : '';
     h += `<th style="left:${c._left}px;min-width:${c.width}px" class="frozen${ex}">${c.label}</th>`;
   }
@@ -324,8 +326,8 @@ function renderPivotTable() {
     const vtCls = 'row-' + (g.fields['Version-Type'] || 'ExF');
     const rowCls = `pivot-group-row ${vtCls}${isExp?' pivot-expanded':''}${isNewGroup?' pivot-new-group':''}`;
     html += `<tr class="${rowCls}" data-pkey="${esc(gk)}">`;
-    for (const c of pivotCols) {
-      const isLast = c === pivotCols[pivotCols.length - 1];
+    for (const c of pivotColsFiltered) {
+      const isLast = c === pivotColsFiltered[pivotColsFiltered.length - 1];
       const ex = isLast || !c.frozen ? ' frozen-last' : '';
       const s = `left:${c._left}px`;
       if (c.key === '_exp') {
@@ -357,8 +359,8 @@ function renderPivotTable() {
       for (const child of g.children) {
         const cVtCls = 'row-' + (child['Version-Type'] || 'ExF');
         html += `<tr class="pivot-child-row ${cVtCls}">`;
-        for (const c of pivotCols) {
-          const isLast = c === pivotCols[pivotCols.length - 1];
+        for (const c of pivotColsFiltered) {
+          const isLast = c === pivotColsFiltered[pivotColsFiltered.length - 1];
           const ex = isLast || !c.frozen ? ' frozen-last' : '';
           const s = `left:${c._left}px`;
           if (c.key === '_exp') {
@@ -427,7 +429,7 @@ function renderTable() {
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';}
 
 // ===== Column toggles =====
-['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',render);});
+['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',()=>render());});
 
 // ===== Auto-load demo on startup =====
 (async function autoLoad() {
