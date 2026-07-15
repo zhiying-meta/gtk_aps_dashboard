@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多版本计划拼接 - 报表生成</title>
+<title>Multi-Version Plan Merge - Report</title>
 <link rel="stylesheet" href="/static/global/style.css">
 <link rel="stylesheet" href="/static/modules/plan_merge/style.css">
 </head>
@@ -11,36 +11,36 @@
 <div class="app-layout">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <button class="sidebar-toggle" id="sidebar-toggle" title="展开/收起侧边栏">☰</button>
-      <span class="sidebar-title">模块导航</span>
+      <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">☰</button>
+      <span class="sidebar-title">Modules</span>
     </div>
     <nav class="sidebar-nav">
       <a href="#" class="nav-item active" data-module="plan-merge">
         <span class="nav-icon">📊</span>
-        <span class="nav-text">gated/ungated/ctb report</span>
+        <span class="nav-text">Plan Merge Report</span>
       </a>
     </nav>
   </aside>
 
   <main class="main-content">
     <header>
-      <h1>📊 多版本计划拼接结果展示</h1>
-      <p class="subtitle">上传数据 → 配置参数 → 生成报表</p>
+      <h1>📊 Multi-Version Plan Merge</h1>
+      <p class="subtitle">Upload Data → Configure → Generate Report</p>
     </header>
 
     <!-- ===== Upload Section ===== -->
     <div class="section" id="upload-section">
       <div class="section-header">
-        <span class="section-title">📁 1. 上传数据文件</span>
+        <span class="section-title">📁 1. Upload Data</span>
         <div class="section-actions">
-          <a href="/templates/input_template.xlsx" class="btn btn-sm">📄 下载模板</a>
-          <a href="/templates/zip" class="btn btn-sm">📦 模板+演示</a>
+          <a href="/templates/input_template.xlsx" class="btn btn-sm">📄 Download Template</a>
+          <a href="/templates/zip" class="btn btn-sm">📦 Template + Demo</a>
         </div>
       </div>
       <div class="upload-grid">
         <div class="upload-card upload-card-main" data-key="main">
-          <div class="upload-label">📁 输入文件 (.xlsx) <span class="req">*</span></div>
-          <div class="upload-hint">包含6个Sheet：sku_master, plan_output_gated, plan_output_ungated, forecast, ctb_sku_cum, ctb_gb_cum</div>
+          <div class="upload-label">📁 Input File (.xlsx) <span class="req">*</span></div>
+          <div class="upload-hint">Includes 6 sheets: sku_master, plan_output_gated, plan_output_ungated, forecast, ctb_sku_cum, ctb_gb_cum</div>
           <input type="file" class="file-input" accept=".xlsx">
           <div class="upload-links">
             <a href="#" class="dl-link schema-btn" data-file="sku_master">📋 sku_master</a>
@@ -57,45 +57,45 @@
     <!-- ===== Config Section ===== -->
     <div class="section" id="config-section">
       <div class="section-header">
-        <span class="section-title">⚙️ 2. 配置 Cut Day of Week</span>
+        <span class="section-title">⚙️ 2. Configure Cut Day of Week</span>
       </div>
       <div class="config-grid">
         <div class="config-item">
-          <label>ExF (Forecast) <span class="offset-badge">基准</span></label>
+          <label>ExF (Forecast) <span class="offset-badge">Baseline</span></label>
           <select id="cfg-exf" class="cfg-select" disabled>
-            <option value="Saturday" selected>周六</option>
+            <option value="Saturday" selected>Sat</option>
           </select>
         </div>
         <div class="config-item">
-          <label>ETD <span class="offset-badge" id="offset-etd">Offset: 0</span></label>
+          <label>ETD <span class="offset-badge" id="offset-etd"></span></label>
           <select id="cfg-etd" class="cfg-select">
-            <option value="Monday">周一</option><option value="Tuesday">周二</option>
-            <option value="Wednesday">周三</option><option value="Thursday">周四</option>
-            <option value="Friday">周五</option><option value="Saturday" selected>周六</option>
-            <option value="Sunday">周日</option>
+            <option value="Monday">Mon</option><option value="Tuesday">Tue</option>
+            <option value="Wednesday">Wed</option><option value="Thursday">Thu</option>
+            <option value="Friday">Fri</option><option value="Saturday" selected>Sat</option>
+            <option value="Sunday">Sun</option>
           </select>
         </div>
         <div class="config-item">
-          <label>PKG Output <span class="offset-badge" id="offset-output">Offset: 0</span></label>
+          <label>PKG Output <span class="offset-badge" id="offset-output"></span></label>
           <select id="cfg-output" class="cfg-select">
-            <option value="Monday">周一</option><option value="Tuesday">周二</option>
-            <option value="Wednesday" selected>周三</option><option value="Thursday">周四</option>
-            <option value="Friday">周五</option><option value="Saturday">周六</option>
-            <option value="Sunday">周日</option>
+            <option value="Monday">Mon</option><option value="Tuesday">Tue</option>
+            <option value="Wednesday" selected>Wed</option><option value="Thursday">Thu</option>
+            <option value="Friday">Fri</option><option value="Saturday">Sat</option>
+            <option value="Sunday">Sun</option>
           </select>
         </div>
         <div class="config-item">
-          <label>GB Output <span class="offset-badge" id="offset-gb">Offset: 0</span></label>
+          <label>GB Output <span class="offset-badge" id="offset-gb"></span></label>
           <select id="cfg-gb" class="cfg-select">
-            <option value="Monday">周一</option><option value="Tuesday" selected>周二</option>
-            <option value="Wednesday">周三</option><option value="Thursday">周四</option>
-            <option value="Friday">周五</option><option value="Saturday">周六</option>
-            <option value="Sunday">周日</option>
+            <option value="Monday">Mon</option><option value="Tuesday" selected>Tue</option>
+            <option value="Wednesday">Wed</option><option value="Thursday">Thu</option>
+            <option value="Friday">Fri</option><option value="Saturday">Sat</option>
+            <option value="Sunday">Sun</option>
           </select>
         </div>
       </div>
       <div class="config-actions">
-        <button id="btn-generate" class="btn btn-lg">▶ 生成报表</button>
+        <button id="btn-generate" class="btn btn-lg">▶ Generate</button>
         <span id="upload-status" class="status-msg"></span>
       </div>
     </div>
@@ -103,9 +103,9 @@
     <!-- ===== Report Section ===== -->
     <div class="section" id="report-section" style="display:none">
       <div class="section-header">
-        <span class="section-title">📊 3. 报表</span>
+        <span class="section-title">📊 3. Report</span>
         <div class="section-actions">
-          <button id="btn-dl-excel" class="btn btn-sm">📥 下载 Excel</button>
+          <button id="btn-dl-excel" class="btn btn-sm">📥 Download Excel</button>
           <span id="report-status" class="status-msg"></span>
         </div>
       </div>
@@ -114,13 +114,13 @@
         <button class="dim-tab" data-dim="GB">GB</button>
       </div>
       <div class="view-tabs">
-        <button class="view-tab active" data-view="detail">📋 明细</button>
-        <button class="view-tab" data-view="pivot">📊 透视</button>
+        <button class="view-tab active" data-view="detail">📋 Detail</button>
+        <button class="view-tab" data-view="pivot">📊 Pivot</button>
       </div>
       <div class="toolbar" style="border:none;padding:8px 0">
         <div class="panels-row">
           <div class="panel panel-filter">
-            <div class="panel-label">🔍 筛选</div>
+            <div class="panel-label">🔍 Filters</div>
             <div class="filter-row">
               <div class="filter-group dropdown-filter">
                 <label>PN <span id="sku-count" class="tag-count"></span></label>
@@ -155,7 +155,7 @@
             </div>
           </div>
           <div class="panel panel-cols">
-            <div class="panel-label">📋 显示列</div>
+            <div class="panel-label">📋 Columns</div>
             <div class="cols-row">
               <label class="toggle-label"><input type="checkbox" id="col-pn" checked> PN</label>
               <label class="toggle-label"><input type="checkbox" id="col-usage" checked> Usage</label>
@@ -163,18 +163,18 @@
               <label class="toggle-label"><input type="checkbox" id="col-color" checked> Color</label>
               <label class="toggle-label"><input type="checkbox" id="col-cutday" checked> Cut Day</label>
               <label class="toggle-label"><input type="checkbox" id="col-pallet" checked> Pallet</label>
-              <span class="panel-label" style="margin-left:8px">分组:</span>
+              <span class="panel-label" style="margin-left:8px">Group:</span>
               <select id="group-by" style="padding:2px 6px;font-size:12px">
-                <option value="">无分组</option>
-                <option value="Style">按 Style</option>
-                <option value="Color">按 Color</option>
+                <option value="">None</option>
+                <option value="Style">By Style</option>
+                <option value="Color">By Color</option>
               </select>
               <span id="row-count" style="margin-left:8px;font-size:12px;color:#64748b"></span>
             </div>
           </div>
         </div>
         <div id="pivot-config" class="pivot-config" style="display:none">
-          <span class="panel-label">📊 聚合字段 (PN按此分组求和):</span>
+          <span class="panel-label">📊 Group by (aggregate PNs):</span>
           <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Usage" checked> Usage</label>
           <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Style" checked> Style</label>
           <label class="toggle-label"><input type="checkbox" class="pivot-field" value="Color" checked> Color</label>
@@ -188,7 +188,7 @@
 
     <div id="loading" class="loading" style="display:none">
       <div class="spinner"></div>
-      <p>正在生成报表...</p>
+      <p>Generating report...</p>
     </div>
 
     <!-- ===== Schema Modal ===== -->
@@ -196,7 +196,7 @@
       <div class="modal-backdrop"></div>
       <div class="modal-content">
         <div class="modal-header">
-          <span class="modal-title" id="schema-title">字段说明</span>
+          <span class="modal-title" id="schema-title">Field Descriptions</span>
           <button class="modal-close">&times;</button>
         </div>
         <div class="modal-body" id="schema-body"></div>

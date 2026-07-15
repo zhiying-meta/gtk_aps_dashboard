@@ -27,7 +27,7 @@ function updateOffset(id) {
   const span = document.getElementById('offset-' + id.replace('cfg-', ''));
   if (!sel || !span) return;
   const offset = DOW_IDX[sel.value] - 5;
-  span.textContent = offset === 0 ? '同周六' : offset < 0 ? `提前${-offset}天` : `延后${offset}天`;
+  span.textContent = offset === 0 ? 'Same as Sat' : offset < 0 ? `${-offset}d early` : `${offset}d late`;
 }
 ['cfg-etd','cfg-output','cfg-gb'].forEach(id => {
   const sel = document.getElementById(id);
@@ -40,15 +40,15 @@ document.querySelectorAll('.schema-btn').forEach(btn => {
   btn.addEventListener('click', async (e) => {
     e.preventDefault();
     const sheet = btn.dataset.file;
-    document.getElementById('schema-title').textContent = sheet + ' - 字段说明';
-    document.getElementById('schema-body').innerHTML = '<p style="color:#94a3b8">加载中...</p>';
+    document.getElementById('schema-title').textContent = sheet + ' - Field Descriptions';
+    document.getElementById('schema-body').innerHTML = '<p style="color:#94a3b8">Loading...</p>';
     modal.style.display = 'flex';
     try {
       const resp = await fetch('/api/schema');
       const data = await resp.json();
       const sc = data[sheet];
-      if (!sc) { document.getElementById('schema-body').innerHTML = '<p>未找到字段说明</p>'; return; }
-      let html = '<table><tr><th>字段</th><th>类型</th><th>说明</th><th>示例</th></tr>';
+      if (!sc) { document.getElementById('schema-body').innerHTML = '<p>No field descriptions found</p>'; return; }
+      let html = '<table><tr><th>Field</th><th>Type</th><th>Description</th><th>Example</th></tr>';
       for (const [f, t, d, e] of sc.fields) {
         html += `<tr><td><code>${esc(f)}</code></td><td>${esc(t)}</td><td>${esc(d)}</td><td>${esc(String(e))}</td></tr>`;
       }
@@ -67,12 +67,12 @@ modal.querySelector('.modal-backdrop').addEventListener('click', () => modal.sty
 document.getElementById('btn-generate').addEventListener('click', async () => {
   const btn = document.getElementById('btn-generate');
   const status = document.getElementById('upload-status');
-  btn.disabled = true; status.textContent = '⏳ 上传处理中...';
+  btn.disabled = true; status.textContent = '⏳ Uploading & processing...';
 
   const form = new FormData();
   const fileInput = document.querySelector('.file-input');
   if (!fileInput || !fileInput.files.length) {
-    status.textContent = '❌ 请选择输入文件'; btn.disabled = false; return;
+    status.textContent = '❌ Please select a file'; btn.disabled = false; return;
   }
   form.append('main', fileInput.files[0]);
 
@@ -89,7 +89,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
-    document.getElementById('upload-status').textContent = `✅ ${allRows.length} 行`;
+    document.getElementById('upload-status').textContent = `✅ ${allRows.length} rows`;
     setupDropdowns(); applyFilters();
     if (activeView === 'pivot') renderPivotTable(); else renderTable();
   } catch(e) {
@@ -123,13 +123,13 @@ function setupDropdown(name, vals, labelMap) {
   function rndr() {
     const ac=Object.values(chk).every(Boolean), sc=Object.values(chk).filter(Boolean).length;
     cnt.textContent=vals.length===0?'':(sc<vals.length?`${sc}`:'');
-    btn.textContent=vals.length===0?'-':(sc===vals.length?`All (${vals.length})`:sc===0?'(none)':`${sc} selected`);
+    btn.textContent=vals.length===0?'-':(sc===vals.length?`All ${vals.length}`:sc===0?'(none)':`${sc} selected`);
     const fv=filtered();
-    let h=`<div class="dropdown-search"><input type="text" placeholder="搜索..." value="${esc(searchTerm)}"></div>`;
+    let h=`<div class="dropdown-search"><input type="text" placeholder="Search..." value="${esc(searchTerm)}"></div>`;
     h+=`<div class="dropdown-all"><input type="checkbox" ${ac?'checked':''}> All (${vals.length})</div>`;
     for(const v of fv) h+=`<label><input type="checkbox" data-val="${v}" ${chk[v]?'checked':''}> ${lbl(v)}</label>`;
-    if (vals.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">无可用值</div>`;
-    else if (fv.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">无匹配</div>`;
+    if (vals.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">No values</div>`;
+    else if (fv.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">No match</div>`;
     menu.innerHTML=h;
     const sInp=menu.querySelector('.dropdown-search input');
     if(sInp){sInp.oninput=function(){searchTerm=this.value;rndr();};sInp.onclick=e=>e.stopPropagation();sInp.focus();}
@@ -166,7 +166,7 @@ function getFilteredRows(useDim) {
 }
 function applyFilters() {
   filteredRows = getFilteredRows(true);
-  document.getElementById('row-count').textContent=`${filteredRows.length} 行`;
+  document.getElementById('row-count').textContent=`${filteredRows.length} rows`;
 }
 function setDimTab(dim) {
   activeDim = dim;
@@ -196,7 +196,7 @@ document.querySelectorAll('.pivot-field').forEach(cb => {
   });
 });
 
-const PIVOT_KEEP = ['Version-Type','Version-Detail','Cut Day','Pallet_Qty'];
+const PIVOT_KEEP = ['Version-Type','Version-Detail','Cut Day'];
 const VT_ORDER = {'ExF':0,'Ungated':1,'Gated':2,'CTB':3};
 let pivotExpanded = new Set();
 
@@ -211,7 +211,7 @@ function renderPivotTable() {
   const th=document.getElementById('table-head'), tb=document.getElementById('table-body');
   const rows = getFilteredRows(true);
   if (rows.length === 0) {
-    th.innerHTML=''; tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">无匹配数据</td></tr>';
+    th.innerHTML=''; tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">No matching data</td></tr>';
     document.getElementById('pivot-row-count').textContent = '';
     return;
   }
@@ -251,8 +251,9 @@ function renderPivotTable() {
   pivotCols.push({ key:'_exp', label:'', width:30, frozen:true });
   for (const f of pivotFields) pivotCols.push({ key:f, label:f, width:90, frozen:true });
   for (const k of PIVOT_KEEP) {
-    pivotCols.push({ key:k, label:k === 'Pallet_Qty' ? 'Pallet' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true });
+    pivotCols.push({ key:k, label:k === 'Version-Type' ? 'Version-Type' : k, width: k === 'Version-Detail' ? 105 : 80, frozen:true });
   }
+  pivotCols.push({ key:'Pallet_Qty', label:'Pallet', width:70, frozen:true });
   pivotCols.push({ key:'PN', label:'PN', width:120, frozen:true });
   const pivotDiv = { key:'_divider', label:'', width:5, frozen:true };
 
@@ -272,7 +273,7 @@ function renderPivotTable() {
   for (const w of allWeeks) h += `<th style="min-width:78px">${weekLabels[w]||w}</th>`;
   th.innerHTML = h + '</tr>';
 
-  document.getElementById('pivot-row-count').textContent = `${groupKeys.length} 行 (聚合)`;
+  document.getElementById('pivot-row-count').textContent = `${groupKeys.length} rows (aggregated)`;
 
   // Data rows
   let html = '', lastGroupStr = '';
@@ -295,12 +296,14 @@ function renderPivotTable() {
       if (c.key === '_exp') {
         html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:13px">${isExp?'▾':'▸'}</td>`;
       } else if (c.key === 'PN') {
-        html += `<td class="data-cell frozen${ex}" style="${s};color:#64748b;font-size:11px">${g.children.length} 个SKU</td>`;
+        html += `<td class="data-cell frozen${ex}" style="${s};color:#64748b;font-size:11px">${g.children.length} SKUs</td>`;
+      } else if (c.key === 'Pallet_Qty') {
+        const pals = [...new Set(g.children.map(c => c.Pallet_Qty != null && c.Pallet_Qty !== '' ? String(c.Pallet_Qty) : '').filter(Boolean))];
+        html += `<td class="data-cell frozen${ex}" style="${s}">${pals.length ? esc(pals.join('/')) : ''}</td>`;
       } else if (pivotFields.includes(c.key)) {
         html += `<td class="data-cell frozen${ex}" style="${s};font-weight:600">${esc(String(g.fields[c.key]))}</td>`;
       } else if (PIVOT_KEEP.includes(c.key)) {
         let val = g.fields[c.key];
-        if (c.key === 'Pallet_Qty') val = val != null && val !== '' ? String(val) : '';
         if (c.key === 'Version-Type') {
           html += `<td class="data-cell frozen${ex}" style="${s}"><span class="type-badge type-${g.fields[c.key]}">${esc(String(val))}</span></td>`;
         } else {
@@ -327,13 +330,13 @@ function renderPivotTable() {
             html += `<td class="data-cell frozen${ex}" style="${s};text-align:center;font-size:11px;color:#94a3b8">↳</td>`;
           } else if (c.key === 'PN') {
             html += `<td class="data-cell frozen${ex}" style="${s};font-weight:500">${esc(child.PN||'')}</td>`;
+          } else if (c.key === 'Pallet_Qty') {
+            const val = child[c.key] != null && child[c.key] !== '' ? String(child[c.key]) : '';
+            html += `<td class="data-cell frozen${ex}" style="${s}">${val}</td>`;
           } else if (pivotFields.includes(c.key)) {
             html += `<td class="data-cell frozen${ex}" style="${s};color:#64748b">${esc(String(child[c.key]||''))}</td>`;
           } else if (c.key === 'Version-Type') {
             html += `<td class="data-cell frozen${ex}" style="${s}"><span class="type-badge type-${child[c.key]}">${esc(String(child[c.key]||''))}</span></td>`;
-          } else if (c.key === 'Pallet_Qty') {
-            const val = child[c.key] != null && child[c.key] !== '' ? String(child[c.key]) : '';
-            html += `<td class="data-cell frozen${ex}" style="${s}">${val}</td>`;
           } else {
             html += `<td class="data-cell frozen${ex}" style="${s}">${esc(String(child[c.key]||''))}</td>`;
           }
@@ -375,7 +378,7 @@ function renderTable() {
   for(let ci=0;ci<vc.length;ci++){const c=vc[ci];const isDiv=c.key==='_divider';const ex=isDiv?' divider-col':(ci===vc.length-1||!vc[ci+1].frozen?' frozen-last':'');const s=c.frozen?` style="left:${c._left}px;min-width:${c.width}px" class="frozen${ex}"`:` style="min-width:${c.width}px"`;h+=`<th${s}>${c.label}</th>`;}
   for(const w of allWeeks) h+=`<th style="min-width:78px">${weekLabels[w]||w}</th>`;
   th.innerHTML=h+'</tr>';
-  if(filteredRows.length===0){tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">无匹配数据</td></tr>';return;}
+  if(filteredRows.length===0){tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">No matching data</td></tr>';return;}
   const grp=document.getElementById('group-by').value; let dr=filteredRows,gh=[];
   if(grp){const gs={};for(const r of filteredRows){(gs[r[grp]||'(blank)']=gs[r[grp]||'(blank)']||[]).push(r);}dr=[];for(const k of Object.keys(gs).sort()){gh.push({label:`${grp}: ${k}`,count:gs[k].length});dr.push(...gs[k]);}}
   let html='',gi=0,ri=0,lpn=null;
@@ -418,13 +421,13 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
   const allData=getFilteredRows(false);
   if(allData.length===0)return;
   const btn=document.getElementById('btn-dl-excel');
-  btn.textContent='⏳ 生成中...';btn.disabled=true;
+  btn.textContent='⏳ Generating...';btn.disabled=true;
   try{
     const resp=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:allData,weeks:allWeeks,week_labels:weekLabels})});
     if(!resp.ok)throw new Error(`HTTP ${resp.status}`);
     const blob=await resp.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='report.xlsx';a.click();URL.revokeObjectURL(a.href);
-  }catch(e){alert('下载失败: '+e.message);}
-  finally{btn.textContent='📥 下载 Excel';btn.disabled=false;}
+  }catch(e){alert('Download failed: '+e.message);}
+  finally{btn.textContent='📥 Download Excel';btn.disabled=false;}
 });
 
 

@@ -80,7 +80,7 @@ def process():
                 uploaded = True
 
         if not uploaded:
-            return jsonify({"error": "未上传文件"}), 400
+            return jsonify({"error": "No file uploaded"}), 400
 
         cfg = {}
         for cfg_key in ['exf_cut', 'etd_cut', 'output_cut', 'gb_cut']:
@@ -96,7 +96,7 @@ def process():
                 break
 
         if not file_map:
-            return jsonify({"error": "未找到xlsx文件"}), 400
+            return jsonify({"error": "No xlsx file found"}), 400
 
         result = process_uploaded_data(file_map, cfg)
         shutil.rmtree(work_dir, ignore_errors=True)
