@@ -42,7 +42,7 @@ python app/server.py
 | `plan_output_ungated` | ✅ | Ungated 版本日级产出 |
 | `forecast` | ✅ | 周级 Forecast |
 | `ctb_sku_cum` | ✅ | SKU 级 CTB 累计值 |
-| `ctb_gb_cum` | | GB 级 CTB 累计值（可选） |
+| `ctb_gb_cum` | ✅ | GB 级 CTB 累计值 |
 
 每个 Sheet 的字段说明可在网页上点击「📋 sheet名称」查看。
 
