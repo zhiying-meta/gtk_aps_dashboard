@@ -226,7 +226,7 @@ document.getElementById('btn-clear-filters').addEventListener('click', () => {
 document.querySelectorAll('.pivot-field').forEach(cb => {
   cb.addEventListener('change', () => {
     pivotFields = Array.from(document.querySelectorAll('.pivot-field:checked')).map(c => c.value);
-    render();
+    applyFilters(); render();
   });
 });
 
