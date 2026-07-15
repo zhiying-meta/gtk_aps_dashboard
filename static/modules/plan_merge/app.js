@@ -178,6 +178,14 @@ document.querySelectorAll('.dim-tab').forEach(tab => {
   tab.addEventListener('click', () => setDimTab(tab.dataset.dim));
 });
 
+document.getElementById('btn-clear-filters').addEventListener('click', () => {
+  document.querySelectorAll('.dropdown-menu').forEach(menu => {
+    const allCb = menu.querySelector('.dropdown-all input');
+    if (allCb && !allCb.checked) { allCb.checked = true; allCb.dispatchEvent(new Event('change')); }
+  });
+  document.querySelectorAll('.pivot-field').forEach(cb => { if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change')); } });
+});
+
 document.querySelectorAll('.pivot-field').forEach(cb => {
   cb.addEventListener('change', () => {
     pivotFields = Array.from(document.querySelectorAll('.pivot-field:checked')).map(c => c.value);
