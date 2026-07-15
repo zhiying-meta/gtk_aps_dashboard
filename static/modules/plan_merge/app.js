@@ -103,7 +103,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
     const savedAgg = Array.from(document.querySelectorAll('.pivot-field:checked')).map(cb => cb.value);
 
-    setupDropdowns(); applyFilters(); render();
+    setupDropdowns(); applyFilters(); // no render yet — restore will trigger final render
 
     // Restore filter state
     for (const n of ['sku','usage','style','color','type','detail']) {
@@ -113,10 +113,8 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
       if (!m) continue;
       const total = parseInt(m.dataset.totalVals) || 0;
       if (vals._all || vals.length === total) continue;
-      // Uncheck "All" first
       const allCb = m.querySelector('.dropdown-all input');
       if (allCb && allCb.checked) { allCb.checked = false; allCb.dispatchEvent(new Event('change')); }
-      // Check each saved value (re-query menu after each click since rndr() rebuilds it)
       for (const val of vals) {
         const menuEl = document.getElementById(n+'-menu');
         const cb = Array.from(menuEl.querySelectorAll('input[data-val]')).find(c => c.dataset.val === val);
@@ -128,6 +126,8 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
       const shouldCheck = savedAgg.includes(cb.value);
       if (cb.checked !== shouldCheck) { cb.checked = shouldCheck; cb.dispatchEvent(new Event('change')); }
     });
+    // Render with restored filters
+    applyFilters(); render();
   } catch(e) {
     status.textContent = `❌ ${e.message}`;
   } finally {
