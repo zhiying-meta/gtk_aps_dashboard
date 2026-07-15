@@ -457,17 +457,20 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
   }
 })();
 
+const DEFAULT_PIVOT_FIELDS = ['Usage', 'Style', 'Color'];
+
 function getPivotDownloadRows() {
-  const rows = getFilteredRows(true);
+  const activePivotFields = pivotFields.length > 0 ? pivotFields : DEFAULT_PIVOT_FIELDS;
+  const allData = getFilteredRows(false);
   const groups = {};
-  for (const r of rows) {
-    const grpKey = pivotFields.map(f => r[f] || '(blank)').concat(
-      PIVOT_KEEP.map(k => r[k] != null ? String(r[k]) : '')
+  for (const r of allData) {
+    const grpKey = activePivotFields.map(f => r[f] || '(blank)').concat(
+      ['_dim', ...PIVOT_KEEP].map(k => r[k] != null ? String(r[k]) : '')
     ).join('||');
     if (!groups[grpKey]) {
       const g = { fields: {}, weeks: {}, children: [] };
-      for (const f of pivotFields) g.fields[f] = r[f] || '(blank)';
-      for (const k of PIVOT_KEEP) g.fields[k] = r[k] != null ? r[k] : '';
+      for (const f of activePivotFields) g.fields[f] = r[f] || '(blank)';
+      for (const k of ['_dim', ...PIVOT_KEEP]) g.fields[k] = r[k] != null ? r[k] : '';
       groups[grpKey] = g;
     }
     groups[grpKey].children.push(r);
@@ -482,10 +485,9 @@ function getPivotDownloadRows() {
   const result = [];
   for (const gk of Object.keys(groups).sort()) {
     const g = groups[gk];
-    const first = g.children[0];
     const pals = [...new Set(g.children.map(c => c.Pallet_Qty != null && c.Pallet_Qty !== '' ? String(c.Pallet_Qty) : '').filter(Boolean))];
     const row = {
-      _dim: first._dim,
+      _dim: g.fields._dim || g.children[0]._dim,
       PN: `${g.children.length} SKUs`,
       Usage: g.fields.Usage || '',
       Style: g.fields.Style || '',
@@ -503,7 +505,7 @@ function getPivotDownloadRows() {
 
 // ===== Download Excel =====
 document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
-  const allData = pivotFields.length > 0 ? getPivotDownloadRows() : getFilteredRows(false);
+  const allData = getPivotDownloadRows();
   if(allData.length===0)return;
   const btn=document.getElementById('btn-dl-excel');
   btn.textContent='⏳ Generating...';btn.disabled=true;
