@@ -206,7 +206,7 @@ function renderPivotTable() {
   for (const r of rows) {
     const grpKey = pivotFields.map(f => r[f] || '(blank)').concat(
       PIVOT_KEEP.map(k => r[k] != null ? String(r[k]) : '')
-    ).join('\x00');
+    ).join('||');
     if (!groups[grpKey]) {
       const g = { fields: {}, weeks: {}, children: [] };
       for (const f of pivotFields) g.fields[f] = r[f] || '(blank)';
@@ -267,11 +267,12 @@ function renderPivotTable() {
     const isExp = pivotExpanded.has(gk);
 
     // Detect aggregate group change for separator
-    const curGroupStr = pivotFields.map(f => g.fields[f]).join('\x00');
+    const curGroupStr = pivotFields.map(f => g.fields[f]).join('||');
     const isNewGroup = curGroupStr !== lastGroupStr;
     lastGroupStr = curGroupStr;
 
-    const rowCls = `pivot-group-row${isExp?' pivot-expanded':''}${isNewGroup?' pivot-new-group':''}`;
+    const vtCls = 'row-' + (g.fields['Version-Type'] || 'ExF');
+    const rowCls = `pivot-group-row ${vtCls}${isExp?' pivot-expanded':''}${isNewGroup?' pivot-new-group':''}`;
     html += `<tr class="${rowCls}" data-pkey="${esc(gk)}">`;
     for (const c of pivotCols) {
       const isLast = c === pivotCols[pivotCols.length - 1];
@@ -302,7 +303,8 @@ function renderPivotTable() {
 
     if (isExp) {
       for (const child of g.children) {
-        html += `<tr class="pivot-child-row">`;
+        const cVtCls = 'row-' + (child['Version-Type'] || 'ExF');
+        html += `<tr class="pivot-child-row ${cVtCls}">`;
         for (const c of pivotCols) {
           const isLast = c === pivotCols[pivotCols.length - 1];
           const ex = isLast || !c.frozen ? ' frozen-last' : '';

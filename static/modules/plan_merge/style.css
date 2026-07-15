@@ -140,22 +140,32 @@
 .pivot-config { display: flex; align-items: center; gap: 10px; padding: 6px 0; flex-wrap: wrap; }
 
 /* Pivot table */
-.pivot-group-row { background: #f8fafc; }
 .pivot-group-row td { border-bottom: 1px solid #e2e8f0; }
-.pivot-group-row td.frozen { background: #f8fafc; }
-.pivot-group-row:hover td { background: #f1f5f9; }
-.pivot-group-row:hover td.frozen { background: #f1f5f9; }
 .pivot-group-row.pivot-expanded td { border-bottom: none; }
-.pivot-group-row.pivot-expanded td.frozen { background: #f8fafc; }
-.pivot-group-row.pivot-expanded:hover td { background: #f8fafc; }
-.pivot-group-row.pivot-expanded:hover td.frozen { background: #f8fafc; }
 .pivot-new-group { border-top: 2.5px solid #94a3b8; }
 .pivot-new-group td { border-top: 2.5px solid #94a3b8; }
 .pivot-new-group td.frozen { border-top: 2.5px solid #94a3b8; }
-.pivot-child-row td { background: #fff; font-size: 11px; }
-.pivot-child-row td.frozen { background: #fff; }
-.pivot-child-row:hover td { background: #fafbfc; }
-.pivot-child-row:hover td.frozen { background: #fafbfc; }
+.pivot-group-row.row-ExF td,
+.pivot-group-row.row-ExF td.frozen { background: #f0f9ff; }
+.pivot-group-row.row-Ungated td,
+.pivot-group-row.row-Ungated td.frozen { background: #f0fdf4; }
+.pivot-group-row.row-Gated td,
+.pivot-group-row.row-Gated td.frozen { background: #fffbeb; }
+.pivot-group-row.row-CTB td,
+.pivot-group-row.row-CTB td.frozen { background: #faf5ff; }
+.pivot-group-row:hover td,
+.pivot-group-row:hover td.frozen { background: #e8edf5; }
+.pivot-child-row td { font-size: 11px; }
+.pivot-child-row.row-ExF td,
+.pivot-child-row.row-ExF td.frozen { background: #f0f9ff; }
+.pivot-child-row.row-Ungated td,
+.pivot-child-row.row-Ungated td.frozen { background: #f0fdf4; }
+.pivot-child-row.row-Gated td,
+.pivot-child-row.row-Gated td.frozen { background: #fffbeb; }
+.pivot-child-row.row-CTB td,
+.pivot-child-row.row-CTB td.frozen { background: #faf5ff; }
+.pivot-child-row:hover td,
+.pivot-child-row:hover td.frozen { background: #f5f7fa; }
 .pivot-child-row td:first-child { color: #94a3b8; }
 .pivot-toggle { user-select: none; }
 .pivot-toggle:hover { color: #3b82f6; }
