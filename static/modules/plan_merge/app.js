@@ -101,15 +101,15 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 // ===== Filters =====
 function setupDropdowns() {
   for (const [name, opts] of Object.entries({
-    sku: { items:extractUnique('PN') },
-    usage: { items:extractUnique('Usage').filter(Boolean) },
-    style: { items:extractUnique('Style') },
-    color: { items:extractUnique('Color') },
-    type: { items:extractUnique('Version-Type') },
-    detail: { items:extractUnique('Version-Detail').filter(Boolean) },
+    sku: { items:extractUnique('PN', activeDim) },
+    usage: { items:extractUnique('Usage', activeDim).filter(Boolean) },
+    style: { items:extractUnique('Style', activeDim) },
+    color: { items:extractUnique('Color', activeDim) },
+    type: { items:extractUnique('Version-Type', activeDim) },
+    detail: { items:extractUnique('Version-Detail', activeDim).filter(Boolean) },
   })) setupDropdown(name, opts.items, opts.map);
 }
-function extractUnique(f) { const s=new Set(); for(const r of allRows){ const v=r[f]; if(v!=null&&v!=='') s.add(v); } return [...s].sort(); }
+function extractUnique(f, dim) { const s=new Set(); for(const r of allRows){ if(dim && r._dim!==dim) continue; const v=r[f]; if(v!=null&&v!=='') s.add(v); } return [...s].sort(); }
 
 function setupDropdown(name, vals, labelMap) {
   const btn=document.getElementById(name+'-btn'), menu=document.getElementById(name+'-menu'), cnt=document.getElementById(name+'-count');
@@ -172,7 +172,7 @@ function applyFilters() {
 function setDimTab(dim) {
   activeDim = dim;
   document.querySelectorAll('.dim-tab').forEach(t => t.classList.toggle('active', t.dataset.dim === dim));
-  applyFilters(); render();
+  setupDropdowns(); applyFilters(); render();
 }
 document.querySelectorAll('.dim-tab').forEach(tab => {
   tab.addEventListener('click', () => setDimTab(tab.dataset.dim));
