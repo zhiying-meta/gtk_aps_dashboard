@@ -10,7 +10,7 @@ const ALL_COLS = [
   { key:'Pallet_Qty', label:'Pallet', width:50, frozen:true, toggle:'col-pallet' },
 ];
 const DIVIDER = { key:'_divider', label:'', width:5, frozen:true };
-let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG', activeView='detail', pivotFields=['Style','Color'];
+let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG', activeView='detail', pivotFields=['Usage','Style','Color'];
 
 // ===== Upload: mark files =====
 document.querySelectorAll('.file-input').forEach(inp => {
@@ -177,10 +177,13 @@ document.querySelectorAll('.view-tab').forEach(tab => {
 document.querySelectorAll('.pivot-field').forEach(cb => {
   cb.addEventListener('change', () => {
     pivotFields = Array.from(document.querySelectorAll('.pivot-field:checked')).map(c => c.value);
-    if (pivotFields.length === 0) { pivotFields = ['Style']; document.querySelector('.pivot-field[value="Style"]').checked = true; }
+    if (pivotFields.length === 0) { pivotFields = ['Usage']; document.querySelector('.pivot-field[value="Usage"]').checked = true; }
     renderPivotTable();
   });
 });
+
+const PIVOT_KEEP = ['Version-Type','Version-Detail','Cut Day','Pallet_Qty'];
+let pivotExpanded = new Set();
 
 function renderPivotTable() {
   const th=document.getElementById('table-head'), tb=document.getElementById('table-body');
@@ -193,38 +196,86 @@ function renderPivotTable() {
 
   const groups = {};
   for (const r of rows) {
-    const key = pivotFields.map(f => r[f] || '(blank)').join('\x00');
-    if (!groups[key]) {
-      groups[key] = { fields: pivotFields.map(f => r[f] || '(blank)'), weeks: {} };
+    const grpKey = pivotFields.map(f => r[f] || '(blank)').concat(
+      PIVOT_KEEP.map(k => r[k] != null ? String(r[k]) : '')
+    ).join('\x00');
+    if (!groups[grpKey]) {
+      const g = { fields: {}, weeks: {}, children: [] };
+      for (const f of pivotFields) g.fields[f] = r[f] || '(blank)';
+      for (const k of PIVOT_KEEP) g.fields[k] = r[k] != null ? r[k] : '';
+      groups[grpKey] = g;
     }
+    groups[grpKey].children.push(r);
     for (const w of allWeeks) {
       const v = r[w];
       if (v != null && v !== '' && !isNaN(Number(v))) {
-        groups[key].weeks[w] = (groups[key].weeks[w] || 0) + Number(v);
+        groups[grpKey].weeks[w] = (groups[grpKey].weeks[w] || 0) + Number(v);
       }
     }
   }
 
   const groupKeys = Object.keys(groups).sort();
   let h = '<tr>';
-  for (const f of pivotFields) h += `<th style="min-width:90px">${f}</th>`;
+  h += '<th style="min-width:30px;text-align:center"></th>';
+  for (const f of pivotFields) h += `<th style="min-width:85px">${f}</th>`;
+  for (const k of PIVOT_KEEP) {
+    const lbl = k === 'Pallet_Qty' ? 'Pallet' : k;
+    h += `<th style="min-width:${k==='Version-Detail'?100:80}px">${lbl}</th>`;
+  }
   for (const w of allWeeks) h += `<th style="min-width:78px">${weekLabels[w]||w}</th>`;
   th.innerHTML = h + '</tr>';
 
-  document.getElementById('pivot-row-count').textContent = `${groupKeys.length} 行`;
+  document.getElementById('pivot-row-count').textContent = `${groupKeys.length} 行 (聚合)`;
 
   let html = '';
   for (const gk of groupKeys) {
     const g = groups[gk];
-    html += '<tr>';
-    for (const fv of g.fields) html += `<td class="data-cell" style="font-weight:500">${esc(fv)}</td>`;
+    const isExp = pivotExpanded.has(gk);
+    html += `<tr class="pivot-group-row${isExp?' pivot-expanded':''}" data-pkey="${esc(gk)}">`;
+    html += `<td class="data-cell pivot-toggle" style="text-align:center;cursor:pointer;font-size:13px">${isExp?'▾':'▸'}</td>`;
+    for (const f of pivotFields) html += `<td class="data-cell" style="font-weight:600">${esc(String(g.fields[f]))}</td>`;
+    for (const k of PIVOT_KEEP) {
+      let val = g.fields[k];
+      if (k === 'Pallet_Qty') val = val != null && val !== '' ? String(val) : '';
+      html += `<td class="data-cell">${k==='Version-Type'?`<span class="type-badge type-${g.fields[k]}">${esc(String(val))}</span>`:esc(String(val))}</td>`;
+    }
     for (const w of allWeeks) {
       const v = g.weeks[w];
       html += `<td class="data-cell ${numCls(v)}">${fmtNum(v)}</td>`;
     }
     html += '</tr>';
+
+    if (isExp) {
+      for (const child of g.children) {
+        const tp = child['Version-Type'], dm = child._dim || 'FG';
+        html += `<tr class="pivot-child-row">`;
+        html += `<td class="data-cell" style="text-align:center;font-size:11px;color:#94a3b8">↳</td>`;
+        for (const f of pivotFields) html += `<td class="data-cell" style="color:#64748b">${esc(String(child[f]||''))}</td>`;
+        for (const k of PIVOT_KEEP) {
+          let val = child[k];
+          if (k === 'Pallet_Qty') val = val != null && val !== '' ? String(val) : '';
+          html += `<td class="data-cell">${k==='Version-Type'?`<span class="type-badge type-${child[k]}">${esc(String(val))}</span>`:esc(String(val))}</td>`;
+        }
+        html += `<td class="data-cell" style="font-weight:500">${esc(child.PN)}</td>`;
+        for (const w of allWeeks) {
+          const v = child[w];
+          html += `<td class="data-cell ${numCls(v)}">${fmtNum(v)}</td>`;
+        }
+        html += '</tr>';
+      }
+    }
   }
   tb.innerHTML = html;
+
+  tb.querySelectorAll('.pivot-toggle').forEach(td => {
+    td.addEventListener('click', () => {
+      const tr = td.closest('tr');
+      const key = tr.dataset.pkey;
+      if (pivotExpanded.has(key)) pivotExpanded.delete(key);
+      else pivotExpanded.add(key);
+      renderPivotTable();
+    });
+  });
 }
 
 function isVis(c) { if(!c.toggle) return true; const e=document.getElementById(c.toggle); return !e||e.checked; }
