@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Multi-Version Plan Report
+title Gated/Ungated/CTB Report
 cd /d "%~dp0"
 
 echo [1/3] Checking Python...
@@ -23,7 +23,8 @@ if %errorlevel% neq 0 (
 
 echo [3/3] Starting server...
 timeout /t 1 /nobreak >nul
-start "" "http://localhost:8501"
+set PORT=8502
+start "" "http://localhost:%PORT%"
 call python run.py
 
 echo.
