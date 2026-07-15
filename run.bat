@@ -12,11 +12,20 @@ if %errorlevel% neq 0 (
 )
 
 echo [2/3] Installing dependencies...
-pip install -r requirements.txt -q
+pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo.
+    echo Dependency installation failed. Check your network connection or run manually:
+    echo   pip install -r requirements.txt
+    pause
+    exit /b
+)
 
 echo [3/3] Starting server...
-echo Opening browser...
-start http://localhost:8501
-python app/server.py
+timeout /t 1 /nobreak >nul
+start "" "http://localhost:8501"
+call python app/server.py
 
+echo.
+echo Server has stopped. You may close this window.
 pause
