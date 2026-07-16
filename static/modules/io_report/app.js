@@ -1,6 +1,8 @@
 /**
- * I/O Report - 9 Tables (INPUT/OUTPUT/CHECKIN/CHECKOUT daily/cum + BOH)
- * Vertical tabs (stacked), upload module persistent, Day default, divider + thick lines
+ * I/O Report - 9 Tables with Mergeable Groups via Drag & Drop
+ * Features:
+ * - Row dim drag to order, col dim Day default
+ * - Report Types draggable to merge into one table, with Type column + row colors
  */
 (() => {
 const DIM_LABELS = { ITEM_NO: 'PN', LINE_CODE: 'Line', STYLE: 'Style' };
@@ -16,17 +18,6 @@ const REPORT_NAMES = {
   cum_checkout: 'Cum Checkout',
   balance: 'BOH'
 };
-const REPORT_LABELS_FULL = {
-  daily_input: 'Daily Input (Checkin type INPUT)',
-  daily_output: 'Daily Output',
-  daily_checkin: 'Daily Checkin',
-  daily_checkout: 'Daily Checkout',
-  cum_input: 'Cum Input',
-  cum_output: 'Cum Output',
-  cum_checkin: 'Cum Checkin',
-  cum_checkout: 'Cum Checkout',
-  balance: 'BOH (Balance on Hand)'
-};
 
 let dimOrder = [];
 let currentGroup = 'FG';
@@ -35,6 +26,10 @@ let COL_DIM = 'day';
 let dragFromDim = null;
 const filterVals = { lineCode: '', itemNo: '', style: '' };
 let ioRoot = null;
+
+// --- merge groups state ---
+let reportGroups = REPORTS.map(r => [r]); // 9 separate initially
+let draggedReport = null; // {type, fromGroup}
 
 function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 function getRoot(){ return document.getElementById('io-report-section'); }
@@ -49,14 +44,12 @@ async function render(){
   else renderUploadPage();
 }
 
-// ---------- Upload HTML builder (plan_merge style) ----------
+// ---------- Upload ----------
 function buildUploadSectionHTML(isCompact){
-  // isCompact = true for reports page top bar, false for full upload page
   const title = isCompact ? '📁 Upload I/O Data (Re-upload to update)' : '📁 Upload I/O Data (3 files required)';
-  const wrapperClass = isCompact ? 'section' : 'section';
   const gridStyle = isCompact ? 'display:grid;grid-template-columns:repeat(3,1fr) 1.2fr;gap:10px;align-items:end' : 'display:grid;grid-template-columns:repeat(3,1fr);gap:12px';
   return `
-    <div class="${wrapperClass}" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
+    <div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
       <div class="section-header">
         <span class="section-title">${title}</span>
         <div class="section-actions">
@@ -70,7 +63,7 @@ function buildUploadSectionHTML(isCompact){
         <strong>Required:</strong> Item Master (<code>ITEM_NO, PRODUCT_CATEGORY=FG/GB, PRODUCT_STYLE</code>) |
         Schedule Result (<code>LINE_CODE, SHIFT_NAME, PLAN_ITEM=INPUT/OUTPUT/CHECKIN/CHECKOUT, SKU, PLAN_DATE, PLAN_VALUE</code>) |
         BOH Balance (<code>PLAN_DATE, SHIFT_NAME, ITEM_CODE, BALANCE_QTY</code>)<br>
-        Place 3 files in <code>data/</code> and click Recheck, or upload below. Supports 4 plan types → 8 report tabs + BOH = 9 tables.
+        Place 3 files in <code>data/</code> and click Recheck, or upload below.
       </div>
       <div id="${isCompact ? 'uploadBarContent' : 'uploadFullContent'}">
         <div class="upload-grid" style="${gridStyle}">
@@ -82,7 +75,7 @@ function buildUploadSectionHTML(isCompact){
           </div>
           <div class="upload-card" id="card_schedule_${isCompact?'compact':'full'}">
             <div class="upload-label">📁 Schedule <span class="req">*</span></div>
-            <div class="upload-hint">排产结果表.xlsx<br>LINE, SHIFT, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, DATE, VALUE</div>
+            <div class="upload-hint">排产结果表.xlsx<br>LINE, SHIFT, PLAN_ITEM, SKU, DATE, VALUE</div>
             <input type="file" class="file-input" id="input_schedule_${isCompact?'compact':'full'}" accept=".xlsx">
             <div class="fname" id="fname_schedule_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div>
           </div>
@@ -106,7 +99,6 @@ function buildUploadSectionHTML(isCompact){
           <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled style="padding:6px 20px">▶ Upload & Analyze</button>
           <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck data/ folder</button>
           <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
-          ${isCompact ? '<span style="font-size:10px;color:#94a3b8">Supports re-upload while viewing reports</span>' : ''}
         </div>
       </div>
     </div>
@@ -116,7 +108,6 @@ function buildUploadSectionHTML(isCompact){
 function attachUploadLogic(isCompact){
   const suffix = isCompact ? 'compact' : 'full';
   const files = { master: null, schedule: null, balance: null };
-
   function markHasFile(cardId, has){
     const card = document.getElementById(cardId);
     if(card) card.classList.toggle('has-file', !!has);
@@ -126,7 +117,6 @@ function attachUploadLogic(isCompact){
     const btn = document.getElementById('uploadBtn_'+suffix);
     if(btn) btn.disabled = !ok;
   }
-
   ['master','schedule','balance'].forEach(k=>{
     const input = document.getElementById('input_'+k+'_'+suffix);
     if(!input) return;
@@ -143,7 +133,6 @@ function attachUploadLogic(isCompact){
       updateBtn();
     });
   });
-
   if(!isCompact){
     const folderInput = document.getElementById('input_folder_full');
     const folderBtn = document.getElementById('btnFolder_full');
@@ -151,18 +140,16 @@ function attachUploadLogic(isCompact){
     if(folderInput){
       folderInput.addEventListener('change', ()=>{
         if(!folderInput.files.length) return;
-        let matched=0;
         for(const f of folderInput.files){
           const lower = f.name.toLowerCase();
           if(lower.includes('master') || f.name.includes('料号')){
-            files.master=f; document.getElementById('fname_master_full').textContent='✓ '+f.name; markHasFile('card_master_full',true); matched++;
+            files.master=f; document.getElementById('fname_master_full').textContent='✓ '+f.name; markHasFile('card_master_full',true);
           }else if(lower.includes('schedule') || lower.includes('result') || f.name.includes('排产')){
-            files.schedule=f; document.getElementById('fname_schedule_full').textContent='✓ '+f.name; markHasFile('card_schedule_full',true); matched++;
+            files.schedule=f; document.getElementById('fname_schedule_full').textContent='✓ '+f.name; markHasFile('card_schedule_full',true);
           }else if(lower.includes('balance') || lower.includes('boh') || f.name.includes('结存')){
-            files.balance=f; document.getElementById('fname_balance_full').textContent='✓ '+f.name; markHasFile('card_balance_full',true); matched++;
+            files.balance=f; document.getElementById('fname_balance_full').textContent='✓ '+f.name; markHasFile('card_balance_full',true);
           }
         }
-        // fallback: if names not matched but 3 xlsx files, assign by order
         const xlsx = Array.from(folderInput.files).filter(x=> x.name.endsWith('.xlsx'));
         if(xlsx.length>=3){
           if(!files.master){ files.master=xlsx[0]; document.getElementById('fname_master_full').textContent='✓ '+xlsx[0].name; markHasFile('card_master_full',true); }
@@ -175,7 +162,6 @@ function attachUploadLogic(isCompact){
       });
     }
   }
-
   const uploadBtn = document.getElementById('uploadBtn_'+suffix);
   if(uploadBtn){
     uploadBtn.addEventListener('click', async ()=>{
@@ -205,7 +191,6 @@ function attachUploadLogic(isCompact){
       }
     });
   }
-
   const retryBtn = document.getElementById('btnRetryLoad_'+suffix);
   if(retryBtn){
     retryBtn.addEventListener('click', async ()=>{
@@ -219,7 +204,6 @@ function attachUploadLogic(isCompact){
       }
     });
   }
-
   if(isCompact){
     const toggle = document.getElementById('toggleUploadBar');
     if(toggle){
@@ -234,43 +218,21 @@ function attachUploadLogic(isCompact){
   }
 }
 
-// ---------- Full upload page (no data) ----------
 function renderUploadPage(){
-  ioRoot.innerHTML = buildUploadSectionHTML(false) + '<div id="io-schema-box" style="display:none;margin:12px 24px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px"></div>';
+  ioRoot.innerHTML = buildUploadSectionHTML(false);
   attachUploadLogic(false);
-
-  window.showSchema = async (key)=>{
-    const box = document.getElementById('io-schema-box');
-    if(!box) return;
-    box.style.display='block';
-    box.innerHTML = 'Loading schema...';
-    try{
-      const resp = await fetch('/api/io/templates/schema');
-      const data = await resp.json();
-      const sc = data[key];
-      if(!sc){ box.innerHTML='No schema'; return; }
-      let html = `<div style="display:flex;justify-content:space-between"><strong>${esc(sc.file)}</strong><button onclick="this.parentElement.parentElement.style.display='none'" style="border:none;background:none;cursor:pointer">✕</button></div>`;
-      html += '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:12px"><tr><th style="text-align:left;border-bottom:1px solid #e2e8f0;padding:4px">Field</th><th style="text-align:left;border-bottom:1px solid #e2e8f0;padding:4px">Type</th><th style="text-align:left;border-bottom:1px solid #e2e8f0;padding:4px">Description</th><th style="text-align:left;border-bottom:1px solid #e2e8f0;padding:4px">Example</th></tr>';
-      for(const [f,t,d,e] of sc.fields){
-        html += `<tr><td style="padding:4px;border-bottom:1px solid #f1f5f9"><code>${esc(f)}</code></td><td style="padding:4px;border-bottom:1px solid #f1f5f9">${esc(t)}</td><td style="padding:4px;border-bottom:1px solid #f1f5f9">${esc(d)}</td><td style="padding:4px;border-bottom:1px solid #f1f5f9">${esc(e)}</td></tr>`;
-      }
-      html += '</table>';
-      if(sc.note) html += `<div style="margin-top:8px;padding:8px;background:#f8fafc;border-radius:4px;font-size:11px;color:#64748b">💡 ${esc(sc.note)}</div>`;
-      box.innerHTML = html;
-    }catch(e){ box.innerHTML='❌ '+e.message; }
-  };
 }
 
-// ---------- Reports Page - 9 tables stacked with vertical tabs ----------
+// ---------- Reports Page ----------
 function renderReportsPage(){
-  // Build upload bar + main
   ioRoot.innerHTML = buildUploadSectionHTML(true) + `
     <div class="section" id="io-main-section">
       <div class="section-header">
-        <span class="section-title">📈 I/O Report - 9 Tables (Input/Output/Checkin/Checkout + BOH)</span>
+        <span class="section-title">📈 I/O Report</span>
         <div class="section-actions">
           <span id="io-report-status" style="font-size:12px;color:#059669"></span>
           <button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All (Excel)</button>
+          <button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset Groups</button>
         </div>
       </div>
 
@@ -291,7 +253,7 @@ function renderReportsPage(){
                 <span class="placeholder">Drop dimensions here</span>
               </div>
             </div>
-            <div style="font-size:10px;color:#94a3b8;margin-top:4px">Drag to order. 1 dim = flat, 2+ = expandable groups. Fixed vertical divider before dates.</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:4px">Drag to order. 1 dim = flat, 2+ = expandable groups.</div>
           </div>
 
           <div class="panel" style="min-width:200px">
@@ -339,13 +301,19 @@ function renderReportsPage(){
         </div>
       </div>
 
+      <div class="merge-info" style="margin-top:12px;padding:8px 12px;background:#f0f9ff;border:1px dashed #93c5fd;border-radius:6px;font-size:11px;color:#334155;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <span>💡 <strong>Merge:</strong> drag a report type chip to another card to combine tables. Merged table adds <code>Type</code> column & colors rows by type.</span>
+        <span style="color:#64748b">Groups: <span id="mergeGroupCount">9</span></span>
+      </div>
+
       <div class="container-fluid" style="padding:0;margin-top:12px">
         <div class="row" style="display:flex;gap:12px">
           <div class="col-1" style="flex:0 0 160px;max-width:160px">
             <div class="io-sidebar" style="position:sticky;top:70px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:8px;text-transform:uppercase">Report Tabs (9)</div>
-              ${REPORTS.map((r,i)=> `<a class="anchor" href="#io_sec_${r}" data-jump="${r}" style="display:block;padding:6px 8px;border-radius:4px;font-size:12px;color:#334155;text-decoration:none;margin-bottom:2px;cursor:pointer">${i+1}. ${esc(REPORT_NAMES[r])}</a>`).join('')}
-              <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:10px;color:#94a3b8">Click to jump. All 9 tables load together.</div>
+              <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:8px;text-transform:uppercase">Report Types (9)</div>
+              ${REPORTS.map((r,i)=> `<a class="anchor report-anchor" href="#" data-type="${r}" style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:4px;font-size:12px;color:#334155;text-decoration:none;margin-bottom:2px;cursor:pointer"><span class="type-dot dot-${r}" style="width:8px;height:8px;border-radius:50%;display:inline-block"></span>${i+1}. ${esc(REPORT_NAMES[r])}</a>`).join('')}
+              <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:10px;color:#94a3b8">Click to jump to group. Drag chips in tables to merge.</div>
+              <div id="unassignedDrop" class="unassigned-drop" style="margin-top:12px;border:2px dashed #cbd5e1;border-radius:6px;padding:8px;text-align:center;font-size:11px;color:#94a3b8">Drop here to create new separate group</div>
             </div>
           </div>
           <div class="col-11" style="flex:1;min-width:0">
@@ -356,19 +324,56 @@ function renderReportsPage(){
         </div>
       </div>
     </div>
-    <div id="io-schema-box-compact" style="display:none;margin:12px 24px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px"></div>
   `;
 
   attachUploadLogic(true);
   initReportsPage();
-  // jump anchors
-  document.querySelectorAll('.io-sidebar .anchor').forEach(a=>{
+  initMergeDragDrop();
+}
+
+function initReportsPage(){
+  document.querySelectorAll('#io-group-tabs .dim-tab').forEach(tab=>{
+    tab.addEventListener('click', ()=>{
+      document.querySelectorAll('#io-group-tabs .dim-tab').forEach(t=> t.classList.remove('active'));
+      tab.classList.add('active');
+      currentGroup = tab.dataset.group;
+      refreshMeta().then(()=> loadAllReports());
+    });
+  });
+  document.querySelectorAll('#ioColDimTabs .btn').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      document.querySelectorAll('#ioColDimTabs .btn').forEach(x=> x.classList.remove('active'));
+      b.classList.add('active');
+      COL_DIM = b.dataset.coldim;
+      refreshMeta().then(()=> loadAllReports());
+    });
+  });
+  initSearchableSelect('lineCode');
+  initSearchableSelect('itemNo');
+  initSearchableSelect('style');
+
+  dimOrder = [];
+  allData = null;
+  renderDimWell();
+  initDimDragDrop();
+  refreshMeta().then(()=> loadAllReports());
+
+  const rb = document.getElementById('ioRefreshBtn');
+  if(rb) rb.addEventListener('click', loadAllReports);
+  const dlAll = document.getElementById('io-dl-all');
+  if(dlAll) dlAll.addEventListener('click', downloadAll);
+  const resetBtn = document.getElementById('io-reset-groups');
+  if(resetBtn) resetBtn.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); renderAllReports(); });
+
+  // sidebar anchor jump - now jumps to group containing type
+  document.querySelectorAll('.report-anchor').forEach(a=>{
     a.addEventListener('click', (e)=>{
       e.preventDefault();
-      const id = a.getAttribute('href').slice(1);
-      document.getElementById(id)?.scrollIntoView({behavior:'smooth', block:'start'});
-      // highlight
-      document.querySelectorAll('.io-sidebar .anchor').forEach(x=> x.style.background='');
+      const rtype = a.dataset.type;
+      const gIdx = reportGroups.findIndex(g=> g.includes(rtype));
+      const el = document.getElementById(gIdx>=0 ? `io_group_${gIdx}` : `io_sec_${rtype}`);
+      el?.scrollIntoView({behavior:'smooth', block:'start'});
+      document.querySelectorAll('.report-anchor').forEach(x=> x.style.background='');
       a.style.background='#eff6ff';
       a.style.color='#3b82f6';
     });
@@ -419,78 +424,41 @@ function populateFilter(key, options){
   dd.innerHTML = html;
 }
 
-// ---------- Reports core ----------
-function initReportsPage(){
-  document.querySelectorAll('#io-group-tabs .dim-tab').forEach(tab=>{
-    tab.addEventListener('click', ()=>{
-      document.querySelectorAll('#io-group-tabs .dim-tab').forEach(t=> t.classList.remove('active'));
-      tab.classList.add('active');
-      currentGroup = tab.dataset.group;
-      refreshMeta().then(()=> loadAllReports());
-    });
-  });
-  document.querySelectorAll('#ioColDimTabs .btn').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      document.querySelectorAll('#ioColDimTabs .btn').forEach(x=> x.classList.remove('active'));
-      b.classList.add('active');
-      COL_DIM = b.dataset.coldim;
-      refreshMeta().then(()=> loadAllReports());
-    });
-  });
-
-  initSearchableSelect('lineCode');
-  initSearchableSelect('itemNo');
-  initSearchableSelect('style');
-
-  dimOrder = [];
-  allData = null;
-  renderDimWell();
-  initDragDrop();
-  refreshMeta().then(()=> loadAllReports());
-
-  const rb = document.getElementById('ioRefreshBtn');
-  if(rb) rb.addEventListener('click', loadAllReports);
-  const dlAll = document.getElementById('io-dl-all');
-  if(dlAll) dlAll.addEventListener('click', downloadAll);
-}
-
-function initDragDrop(){
+// ---------- Dim drag drop ----------
+function initDimDragDrop(){
   document.querySelectorAll('#io-report-section .dim-chip.available').forEach(chip=>{
     chip.addEventListener('dragstart', e=>{
       e.dataTransfer.setData('text/plain', chip.dataset.dim);
+      e.dataTransfer.setData('text/x-dim', '1');
       chip.classList.add('dragging');
     });
     chip.addEventListener('dragend', e=> chip.classList.remove('dragging'));
   });
   const well = document.getElementById('ioDimWell');
   if(well){
-    well.addEventListener('dragover', onDragOver);
-    well.addEventListener('drop', onDrop);
+    well.addEventListener('dragover', e=>{ if(e.dataTransfer.types.includes('text/x-dim')|| e.dataTransfer.getData('text/plain') in DIM_LABELS || true){ e.preventDefault(); well.classList.add('drag-over'); }});
     well.addEventListener('dragleave', ()=> well.classList.remove('drag-over'));
-  }
-}
-function onDragOver(e){ e.preventDefault(); const w=document.getElementById('ioDimWell'); if(w) w.classList.add('drag-over'); }
-document.addEventListener('dragend', ()=>{ const w=document.getElementById('ioDimWell'); if(w) w.classList.remove('drag-over'); dragFromDim=null; });
-function onDrop(e){
-  e.preventDefault();
-  const w=document.getElementById('ioDimWell'); if(w) w.classList.remove('drag-over');
-  const dim = e.dataTransfer.getData('text/plain');
-  if(!dim) return;
-  if(dragFromDim){
-    const fromIdx = dimOrder.indexOf(dragFromDim);
-    if(fromIdx<0) return;
-    dimOrder.splice(fromIdx,1);
-    const target = e.target.closest('.dim-chip.in-well');
-    if(target){
-      const toDim = target.dataset.dim;
-      const toIdx = dimOrder.indexOf(toDim);
-      if(toIdx>=0){ dimOrder.splice(toIdx,0,dim); }else{ dimOrder.push(dim); }
-    }else{ dimOrder.push(dim); }
-    dragFromDim=null;
-    renderDimWell();
-  }else if(!dimOrder.includes(dim)){
-    dimOrder.push(dim);
-    renderDimWell();
+    well.addEventListener('drop', e=>{
+      e.preventDefault(); well.classList.remove('drag-over');
+      if(e.dataTransfer.getData('text/x-report')) return; // ignore report chips
+      const dim = e.dataTransfer.getData('text/plain');
+      if(!dim || !DIM_LABELS[dim]) return;
+      if(dragFromDim){
+        const fromIdx = dimOrder.indexOf(dragFromDim);
+        if(fromIdx>=0) dimOrder.splice(fromIdx,1);
+        const target = e.target.closest('.dim-chip.in-well');
+        if(target){
+          const toDim = target.dataset.dim;
+          const toIdx = dimOrder.indexOf(toDim);
+          if(toIdx>=0) dimOrder.splice(toIdx,0,dim); else dimOrder.push(dim);
+        }else dimOrder.push(dim);
+        dragFromDim=null;
+        renderDimWell();
+      }else if(!dimOrder.includes(dim)){
+        dimOrder.push(dim);
+        renderDimWell();
+      }
+    });
   }
 }
 function removeDim(dim){ dimOrder = dimOrder.filter(d=> d!==dim); renderDimWell(); }
@@ -504,7 +472,7 @@ function renderDimWell(){
   }
   setTimeout(()=> loadAllReports(), 0);
 }
-function onWellChipDragStart(e,dim){ e.dataTransfer.setData('text/plain', dim); dragFromDim = dim; }
+function onWellChipDragStart(e,dim){ e.dataTransfer.setData('text/plain', dim); e.dataTransfer.setData('text/x-dim','1'); dragFromDim = dim; }
 window.ioOnWellChipDragStart = onWellChipDragStart;
 function getDimParam(){
   if(dimOrder.length===0) return '';
@@ -536,7 +504,7 @@ async function loadAllReports(){
     if(content) content.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8">Please drag row dimensions into the box above</div>';
     return;
   }
-  if(content) content.innerHTML = '<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading 9 tables...</div>';
+  if(content) content.innerHTML = '<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading reports...</div>';
   const groupParam = currentGroup === 'FG' ? '成品' : 'GB';
   const params = new URLSearchParams({group:groupParam, dim, col_dim:COL_DIM, line_code:filterVals.lineCode, item_no:filterVals.itemNo, style:filterVals.style});
   try{
@@ -549,46 +517,209 @@ async function loadAllReports(){
     if(content) content.innerHTML = `<div style="text-align:center;padding:24px;color:#dc2626">❌ Load failed: ${esc(e.message)}</div>`;
   }
 }
+
+// ---------- Merge logic ----------
+function initMergeDragDrop(){
+  const unassigned = document.getElementById('unassignedDrop');
+  if(unassigned){
+    unassigned.addEventListener('dragover', e=>{ if(draggedReport){ e.preventDefault(); unassigned.classList.add('drag-over'); }});
+    unassigned.addEventListener('dragleave', ()=> unassigned.classList.remove('drag-over'));
+    unassigned.addEventListener('drop', e=>{
+      e.preventDefault(); unassigned.classList.remove('drag-over');
+      if(!draggedReport) return;
+      const {type, fromGroup} = draggedReport;
+      // create new group for this type
+      const from = reportGroups[fromGroup];
+      if(from){
+        from.splice(from.indexOf(type),1);
+        if(from.length===0) reportGroups.splice(fromGroup,1);
+      }
+      reportGroups.push([type]);
+      draggedReport=null;
+      renderAllReports();
+    });
+  }
+}
+
+function handleReportDragStart(e){
+  const type = e.currentTarget.dataset.type;
+  const fromGroup = parseInt(e.currentTarget.dataset.group);
+  draggedReport = {type, fromGroup};
+  e.dataTransfer.setData('text/plain', type);
+  e.dataTransfer.setData('text/x-report', '1');
+  e.dataTransfer.effectAllowed='move';
+  e.currentTarget.classList.add('dragging');
+}
+function handleReportDragEnd(e){
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.merge-group').forEach(el=> el.classList.remove('drag-over'));
+  document.querySelectorAll('.unassigned-drop').forEach(el=> el.classList.remove('drag-over'));
+}
+function handleGroupDragOver(e){
+  if(!draggedReport) return;
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+function handleGroupDragLeave(e){
+  e.currentTarget.classList.remove('drag-over');
+}
+function handleGroupDrop(e, toGroupIdx){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if(!draggedReport) return;
+  const {type, fromGroup} = draggedReport;
+  if(fromGroup===toGroupIdx) { draggedReport=null; return; }
+  const from = reportGroups[fromGroup];
+  const to = reportGroups[toGroupIdx];
+  if(!from || !to) { draggedReport=null; return; }
+  // remove from old
+  const idx = from.indexOf(type);
+  if(idx>=0) from.splice(idx,1);
+  if(from.length===0){
+    // adjust indices: if we remove earlier group, toGroupIdx shifts
+    const removedBefore = fromGroup < toGroupIdx ? 1 : 0;
+    reportGroups.splice(fromGroup,1);
+    const newToIdx = toGroupIdx - removedBefore;
+    const target = reportGroups[newToIdx];
+    if(target && !target.includes(type)) target.push(type);
+  }else{
+    if(!to.includes(type)) to.push(type);
+  }
+  draggedReport=null;
+  renderAllReports();
+}
+window.ioHandleGroupDrop = handleGroupDrop;
+window.ioHandleGroupDragOver = handleGroupDragOver;
+window.ioHandleGroupDragLeave = handleGroupDragLeave;
+window.ioHandleReportDragStart = handleReportDragStart;
+window.ioHandleReportDragEnd = handleReportDragEnd;
+
+function splitReportType(groupIdx, type){
+  const g = reportGroups[groupIdx];
+  if(!g || g.length<=1) return;
+  const pos = g.indexOf(type);
+  if(pos>=0) g.splice(pos,1);
+  reportGroups.push([type]);
+  renderAllReports();
+}
+window.ioSplitType = splitReportType;
+
+// Merge helpers
+function mergeTypesData(types){
+  let columns = [];
+  let colSet = new Set();
+  // union columns preserving order of first occurrence
+  types.forEach(t=>{
+    const d = allData[t];
+    if(!d || !d.columns) return;
+    d.columns.forEach(c=>{ if(!colSet.has(c)){ colSet.add(c); columns.push(c); }});
+  });
+  let rows = [];
+  types.forEach(t=>{
+    const d = allData[t];
+    if(!d || !d.rows) return;
+    d.rows.forEach(r=>{
+      rows.push({ ...r, _REPORT_TYPE: REPORT_NAMES[t], _REPORT_KEY: t });
+    });
+  });
+  return { columns, rows };
+}
+
 function renderAllReports(){
   const content = document.getElementById('ioReportContent');
+  const countEl = document.getElementById('mergeGroupCount');
+  if(countEl) countEl.textContent = String(reportGroups.length);
   if(!content) return;
   if(!allData){ content.innerHTML = '<div style="text-align:center;padding:24px;color:#94a3b8">No data</div>'; return; }
+  // clean empty groups
+  reportGroups = reportGroups.filter(g=> g.length>0);
+  if(reportGroups.length===0) reportGroups = REPORTS.map(r=>[r]);
 
   let html = '';
-  REPORTS.forEach(rtype=>{
-    const data = allData[rtype];
-    const title = REPORT_NAMES[rtype] || rtype;
-    const fullTitle = REPORT_LABELS_FULL[rtype] || title;
-    html += `<div class="report-section" id="io_sec_${rtype}" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:16px">`;
-    html += `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #3b82f6;padding-bottom:6px;margin-bottom:8px"><h6 style="margin:0;font-size:13px;font-weight:700">${esc(fullTitle)}</h6><div style="display:flex;gap:8px;align-items:center"><span style="font-size:11px;color:#64748b">${data ? data.rows.length : 0} rows × ${data ? data.columns.length : 0} cols</span><button class="btn btn-sm btn-outline" onclick="window.ioDownloadExcel('${rtype}')">📥 Excel</button></div></div>`;
-    if(!data || !data.rows || data.rows.length===0){
-      html += '<div style="text-align:center;padding:20px;color:#94a3b8">No data for current filters</div>';
-    }else{
-      const dimParam = getDimParam();
-      if(dimParam==='detail' && dimOrder.length>=2){
-        html += buildHierarchicalTable(data, dimOrder);
+  reportGroups.forEach((groupTypes, gIdx)=>{
+    const isMerged = groupTypes.length > 1;
+    const titles = groupTypes.map(t=> REPORT_NAMES[t]).join(' + ');
+    const isDetail = getDimParam()==='detail' && dimOrder.length>=2;
+    let tableHTML = '';
+    let totalRows = 0;
+    let totalCols = 0;
+
+    if(isMerged){
+      const merged = mergeTypesData(groupTypes);
+      totalRows = merged.rows.length;
+      totalCols = merged.columns.length;
+      if(totalRows===0){
+        tableHTML = '<div style="text-align:center;padding:20px;color:#94a3b8">No data for current filters</div>';
       }else{
-        html += buildFlatTable(data, dimOrder[0] || 'ITEM_NO');
+        if(isDetail){
+          tableHTML = buildMergedHierarchicalTable(merged, dimOrder);
+        }else{
+          tableHTML = buildMergedFlatTable(merged, dimOrder[0] || 'ITEM_NO');
+        }
+      }
+    }else{
+      const rtype = groupTypes[0];
+      const data = allData[rtype];
+      totalRows = data ? data.rows.length : 0;
+      totalCols = data ? data.columns.length : 0;
+      if(!data || !data.rows || data.rows.length===0){
+        tableHTML = '<div style="text-align:center;padding:20px;color:#94a3b8">No data for current filters</div>';
+      }else{
+        const enriched = { columns: data.columns, rows: data.rows.map(r=> ({...r, _REPORT_TYPE: REPORT_NAMES[rtype], _REPORT_KEY: rtype})) };
+        if(isDetail){
+          tableHTML = isMerged ? buildMergedHierarchicalTable(enriched, dimOrder) : buildHierarchicalTable(enriched, dimOrder, rtype);
+        }else{
+          tableHTML = isMerged ? buildMergedFlatTable(enriched, dimOrder[0]||'ITEM_NO') : buildFlatTable(enriched, dimOrder[0]||'ITEM_NO', rtype);
+        }
       }
     }
-    html += '</div>';
+
+    const chips = groupTypes.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-group="${gIdx}" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])} <span class="remove" onclick="event.stopPropagation(); ioSplitType(${gIdx},'${t}')">×</span></span>`).join('');
+
+    html += `<div class="report-section merge-group ${isMerged?'merged':''}" id="io_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})">
+      <div class="group-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:2px solid ${isMerged?'#8b5cf6':'#3b82f6'};padding-bottom:6px;margin-bottom:8px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px">${chips}</div>
+          <div style="font-size:11px;color:#64748b">${esc(titles)} — ${totalRows} rows × ${totalCols} cols ${isMerged?'<span style="color:#8b5cf6;font-weight:600"> (Merged, Type column added)</span>':''}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+          ${isMerged
+            ? `<button class="btn btn-sm btn-outline" onclick="window.ioDownloadMerged(${gIdx})">📥 Excel</button>`
+            : `<button class="btn btn-sm btn-outline" onclick="window.ioDownloadExcel('${groupTypes[0]}')">📥 Excel</button>`
+          }
+        </div>
+      </div>
+      ${tableHTML}
+    </div>`;
   });
+
   content.innerHTML = html;
 }
 
-// ---------- Tables with divider + thick lines ----------
-function buildFlatTable(data, dim){
+// ---------- Tables ----------
+function buildFlatTable(data, dim, reportKey){
   const { columns, rows } = data;
   const dimLabel = DIM_LABELS[dim] || dim;
   const frozenW = 120;
-  const dividerLeft = frozenW;
+  const typeW = 110;
+  const isEnriched = rows.length>0 && rows[0]._REPORT_KEY;
+  // For single table, we show Type as first column only if we want colors? But requirement is Type column for merged only.
+  // For single, we still add type class for coloring but not show Type column (or show as badge?). We'll hide Type column for single to keep familiar, but row colors by type.
+  const showTypeCol = false;
+
+  const dividerLeft = showTypeCol ? typeW+frozenW : frozenW;
   const lastCol = columns[columns.length-1];
   let total=0, nz=0;
   rows.forEach(r=>{ const v=r[lastCol]||0; total+=v; if(v>0) nz++; });
 
   let html = `<div class="stat-row"><strong>${rows.length}</strong> rows &nbsp; <strong>${columns.length}</strong> cols &nbsp; Last col total: <strong>${total.toLocaleString()}</strong> &nbsp; Non-zero: <strong>${nz}</strong></div>`;
   html += '<div class="table-wrapper"><table><thead><tr>';
-  html += `<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
+  if(showTypeCol){
+    html += `<th class="frozen" style="left:0;min-width:${typeW}px;z-index:16">Type</th>`;
+    html += `<th class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
+  }else{
+    html += `<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
+  }
   html += `<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{
     const p=c.split('_');
@@ -600,9 +731,15 @@ function buildFlatTable(data, dim){
     const curVal=r[dim];
     const isNewGroup = prevVal!==null && prevVal!==curVal;
     prevVal=curVal;
-    const rowCls = isNewGroup ? 'row-new-group' : '';
+    const rKey = r._REPORT_KEY || reportKey || '';
+    const rowCls = `row-${rKey} ${isNewGroup ? 'row-new-group' : ''}`;
     html += `<tr class="${rowCls}">`;
-    html += `<td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:#fff">${esc(String(r[dim]??''))}</td>`;
+    if(showTypeCol){
+      html += `<td class="frozen" style="left:0;min-width:${typeW}px;z-index:5"><span class="type-badge type-${rKey}">${esc(r._REPORT_TYPE||'')}</span></td>`;
+      html += `<td class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
+    }else{
+      html += `<td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
+    }
     html += `<td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
     columns.forEach(c=>{
       const v=r[c];
@@ -615,7 +752,54 @@ function buildFlatTable(data, dim){
   return html;
 }
 
-function buildHierarchicalTable(data, dimOrder){
+function buildMergedFlatTable(data, dim){
+  const { columns, rows } = data;
+  const dimLabel = DIM_LABELS[dim] || dim;
+  const typeW = 130;
+  const frozenW = 120;
+  const dividerLeft = typeW+frozenW;
+
+  let html = `<div class="stat-row"><strong>${rows.length}</strong> rows (merged) &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong></div>`;
+  html += '<div class="table-wrapper"><table><thead><tr>';
+  html += `<th class="frozen" style="left:0;min-width:${typeW}px;z-index:16">Type</th>`;
+  html += `<th class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
+  html += `<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
+  columns.forEach(c=>{
+    const p=c.split('_');
+    html += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  // sort by Type then dim
+  const sorted = [...rows].sort((a,b)=>{
+    if(a._REPORT_KEY < b._REPORT_KEY) return -1;
+    if(a._REPORT_KEY > b._REPORT_KEY) return 1;
+    const av = a[dim]||'', bv = b[dim]||'';
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  });
+  let prevType=null, prevVal=null;
+  sorted.forEach((r)=>{
+    const curType=r._REPORT_KEY;
+    const curVal=r[dim];
+    const isNewType = prevType!==null && prevType!==curType;
+    const isNewVal = !isNewType && prevVal!==null && prevVal!==curVal;
+    const isNewGroup = isNewType || isNewVal;
+    prevType=curType; prevVal=curVal;
+    const rowCls = `row-${curType} ${isNewGroup ? 'row-new-group' : ''}`;
+    html += `<tr class="${rowCls}">`;
+    html += `<td class="frozen" style="left:0;min-width:${typeW}px;z-index:5"><span class="type-badge type-${curType}">${esc(r._REPORT_TYPE||'')}</span></td>`;
+    html += `<td class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
+    html += `<td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+    columns.forEach(c=>{
+      const v=r[c];
+      html += `<td class="num ${v>0?'num-pos':v===0?'num-zero':''}">${v!=null ? Number(v).toLocaleString() : ''}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function buildHierarchicalTable(data, dimOrder, reportKey){
   const { columns, rows } = data;
   const nDims = dimOrder.length;
   const frozenW = 120;
@@ -654,11 +838,10 @@ function buildHierarchicalTable(data, dimOrder){
     nodes.forEach((node, idx)=>{
       path[depth]=idx;
       const pid = uidBase+'_'+path.slice(0,depth+1).join('_');
-      const isNewGroup = true; // each group gets thick line
-
       if(depth===nDims-1){
         const agg = sumRows(node.allRows);
-        h += `<tr class="agg-row row-new-group">`;
+        const sampleKey = node.allRows[0]?._REPORT_KEY || reportKey || '';
+        h += `<tr class="agg-row row-new-group row-${sampleKey}">`;
         for(let d=0; d<nDims; d++){
           const left = d*frozenW;
           const val = d<depth ? '' : node.key;
@@ -670,7 +853,8 @@ function buildHierarchicalTable(data, dimOrder){
       }else{
         const aggregated = node.items.flatMap(n=> n.allRows || []);
         const agg = sumRows(aggregated);
-        h += `<tr class="hierarchy-row agg-row row-new-group" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
+        const sampleKey = aggregated[0]?._REPORT_KEY || reportKey || '';
+        h += `<tr class="hierarchy-row agg-row row-new-group row-${sampleKey}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
         for(let d=0; d<nDims; d++){
           const left = d*frozenW;
           if(d===depth){
@@ -696,6 +880,128 @@ function buildHierarchicalTable(data, dimOrder){
   for(let d=0; d<nDims; d++){
     const left = d*frozenW;
     h += d===0 ? `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><strong>Total</strong></td>` : `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
+  }
+  h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+  columns.forEach(c=>{ h+= `<td class="num"><strong>${Number(grandTotal[c]).toLocaleString()}</strong></td>`; });
+  h += '</tr></tbody></table></div>';
+  return h;
+}
+
+function buildMergedHierarchicalTable(data, dimOrder){
+  const { columns, rows } = data;
+  // effective dims: Type + dimOrder
+  const effDims = ['_REPORT_TYPE', ...dimOrder];
+  const nDims = effDims.length;
+  const frozenW = 120;
+  const typeW = 130;
+  // compute left offsets: first is Type 130, rest 120
+  const lefts = [];
+  let curL = 0;
+  effDims.forEach((_, i)=>{
+    lefts.push(curL);
+    curL += (i===0? typeW : frozenW);
+  });
+  const divLeft = curL;
+
+  function groupRows(items, depth){
+    if(depth>=nDims) return items.map(r=> ({ key:null, items:[], allRows:[r] }));
+    const dim = effDims[depth];
+    const groups = {};
+    items.forEach(r=>{ const k = r[dim]||'(blank)'; if(!groups[k]) groups[k]=[]; groups[k].push(r); });
+    // sort: for Type, use REPORTS order
+    const keys = Object.keys(groups);
+    if(depth===0){
+      keys.sort((a,b)=>{
+        const ia = REPORTS.findIndex(t=> REPORT_NAMES[t]===a);
+        const ib = REPORTS.findIndex(t=> REPORT_NAMES[t]===b);
+        return ia-ib;
+      });
+    }else{
+      keys.sort();
+    }
+    return keys.map(k=> ({ key:k, items: groupRows(groups[k], depth+1), allRows: groups[k], repKey: groups[k][0]?._REPORT_KEY||'' }));
+  }
+  const tree = groupRows(rows, 0);
+  function sumRows(arr){
+    const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s;
+  }
+  const grandTotal = sumRows(rows);
+
+  let h = `<div class="stat-row"><strong>${rows.length}</strong> detail rows merged &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: ${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</div>`;
+  h += '<div class="table-wrapper"><table><thead><tr>';
+  effDims.forEach((d,i)=>{
+    const btn = i < nDims-1 ? `<span class="expand-btn" onclick="window.ioExpandLevel(event,${i})" title="Expand/Collapse all">⊞</span>` : '';
+    const left = lefts[i];
+    const w = i===0? typeW : frozenW;
+    const label = d==='_REPORT_TYPE' ? 'Type' : (DIM_LABELS[d]||d);
+    h += `<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)} ${btn}</th>`;
+  });
+  h += `<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
+  columns.forEach(c=>{
+    const p=c.split('_');
+    h += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
+  });
+  h += '</tr></thead><tbody>';
+
+  let path=[];
+  const uidBase = Date.now();
+  function renderTree(nodes, depth){
+    nodes.forEach((node, idx)=>{
+      path[depth]=idx;
+      const pid = uidBase+'_'+path.slice(0,depth+1).join('_');
+      const rk = node.repKey || node.allRows[0]?._REPORT_KEY || '';
+      if(depth===nDims-1){
+        const agg = sumRows(node.allRows);
+        h += `<tr class="agg-row row-new-group row-${rk}">`;
+        for(let d=0; d<nDims; d++){
+          const left = lefts[d];
+          const val = d<depth ? '' : node.key;
+          if(d===0){
+            const badge = `<span class="type-badge type-${rk}">${esc(val)}</span>`;
+            h += `<td class="frozen" style="left:${left}px;min-width:${typeW}px;z-index:5">${badge}</td>`;
+          }else{
+            h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(val)}</td>`;
+          }
+        }
+        h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ h+= `<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        h += '</tr>';
+      }else{
+        const aggregated = node.items.flatMap(n=> n.allRows || []);
+        const agg = sumRows(aggregated);
+        const repKey = aggregated[0]?._REPORT_KEY || rk || '';
+        h += `<tr class="hierarchy-row agg-row row-new-group row-${repKey}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
+        for(let d=0; d<nDims; d++){
+          const left = lefts[d];
+          const w = d===0? typeW : frozenW;
+          if(d===depth){
+            if(d===0){
+              h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span><span class="type-badge type-${repKey}">${esc(node.key)}</span></td>`;
+            }else{
+              h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`;
+            }
+          }else if(d===depth+1){
+            h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5">${node.items.length} items</td>`;
+          }else{
+            h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
+          }
+        }
+        h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ h+= `<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        h += '</tr>';
+        h += `<tbody id="children_${pid}" data-parent="${pid}" style="display:none">`;
+        renderTree(node.items, depth+1);
+        h += '</tbody>';
+      }
+    });
+  }
+  renderTree(tree,0);
+
+  h += '<tr class="total-row">';
+  for(let d=0; d<nDims; d++){
+    const left = lefts[d];
+    const w = d===0? typeW : frozenW;
+    h += d===0 ? `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><strong>Total</strong></td>` : `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
   }
   h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
   columns.forEach(c=>{ h+= `<td class="num"><strong>${Number(grandTotal[c]).toLocaleString()}</strong></td>`; });
@@ -761,35 +1067,72 @@ function downloadExcel(type){
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     XLSX.utils.book_append_sheet(wb, ws, type.slice(0,31));
     XLSX.writeFile(wb, `${REPORT_NAMES[type]||type}.xlsx`);
-  }else{
-    let csv = '\uFEFF' + wsData[0].join(',') + '\n';
-    wsData.slice(1).forEach(r=>{ csv += r.map(v=> `"${String(v).replace(/"/g,'""')}"`).join(',') + '\n'; });
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`${type}.csv`; a.click(); URL.revokeObjectURL(a.href);
   }
 }
 window.ioDownloadExcel = downloadExcel;
+
+function downloadMerged(gIdx){
+  const groupTypes = reportGroups[gIdx];
+  if(!groupTypes || groupTypes.length===0) return;
+  const merged = mergeTypesData(groupTypes);
+  if(!merged.rows.length) return;
+  const dim = getDimParam();
+  const isDetail = dim==='detail' && dimOrder.length>=2;
+  let headers;
+  if(isDetail){
+    headers = ['Type', ...dimOrder.map(d=> DIM_LABELS[d]||d)];
+  }else{
+    headers = ['Type', DIM_LABELS[dim]||dim];
+  }
+  const wsData = [];
+  wsData.push([...headers, ...merged.columns]);
+  const sorted = [...merged.rows].sort((a,b)=>{
+    if(a._REPORT_KEY < b._REPORT_KEY) return -1;
+    if(a._REPORT_KEY > b._REPORT_KEY) return 1;
+    return 0;
+  });
+  sorted.forEach(row=>{
+    const r=[];
+    r.push(row._REPORT_TYPE||'');
+    if(isDetail){
+      dimOrder.forEach(d=> r.push(row[d]||''));
+    }else{
+      r.push(row[dim]??'');
+    }
+    merged.columns.forEach(c=> r.push(row[c]??0));
+    wsData.push(r);
+  });
+  if(window.XLSX){
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const name = groupTypes.map(t=> REPORT_NAMES[t]).join('_').slice(0,31);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+    XLSX.writeFile(wb, `${name}.xlsx`);
+  }
+}
+window.ioDownloadMerged = downloadMerged;
 
 function downloadAll(){
   if(!allData) return;
   if(!window.XLSX){ alert('XLSX library not loaded'); return; }
   const wb = XLSX.utils.book_new();
-  REPORTS.forEach(rtype=>{
-    const data = allData[rtype];
-    if(!data || !data.rows.length) return;
+  reportGroups.forEach((groupTypes,gIdx)=>{
+    const merged = mergeTypesData(groupTypes);
+    if(!merged.rows.length) return;
     const dim = getDimParam();
-    const headers = dim==='detail' ? dimOrder : [dimOrder[0] || 'ITEM_NO'];
+    const isDetail = dim==='detail' && dimOrder.length>=2;
+    let headers = isDetail ? ['Type', ...dimOrder.map(d=> DIM_LABELS[d]||d)] : ['Type', DIM_LABELS[dim]||dim];
     const wsData = [];
-    wsData.push([...headers.map(h=> DIM_LABELS[h]||h), ...data.columns]);
-    data.rows.forEach(row=>{
-      const r=[];
-      if(dim==='detail'){ headers.forEach(h=> r.push(row[h]||'')); }
-      else{ r.push(row[dimOrder[0]]??''); }
-      data.columns.forEach(c=> r.push(row[c]??0));
+    wsData.push([...headers, ...merged.columns]);
+    merged.rows.forEach(row=>{
+      const r=[row._REPORT_TYPE||''];
+      if(isDetail){ dimOrder.forEach(d=> r.push(row[d]||'')); } else { r.push(row[dim]??''); }
+      merged.columns.forEach(c=> r.push(row[c]??0));
       wsData.push(r);
     });
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, rtype.slice(0,31));
+    const name = groupTypes.map(t=> REPORT_NAMES[t]).join('+').slice(0,31) || `Group${gIdx+1}`;
+    XLSX.utils.book_append_sheet(wb, ws, name);
   });
   XLSX.writeFile(wb, `IO_Report_${currentGroup}_${COL_DIM}.xlsx`);
 }
