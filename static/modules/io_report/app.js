@@ -302,8 +302,9 @@ function renderReportsPage(){
       </div>
 
       <div class="merge-info" style="margin-top:12px;padding:8px 12px;background:#f0f9ff;border:1px dashed #93c5fd;border-radius:6px;font-size:11px;color:#334155;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <span>💡 <strong>Merge:</strong> drag a report type chip to another card to combine tables. Merged table adds <code>Type</code> column & colors rows by type.</span>
+        <span>💡 <strong>Merge:</strong> drag芯片到另一卡片合并为一张表（多合一），合并表新增 <code>Type</code> 列并按类型着色。支持同时存在多个合并组，例如 Group1=Daily+Cum Input，Group2=Daily+Cum Output。</span>
         <span style="color:#64748b">Groups: <span id="mergeGroupCount">9</span></span>
+        <button id="addEmptyGroupBtn" class="btn btn-sm btn-outline" style="padding:2px 8px;font-size:11px">➕ Add Empty Group</button>
       </div>
 
       <div class="container-fluid" style="padding:0;margin-top:12px">
@@ -312,8 +313,9 @@ function renderReportsPage(){
             <div class="io-sidebar" style="position:sticky;top:70px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
               <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:8px;text-transform:uppercase">Report Types (9)</div>
               ${REPORTS.map((r,i)=> `<a class="anchor report-anchor" href="#" data-type="${r}" style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:4px;font-size:12px;color:#334155;text-decoration:none;margin-bottom:2px;cursor:pointer"><span class="type-dot dot-${r}" style="width:8px;height:8px;border-radius:50%;display:inline-block"></span>${i+1}. ${esc(REPORT_NAMES[r])}</a>`).join('')}
-              <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:10px;color:#94a3b8">Click to jump to group. Drag chips in tables to merge.</div>
-              <div id="unassignedDrop" class="unassigned-drop" style="margin-top:12px;border:2px dashed #cbd5e1;border-radius:6px;padding:8px;text-align:center;font-size:11px;color:#94a3b8">Drop here to create new separate group</div>
+              <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:10px;color:#94a3b8">Click to jump. Drag chips to merge.<br>支持多组合并：可同时存在 Group1=Daily+Cum Input, Group2=Output+BOH 等。</div>
+              <div id="unassignedDrop" class="unassigned-drop" style="margin-top:12px;border:2px dashed #cbd5e1;border-radius:6px;padding:8px;text-align:center;font-size:11px;color:#94a3b8">Drop here to split into separate group</div>
+              <div id="newMergedDrop" class="unassigned-drop" style="margin-top:8px;border:2px dashed #8b5cf6;border-radius:6px;padding:8px;text-align:center;font-size:11px;color:#6d28d9;background:#faf5ff">➕ Drop here to create NEW merged group<br><small style="font-size:10px;color:#94a3b8">拖入多个类型自动合并</small></div>
             </div>
           </div>
           <div class="col-11" style="flex:1;min-width:0">
@@ -363,7 +365,9 @@ function initReportsPage(){
   const dlAll = document.getElementById('io-dl-all');
   if(dlAll) dlAll.addEventListener('click', downloadAll);
   const resetBtn = document.getElementById('io-reset-groups');
-  if(resetBtn) resetBtn.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); renderAllReports(); });
+  if(resetBtn) resetBtn.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); pendingNewGroup = []; renderAllReports(); });
+  const addEmptyBtn = document.getElementById('addEmptyGroupBtn');
+  if(addEmptyBtn) addEmptyBtn.addEventListener('click', ()=>{ addEmptyGroup(); });
 
   // sidebar anchor jump - now jumps to group containing type
   document.querySelectorAll('.report-anchor').forEach(a=>{
@@ -518,7 +522,9 @@ async function loadAllReports(){
   }
 }
 
-// ---------- Merge logic ----------
+// ---------- Merge logic - supports multiple merged groups ----------
+let pendingNewGroup = []; // for creating new merged group via drop zone
+
 function initMergeDragDrop(){
   const unassigned = document.getElementById('unassignedDrop');
   if(unassigned){
@@ -528,10 +534,10 @@ function initMergeDragDrop(){
       e.preventDefault(); unassigned.classList.remove('drag-over');
       if(!draggedReport) return;
       const {type, fromGroup} = draggedReport;
-      // create new group for this type
       const from = reportGroups[fromGroup];
       if(from){
-        from.splice(from.indexOf(type),1);
+        const idx = from.indexOf(type);
+        if(idx>=0) from.splice(idx,1);
         if(from.length===0) reportGroups.splice(fromGroup,1);
       }
       reportGroups.push([type]);
@@ -539,12 +545,43 @@ function initMergeDragDrop(){
       renderAllReports();
     });
   }
+  const newMerged = document.getElementById('newMergedDrop');
+  if(newMerged){
+    newMerged.addEventListener('dragover', e=>{ if(draggedReport){ e.preventDefault(); newMerged.classList.add('drag-over'); }});
+    newMerged.addEventListener('dragleave', ()=> newMerged.classList.remove('drag-over'));
+    newMerged.addEventListener('drop', e=>{
+      e.preventDefault(); newMerged.classList.remove('drag-over');
+      if(!draggedReport) return;
+      const {type, fromGroup} = draggedReport;
+      const from = reportGroups[fromGroup];
+      if(from){
+        const idx = from.indexOf(type);
+        if(idx>=0) from.splice(idx,1);
+        if(from.length===0) reportGroups.splice(fromGroup,1);
+      }
+      // accumulate into pendingNewGroup
+      if(!pendingNewGroup.includes(type)) pendingNewGroup.push(type);
+      draggedReport=null;
+      renderAllReports();
+    });
+  }
 }
+
+function addEmptyGroup(){
+  reportGroups.push([]);
+  renderAllReports();
+}
+window.ioAddEmptyGroup = addEmptyGroup;
 
 function handleReportDragStart(e){
   const type = e.currentTarget.dataset.type;
-  const fromGroup = parseInt(e.currentTarget.dataset.group);
-  draggedReport = {type, fromGroup};
+  const fromGroup = e.currentTarget.dataset.group ? parseInt(e.currentTarget.dataset.group) : -1;
+  // if from pending group
+  if(e.currentTarget.dataset.pending){
+    draggedReport = {type, fromGroup: -2, fromPending: true};
+  }else{
+    draggedReport = {type, fromGroup};
+  }
   e.dataTransfer.setData('text/plain', type);
   e.dataTransfer.setData('text/x-report', '1');
   e.dataTransfer.effectAllowed='move';
@@ -567,23 +604,30 @@ function handleGroupDrop(e, toGroupIdx){
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
   if(!draggedReport) return;
-  const {type, fromGroup} = draggedReport;
-  if(fromGroup===toGroupIdx) { draggedReport=null; return; }
-  const from = reportGroups[fromGroup];
-  const to = reportGroups[toGroupIdx];
-  if(!from || !to) { draggedReport=null; return; }
-  // remove from old
-  const idx = from.indexOf(type);
-  if(idx>=0) from.splice(idx,1);
-  if(from.length===0){
-    // adjust indices: if we remove earlier group, toGroupIdx shifts
-    const removedBefore = fromGroup < toGroupIdx ? 1 : 0;
-    reportGroups.splice(fromGroup,1);
-    const newToIdx = toGroupIdx - removedBefore;
-    const target = reportGroups[newToIdx];
-    if(target && !target.includes(type)) target.push(type);
+  const {type, fromGroup, fromPending} = draggedReport;
+  if(!fromPending && fromGroup===toGroupIdx) { draggedReport=null; return; }
+
+  if(fromPending){
+    // from pending new group to existing group
+    const idx = pendingNewGroup.indexOf(type);
+    if(idx>=0) pendingNewGroup.splice(idx,1);
+    const to = reportGroups[toGroupIdx];
+    if(to && !to.includes(type)) to.push(type);
   }else{
-    if(!to.includes(type)) to.push(type);
+    const from = reportGroups[fromGroup];
+    const to = reportGroups[toGroupIdx];
+    if(!from || !to) { draggedReport=null; return; }
+    const idx = from.indexOf(type);
+    if(idx>=0) from.splice(idx,1);
+    if(from.length===0){
+      const removedBefore = fromGroup < toGroupIdx ? 1 : 0;
+      reportGroups.splice(fromGroup,1);
+      const newToIdx = toGroupIdx - removedBefore;
+      const target = reportGroups[newToIdx];
+      if(target && !target.includes(type)) target.push(type);
+    }else{
+      if(!to.includes(type)) to.push(type);
+    }
   }
   draggedReport=null;
   renderAllReports();
@@ -596,13 +640,40 @@ window.ioHandleReportDragEnd = handleReportDragEnd;
 
 function splitReportType(groupIdx, type){
   const g = reportGroups[groupIdx];
-  if(!g || g.length<=1) return;
+  if(!g) return;
   const pos = g.indexOf(type);
   if(pos>=0) g.splice(pos,1);
+  if(g.length===0){
+    reportGroups.splice(groupIdx,1);
+  }
   reportGroups.push([type]);
   renderAllReports();
 }
 window.ioSplitType = splitReportType;
+
+function removePendingType(type){
+  const idx = pendingNewGroup.indexOf(type);
+  if(idx>=0) pendingNewGroup.splice(idx,1);
+  renderAllReports();
+}
+window.ioRemovePendingType = removePendingType;
+
+function confirmPendingGroup(){
+  if(pendingNewGroup.length>0){
+    reportGroups.push([...pendingNewGroup]);
+    pendingNewGroup = [];
+    renderAllReports();
+  }
+}
+window.ioConfirmPendingGroup = confirmPendingGroup;
+
+function clearPendingGroup(){
+  // return types to separate groups
+  pendingNewGroup.forEach(t=> reportGroups.push([t]));
+  pendingNewGroup = [];
+  renderAllReports();
+}
+window.ioClearPendingGroup = clearPendingGroup;
 
 // Merge helpers
 function mergeTypesData(types){
@@ -628,15 +699,39 @@ function mergeTypesData(types){
 function renderAllReports(){
   const content = document.getElementById('ioReportContent');
   const countEl = document.getElementById('mergeGroupCount');
-  if(countEl) countEl.textContent = String(reportGroups.length);
   if(!content) return;
   if(!allData){ content.innerHTML = '<div style="text-align:center;padding:24px;color:#94a3b8">No data</div>'; return; }
-  // clean empty groups
-  reportGroups = reportGroups.filter(g=> g.length>0);
+  // keep empty groups for UX, but ensure at least one group
   if(reportGroups.length===0) reportGroups = REPORTS.map(r=>[r]);
+  // count display: include pending as half?
+  if(countEl) countEl.textContent = String(reportGroups.filter(g=>g.length>0).length + (pendingNewGroup.length>0?1:0));
 
   let html = '';
+
+  // render pending new merged group on top if exists
+  if(pendingNewGroup.length>0){
+    html += `<div class="report-section merge-group merged pending" id="io_group_pending" style="border-color:#8b5cf6;background:#faf5ff" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="event.preventDefault(); if(!draggedReport) return; const {type,fromGroup,fromPending}=draggedReport; if(fromPending){ const idx=pendingNewGroup.indexOf(type); if(idx>=0) pendingNewGroup.splice(idx,1); }else{ const from=reportGroups[fromGroup]; if(from){ const i=from.indexOf(type); if(i>=0) from.splice(i,1); if(from.length===0) reportGroups.splice(fromGroup,1); } } if(!pendingNewGroup.includes(type)) pendingNewGroup.push(type); draggedReport=null; renderAllReports();">
+      <div class="group-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:2px dashed #8b5cf6;padding-bottom:6px;margin-bottom:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+          <span style="font-size:11px;font-weight:700;color:#6d28d9">🆕 NEW GROUP (${pendingNewGroup.length} types):</span>
+          ${pendingNewGroup.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-pending="1" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])} <span class="remove" onclick="event.stopPropagation(); ioRemovePendingType('${t}')">×</span></span>`).join('')}
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="ioConfirmPendingGroup()">✓ Confirm</button>
+          <button class="btn btn-sm btn-outline" onclick="ioClearPendingGroup()">✕ Cancel</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#64748b">Will be <strong>${pendingNewGroup.map(t=>REPORT_NAMES[t]).join(' + ')}</strong> ${pendingNewGroup.length>1?'(merged with Type column)':''}</div>
+    </div>`;
+  }
   reportGroups.forEach((groupTypes, gIdx)=>{
+    if(!groupTypes || groupTypes.length===0){
+      html += `<div class="report-section merge-group empty" id="io_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" style="border:2px dashed #cbd5e1;background:#f8fafc">
+        <div style="text-align:center;padding:20px;color:#94a3b8">📭 Empty Group ${gIdx+1} — Drop report type chips here to create ${'<strong>multiple merged groups</strong>同时共存'}<br><small>可拖入多个类型形成合并表，例如 Daily+Cum Input 为一组，Daily+Cum Output 为另一组</small></div>
+        <div style="text-align:center;margin-top:8px"><button class="btn btn-sm btn-outline" onclick="reportGroups.splice(${gIdx},1); renderAllReports();">✕ Remove Empty Group</button></div>
+      </div>`;
+      return;
+    }
     const isMerged = groupTypes.length > 1;
     const titles = groupTypes.map(t=> REPORT_NAMES[t]).join(' + ');
     const isDetail = getDimParam()==='detail' && dimOrder.length>=2;
