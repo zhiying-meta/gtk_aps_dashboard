@@ -1,13 +1,43 @@
 import os
+import sys
 from flask import Flask, send_from_directory
 
+
+def _get_base_path():
+    """Return base path, handles PyInstaller frozen env."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _get_static_dir():
+    base = _get_base_path()
+    cand = os.path.join(base, 'static')
+    if os.path.isdir(cand):
+        return cand
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
+
+
 def create_app():
-    static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static')
-    app = Flask(__name__, static_folder=static_dir, static_url_path='/static')
-    app.config.from_object('app.config')
+    static_dir = _get_static_dir()
+    app = Flask(__name__, static_folder=static_dir, static_url_path="/static")
+    app.config.from_object("app.config")
+
+    # Ensure upload folder exists
+    try:
+        os.makedirs(app.config.get("UPLOAD_FOLDER", "uploads"), exist_ok=True)
+    except Exception:
+        pass
 
     from app.modules.plan_merge import plan_merge_bp
     app.register_blueprint(plan_merge_bp)
+
+    # Optional io_report module if present (feat/io-report branch)
+    try:
+        from app.modules.io_report.routes import io_bp
+        app.register_blueprint(io_bp)
+    except Exception:
+        pass
 
     @app.after_request
     def no_cache(resp):

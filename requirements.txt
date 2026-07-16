@@ -1,3 +1,7 @@
 flask>=3.0
 openpyxl>=3.1
 requests>=2.31
+waitress>=2.1
+# Optional for desktop app packaging:
+# pyinstaller>=6.0
+# pywebview>=5.0  # for native window instead of browser

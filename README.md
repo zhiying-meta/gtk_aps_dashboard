@@ -4,10 +4,11 @@ Upload production plan data → Configure Cut Day → Auto-generate comparison r
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10+ (for dev mode)
 - macOS / Linux / Windows
+- For end users without Python: use pre-built desktop app (see Desktop App section)
 
-## Quick Start
+## Quick Start (Dev)
 
 ```bash
 # 1. Clone or download
@@ -20,9 +21,76 @@ cd gtk-result-table
 # 3. Manual start
 pip install -r requirements.txt
 python run.py
+
+# 4. Desktop mode (dev, with auto-browser + status window)
+python desktop_app.py
 ```
 
 Visit **http://localhost:8502** (configurable via `PORT` env var or `app/config.py`)
+
+## Desktop App (No Python Required)
+
+If your colleague has Python environment issues, build a standalone executable:
+
+### Option A: One-click build scripts
+
+```bash
+# macOS / Linux
+chmod +x build_app.sh
+./build_app.sh              # one-folder mode (recommended, fast)
+./build_app.sh --onefile    # single exe file (slower startup)
+./build_app.sh --webview    # native window (needs pywebview)
+
+# Windows
+build_app.bat
+build_app.bat --onefile
+```
+
+Output:
+- `dist/ProductionPlanReview/` (folder) - zip and send
+- `dist/ProductionPlanReview.exe` (Windows) or `ProductionPlanReview` (macOS/Linux) for one-file mode
+
+Double-click the exe/app to run - it will:
+1. Find free port (8502+)
+2. Start server in background
+3. Open browser automatically
+4. Show status window (Tkinter) with Quit button
+
+### Option B: Manual PyInstaller
+
+```bash
+pip install pyinstaller waitress
+python build.py                    # one-folder
+python build.py --onefile          # one-file
+python build.py --onefile --windowed --with-webview  # native window, no console
+```
+
+### Option C: Native window (pywebview)
+
+For a true desktop feel (no external browser):
+
+```bash
+pip install pywebview
+python desktop_app.py  # will auto-detect pywebview and open native window
+# To bundle:
+python build.py --with-webview --windowed
+```
+
+With pywebview installed, the app opens a 1280x860 native window with the report inside, no browser needed.
+
+### Distributing
+
+- **One-folder**: Zip `dist/ProductionPlanReview` and send. Colleague unzips and double-clicks `ProductionPlanReview` / `ProductionPlanReview.exe`
+- **One-file**: Send single `ProductionPlanReview` / `.exe` directly (larger, slower startup ~2-3s)
+- Upload folder when frozen is stored in `~/.production_plan_review/uploads` (writable) or system temp, so no permission issues
+- No Python, no pip, no terminal needed for end user
+
+### Troubleshooting Desktop App
+
+- **Port in use**: App auto-tries 8502-8522
+- **Antivirus false positive** (Windows): One-file exe may trigger due to PyInstaller - use one-folder mode or add exception
+- **macOS Gatekeeper**: Right-click → Open to bypass unsigned warning, or codesign: `codesign --deep --force --sign - dist/ProductionPlanReview.app`
+- If browser doesn't open, check console / status window shows URL, manually open `http://127.0.0.1:8502`
 
 ## Usage
 
@@ -71,28 +139,31 @@ Click **📋 sheet_name** in the UI to view field descriptions.
 ```
 gtk-result-table/
 ├── app/
-│   ├── __init__.py              # Flask factory + root route
-│   ├── config.py                # PORT, UPLOAD_FOLDER
+│   ├── __init__.py              # Flask factory (PyInstaller compatible)
+│   ├── config.py                # PORT, UPLOAD_FOLDER (writable when frozen)
 │   └── modules/plan_merge/      # Plan merge blueprint
 │       ├── __init__.py           # Blueprint registration
 │       ├── routes.py             # API endpoints
-│       ├── engine.py             # Data processing + Excel generation
+│       ├── engine.py             # Data processing + Excel + ETD offset logic
 │       ├── utils.py              # XLSX parsing helpers
-│       ├── config.py             # Default cut-day values
+│       ├── config.py             # Default cut-day + offset values
 │       └── templates/            # Download templates + demo
 ├── static/
 │   ├── global/                   # Global HTML/CSS/JS
-│   │   ├── index.html           # Single-page application
+│   │   ├── index.html           # SPA + nav categories (Multiple/Single)
 │   │   ├── style.css            # Layout, sidebar
-│   │   └── app.js               # Sidebar toggle
+│   │   └── app.js               # Sidebar toggle + module switch
 │   └── modules/plan_merge/
-│       ├── app.js               # Main frontend logic
+│       ├── app.js               # Main logic + ETD offset param + expand fix
 │       └── style.css            # Table, filters, modals, pivot
-├── uploads/                     # Temp upload directory
+├── uploads/                     # Temp upload dir (dev) – frozen uses ~/.production_plan_review/uploads
+├── desktop_app.py               # Desktop entry: auto port, browser, Tkinter/pywebview
+├── ProductionPlanReview.spec    # PyInstaller spec (one-folder)
+├── build.py                     # Build script (pyinstaller wrapper)
+├── build_app.sh / .bat          # One-click build for macOS/Linux/Windows
 ├── requirements.txt
-├── run.sh                       # macOS/Linux launcher
-├── run.bat                      # Windows launcher
-└── run.py                       # Entry point
+├── run.sh / run.bat             # Dev launchers (auto-install Python)
+└── run.py                       # Dev entry point
 ```
 
 ## Business Logic
@@ -100,7 +171,9 @@ gtk-result-table/
 | Module | Source | Algorithm |
 |--------|--------|-----------|
 | **ExF** | forecast sheet | Weekly values aligned to ExF Cut Day (Saturday) |
-| **ETD** | plan_output (daily) | Aggregate to Cut Day weeks → `FLOOR(CumSum / Pallet_Qty) * Pallet_Qty` |
+| **ETD** | plan_output (daily) | `ETD(D)=PackoutCum(D-n)` where `n=ETD Packout Offset` (default 2) → Aggregate to Cut Day weeks → `FLOOR(CumSum / Pallet_Qty) * Pallet_Qty` . e.g. Sat ETD uses Thu Packout cum |
 | **Packout** | plan_output (daily) | Aggregate to Cut Day weeks (no pallet rounding) |
 | **CTB** | ctb_sku_cum / ctb_gb_cum | Take last daily value per Cut Day week |
 | **GB** | Sum of FG data by GB_PN | Packout & CTB only; no ETD/ExF at GB level |
+
+ETD offset is configurable in section 2 (default 2 days).
