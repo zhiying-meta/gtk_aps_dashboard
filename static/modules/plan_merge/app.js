@@ -11,12 +11,62 @@ const ALL_COLS = [
 ];
 const DIVIDER = { key:'_divider', label:'', width:5, frozen:true };
 let allRows=[], allWeeks=[], weekLabels={}, filteredRows=[], activeDim='FG', pivotFields=[];
+const PIVOT_KEEP = ['Version-Type','Version-Detail','Cut Day'];
+const VT_ORDER = {'ExF':0,'Ungated':1,'Gated':2,'CTB':3};
+let pivotExpanded = new Set();
+let _pivotGroupKeys = [];
+let _lastLoadedInfo = null; // for persistent status
+function saveLoadStatus(info) {
+  try { localStorage.setItem('plan_merge_last_load', JSON.stringify(info)); } catch(e) {}
+}
+function loadLastStatus() {
+  try {
+    const s = localStorage.getItem('plan_merge_last_load');
+    if (s) return JSON.parse(s);
+  } catch(e) {}
+  return null;
+}
+function restoreLoadStatusUI() {
+  const info = loadLastStatus();
+  if (!info) return;
+  const statusEl = document.getElementById('upload-status');
+  const fnEl = document.getElementById('file-name-main');
+  if (statusEl && info.msg) statusEl.textContent = info.msg;
+  if (fnEl && info.fileMsg) {
+    fnEl.textContent = info.fileMsg;
+    fnEl.className = 'file-name success';
+    const card = document.querySelector('.upload-card');
+    if (card) card.classList.add('has-file');
+  }
+}
+// Restore on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(restoreLoadStatusUI, 300);
+});
 
-// ===== Upload: mark files =====
+// ===== Upload: mark files + filename display =====
+function updateFileNameDisplay(input) {
+  const card = input.closest('.upload-card');
+  const fnEl = card ? card.querySelector('.file-name') : document.getElementById('file-name-main');
+  const mainFnEl = document.getElementById('file-name-main');
+  if (input.files && input.files.length > 0) {
+    const name = input.files[0].name;
+    const sizeKB = (input.files[0].size / 1024).toFixed(1);
+    const txt = `📄 ${name} (${sizeKB} KB) — 待生成`;
+    if (fnEl) { fnEl.textContent = txt; fnEl.className = 'file-name has-file'; }
+    if (mainFnEl && fnEl !== mainFnEl) { mainFnEl.textContent = txt; mainFnEl.className = 'file-name has-file'; }
+    if (card) card.classList.add('has-file');
+  } else {
+    if (fnEl) { fnEl.textContent = ''; fnEl.className = 'file-name'; }
+    if (card) card.classList.remove('has-file');
+  }
+}
 document.querySelectorAll('.file-input').forEach(inp => {
   inp.addEventListener('change', () => {
     const card = inp.closest('.upload-card');
-    card.classList.toggle('has-file', inp.files.length > 0);
+    const has = inp.files.length > 0;
+    if (card) card.classList.toggle('has-file', has);
+    updateFileNameDisplay(inp);
   });
 });
 
@@ -100,8 +150,23 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
+    // Clear old pivot expand state on new data + show offset
+    pivotExpanded = new Set();
+    const loadedFileName = fileInput.files[0] ? fileInput.files[0].name : 'file';
+    const timeStr = new Date().toLocaleTimeString();
     const usedOffset = data.config ? data.config.etd_packout_offset : document.getElementById('cfg-etd-packout-offset')?.value;
-    document.getElementById('upload-status').textContent = `✅ ${allRows.length} rows | ETD offset=${usedOffset}d`;
+    const successMsg = `✅ 加载成功: ${loadedFileName} — ${allRows.length} rows | ETD offset=${usedOffset}d`;
+    const fileMsg = `✅ 已加载成功: ${loadedFileName} (${allRows.length} rows) — ${timeStr} | ETD offset=${usedOffset}d`;
+    document.getElementById('upload-status').textContent = successMsg;
+    const fnMain = document.getElementById('file-name-main');
+    if (fnMain) {
+      fnMain.textContent = fileMsg;
+      fnMain.className = 'file-name success';
+    }
+    const card = fileInput.closest('.upload-card');
+    if (card) card.classList.add('has-file');
+    _lastLoadedInfo = { fileName: loadedFileName, rows: allRows.length, time: timeStr, msg: successMsg, fileMsg: fileMsg };
+    saveLoadStatus(_lastLoadedInfo);
 
     // Save filter & aggregate state
     const savedFilter = {};
@@ -142,6 +207,11 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     applyFilters(); render();
   } catch(e) {
     status.textContent = `❌ ${e.message}`;
+    const fnMain = document.getElementById('file-name-main');
+    if (fnMain) {
+      fnMain.textContent = `❌ 加载失败: ${e.message}`;
+      fnMain.className = 'file-name error';
+    }
   } finally {
     btn.disabled = false; document.getElementById('loading').style.display = 'none';
   }
@@ -173,9 +243,9 @@ function setupDropdown(name, vals, labelMap) {
     cnt.textContent=vals.length===0?'':(sc<vals.length?`${sc}`:'');
     btn.textContent=vals.length===0?'-':(sc===vals.length?`All ${vals.length}`:sc===0?'(none)':`${sc} selected`);
     const fv=filtered();
-    let h=`<div class="dropdown-search"><input type="text" placeholder="Search..." value="${esc(searchTerm)}"></div>`;
+    let h=`<div class="dropdown-search"><input type="text" placeholder="Search..." value="${escAttr(searchTerm)}"></div>`;
     h+=`<div class="dropdown-all"><input type="checkbox" ${ac?'checked':''}> All (${vals.length})</div>`;
-    for(const v of fv) h+=`<label><input type="checkbox" data-val="${v}" ${chk[v]?'checked':''}> ${lbl(v)}</label>`;
+    for(const v of fv) h+=`<label><input type="checkbox" data-val="${escAttr(v)}" ${chk[v]?'checked':''}> ${esc(lbl(v))}</label>`;
     if (vals.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">No values</div>`;
     else if (fv.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">No match</div>`;
     menu.innerHTML=h;
@@ -242,10 +312,6 @@ document.querySelectorAll('.pivot-field').forEach(cb => {
   });
 });
 
-const PIVOT_KEEP = ['Version-Type','Version-Detail','Cut Day'];
-const VT_ORDER = {'ExF':0,'Ungated':1,'Gated':2,'CTB':3};
-let pivotExpanded = new Set();
-
 function pivotSortKey(row) {
   const pf = pivotFields.map(f => row.fields[f] || '');
   const vt = VT_ORDER[row.fields['Version-Type']] ?? 99;
@@ -259,6 +325,7 @@ function renderPivotTable() {
   if (rows.length === 0) {
     th.innerHTML=''; tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">No matching data</td></tr>';
     document.getElementById('pivot-row-count').textContent = '';
+    _pivotGroupKeys = [];
     return;
   }
 
@@ -268,7 +335,7 @@ function renderPivotTable() {
       PIVOT_KEEP.map(k => r[k] != null ? String(r[k]) : '')
     ).join('||');
     if (!groups[grpKey]) {
-      const g = { fields: {}, weeks: {}, children: [] };
+      const g = { fields: {}, weeks: {}, children: [], _key: grpKey };
       for (const f of pivotFields) g.fields[f] = r[f] || '(blank)';
       for (const k of PIVOT_KEEP) g.fields[k] = r[k] != null ? r[k] : '';
       groups[grpKey] = g;
@@ -291,6 +358,7 @@ function renderPivotTable() {
     }
     return 0;
   });
+  _pivotGroupKeys = groupKeys; // save for index lookup
 
   // Build column definitions with widths for frozen — match detail order: Dim, PN, Usage, Style, Color, Version-Type, Version-Detail, Cut Day, Pallet
   const pivotCols = [];
@@ -326,9 +394,10 @@ function renderPivotTable() {
 
   document.getElementById('pivot-row-count').textContent = `${groupKeys.length} rows (aggregated)`;
 
-  // Data rows
+  // Data rows — use index-based data-pidx to avoid escaping issues
   let html = '', lastGroupStr = '';
-  for (const gk of groupKeys) {
+  for (let idx = 0; idx < groupKeys.length; idx++) {
+    const gk = groupKeys[idx];
     const g = groups[gk];
     const isExp = pivotExpanded.has(gk);
 
@@ -339,13 +408,13 @@ function renderPivotTable() {
 
     const vtCls = 'row-' + (g.fields['Version-Type'] || 'ExF');
     const rowCls = `pivot-group-row ${vtCls}${isExp?' pivot-expanded':''}${isNewGroup?' pivot-new-group':''}`;
-    html += `<tr class="${rowCls}" data-pkey="${esc(gk)}">`;
+    html += `<tr class="${rowCls}" data-pidx="${idx}" data-pkey="${escAttr(gk)}" style="cursor:pointer">`;
     for (const c of pivotColsFiltered) {
       const isLast = c === pivotColsFiltered[pivotColsFiltered.length - 1];
       const ex = isLast || !c.frozen ? ' frozen-last' : '';
       const s = `left:${c._left}px`;
       if (c.key === '_exp') {
-        html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:13px">${isExp?'▾':'▸'}</td>`;
+        html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:14px;font-weight:700;user-select:none" data-pidx="${idx}">${isExp?'▾':'▸'}</td>`;
       } else if (c.key === '_dim') {
         const dm = g.children[0]?._dim || 'FG';
         html += `<td class="data-cell frozen${ex}" style="${s}"><span class="dim-badge dim-${dm}">${dm}</span></td>`;
@@ -409,16 +478,37 @@ function renderPivotTable() {
   }
   tb.innerHTML = html;
 
-  // Delegated toggle click
+  // Delegated toggle click — robust: click anywhere on pivot-group-row toggles, plus explicit window._togglePivot
   tb.onclick = (e) => {
-    const td = e.target.closest('.pivot-toggle');
-    if (!td) return;
-    const tr = td.closest('tr');
-    const key = tr.dataset.pkey;
+    // Ignore clicks on badges etc that shouldn't toggle? But allow row click for better UX
+    const tr = e.target.closest('tr.pivot-group-row');
+    if (!tr) return;
+    let key = null;
+    const pidx = tr.getAttribute('data-pidx');
+    if (pidx !== null && _pivotGroupKeys[parseInt(pidx)] !== undefined) {
+      key = _pivotGroupKeys[parseInt(pidx)];
+    } else {
+      key = tr.getAttribute('data-pkey') || tr.dataset.pkey;
+    }
     if (!key) return;
     if (pivotExpanded.has(key)) pivotExpanded.delete(key);
     else pivotExpanded.add(key);
     renderPivotTable();
+  };
+  // expose for console / inline fallback
+  window._togglePivot = function(idx) {
+    try {
+      const key = _pivotGroupKeys[idx];
+      if (!key) {
+        console.warn('_togglePivot: no key for idx', idx);
+        return;
+      }
+      if (pivotExpanded.has(key)) pivotExpanded.delete(key);
+      else pivotExpanded.add(key);
+      renderPivotTable();
+    } catch(err) {
+      console.error('togglePivot error', err);
+    }
   };
 }
 
@@ -445,8 +535,17 @@ function renderTable() {
     html+='</tr>';
   }
   tb.innerHTML=html;
+  // Clear pivot toggle handler when in detail view to avoid confusion
+  tb.onclick = null;
 }
-function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';}
+function esc(s){
+  if (s == null || s === '') return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s){
+  if (s == null || s === '') return '';
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
+}
 
 // ===== Column toggles =====
 ['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',()=>render());});
@@ -462,6 +561,12 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
     dt.items.add(new File([blob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
     inp.files = dt.files;
     inp.closest('.upload-card').classList.add('has-file');
+    // Show demo filename
+    const fnEl = document.getElementById('file-name-main');
+    if (fnEl) {
+      fnEl.textContent = `📄 input_demo.xlsx (${(blob.size/1024).toFixed(1)} KB) — Demo已加载，待生成`;
+      fnEl.className = 'file-name has-file';
+    }
   } catch(e) {
     console.log('Auto-load demo failed:', e.message);
   }

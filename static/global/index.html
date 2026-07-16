@@ -60,6 +60,7 @@
           <div class="upload-label">📁 Input File (.xlsx) <span class="req">*</span></div>
           <div class="upload-hint">Includes 6 sheets: sku_master, plan_output_gated, plan_output_ungated, forecast, ctb_sku_cum, ctb_gb_cum</div>
           <input type="file" class="file-input" accept=".xlsx">
+          <div class="file-name" id="file-name-main"></div>
           <div class="upload-links">
             <a href="#" class="dl-link schema-btn" data-file="sku_master">📋 sku_master</a>
             <a href="#" class="dl-link schema-btn" data-file="plan_output_gated">📋 plan_gated</a>
@@ -226,9 +227,10 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="/static/global/app.js"></script>
-<script src="/static/modules/plan_merge/app.js"></script>
-<script src="/static/modules/io_report/app.js"></script>
-<link rel="stylesheet" href="/static/modules/io_report/style.css">
+<script src="/static/global/app.js?v=20260716_5"></script>
+<script src="/static/modules/plan_merge/app.js?v=20260716_5"></script>
+<script src="/static/modules/io_report/app.js?v=20260716_5"></script>
+<link rel="stylesheet" href="/static/modules/io_report/style.css?v=20260716_5">
+<link rel="stylesheet" href="/static/modules/plan_merge/style.css?v=20260716_5">
 </body>
 </html>

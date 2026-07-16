@@ -113,6 +113,119 @@ def _classify_upload(filename: str, field: str) -> str | None:
     return None
 
 
+def _is_zip_file(filename: str) -> bool:
+    return filename.lower().endswith(".zip")
+
+
+def _extract_zip_to_tmp(zip_path: str, tmp_dir: str):
+    extracted = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                # only care about xlsx
+                if not info.filename.lower().endswith(".xlsx"):
+                    continue
+                # extract
+                base = os.path.basename(info.filename)
+                # sanitize
+                target_path = os.path.join(tmp_dir, base)
+                # avoid overwrite with incremental
+                # read and write
+                with zf.open(info) as src, open(target_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted.append(target_path)
+    except Exception as e:
+        print(f"[IO] zip extract failed {e}")
+    return extracted
+
+
+def _try_split_combined_xlsx(xlsx_path: str, tmp_dir: str) -> bool:
+    """
+    If xlsx is a combined file with 3 sheets (Item Master / Schedule / Balance),
+    split into 3 separate files matching TARGET_MAP.
+    Returns True if split succeeded.
+    """
+    try:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+        sheet_names = [s.lower() for s in wb.sheetnames]
+        # Map possible sheet name patterns to target
+        # Look for sheets that contain relevant keywords
+        def find_sheet(keywords):
+            for idx, sn in enumerate(wb.sheetnames):
+                low = sn.lower()
+                for kw in keywords:
+                    if kw in low or kw in sn:
+                        return sn
+            return None
+
+        master_sheet = find_sheet(["item master", "料号主表", "master", "item_master", "料号"])
+        sched_sheet = find_sheet(["schedule", "排产结果", "排产", "schedule_result", "sched"])
+        bal_sheet = find_sheet(["balance", "boh", "结存", "结存表", "boh_balance", "balance_qty"])
+
+        # If we found at least 2 of them, or if file has exactly 3 sheets and we can guess, split
+        # Heuristic: if we have 3 sheets, assume order = master, schedule, balance
+        if not (master_sheet and sched_sheet and bal_sheet):
+            if len(wb.sheetnames) >= 3:
+                # try to use sheet order as fallback
+                # Check if sheets have expected headers
+                # For now, if we have 3 sheets, try to map by header
+                for sn in wb.sheetnames:
+                    try:
+                        ws = wb[sn]
+                        headers = [str(c.value).strip() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+                        # print(f"sheet {sn} headers {headers}")
+                        if "ITEM_NO" in headers and "PRODUCT_CATEGORY" in headers:
+                            master_sheet = sn
+                        elif "LINE_CODE" in headers and "PLAN_ITEM" in headers:
+                            sched_sheet = sn
+                        elif "ITEM_CODE" in headers and "BALANCE_QTY" in headers:
+                            bal_sheet = sn
+                    except Exception:
+                        continue
+        wb.close()
+
+        if not (master_sheet and sched_sheet and bal_sheet):
+            return False
+
+        # Now split - reopen to copy sheets
+        wb = openpyxl.load_workbook(xlsx_path, data_only=False)
+        # Master
+        if master_sheet in wb.sheetnames:
+            ws = wb[master_sheet]
+            out_wb = openpyxl.Workbook()
+            out_ws = out_wb.active
+            for row in ws.iter_rows(values_only=True):
+                out_ws.append(list(row) if row else [])
+            out_wb.save(os.path.join(tmp_dir, TARGET_MAP["master"]))
+        # Schedule
+        if sched_sheet in wb.sheetnames:
+            ws = wb[sched_sheet]
+            out_wb = openpyxl.Workbook()
+            out_ws = out_wb.active
+            for row in ws.iter_rows(values_only=True):
+                out_ws.append(list(row) if row else [])
+            out_wb.save(os.path.join(tmp_dir, TARGET_MAP["schedule"]))
+        # Balance
+        if bal_sheet in wb.sheetnames:
+            ws = wb[bal_sheet]
+            out_wb = openpyxl.Workbook()
+            out_ws = out_wb.active
+            for row in ws.iter_rows(values_only=True):
+                out_ws.append(list(row) if row else [])
+            out_wb.save(os.path.join(tmp_dir, TARGET_MAP["balance"]))
+        wb.close()
+        return True
+    except Exception as e:
+        print(f"[IO] split combined xlsx failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 @io_bp.route("/api/io/upload", methods=["POST"])
 def api_upload():
     if not request.files:
@@ -120,22 +233,106 @@ def api_upload():
 
     tmp_dir = tempfile.mkdtemp(prefix="io_upload_")
     try:
-        # save with classification
-        for field_key, f in request.files.items():
+        # Collect all files (including multiple under same key)
+        all_files = []
+        for key in request.files:
+            all_files.extend([(key, f) for f in request.files.getlist(key)])
+
+        # First pass: handle zip and combined xlsx
+        pending_regular = []
+        for field_key, f in all_files:
             if not f.filename:
                 continue
-            target = _classify_upload(f.filename, field_key)
-            # direct field name fallback
-            if not target and field_key in TARGET_MAP:
-                target = TARGET_MAP[field_key]
-            if target:
-                f.save(os.path.join(tmp_dir, target))
+            fname = f.filename
+            if _is_zip_file(fname):
+                # save zip to tmp and extract
+                zip_tmp = os.path.join(tmp_dir, f"_upload_{field_key}_{fname}")
+                f.save(zip_tmp)
+                extracted = _extract_zip_to_tmp(zip_tmp, tmp_dir)
+                # classify extracted files
+                for ep in extracted:
+                    target = _classify_upload(os.path.basename(ep), os.path.basename(ep))
+                    if target:
+                        # already in tmp_dir with basename, need to move to target name
+                        dest = os.path.join(tmp_dir, target)
+                        if os.path.abspath(ep) != os.path.abspath(dest):
+                            shutil.copyfile(ep, dest)
+                    else:
+                        # try to keep as is, will be classified later
+                        pending_regular.append((field_key, ep, True))  # True = is path
+                # remove zip tmp
+                try:
+                    os.remove(zip_tmp)
+                except:
+                    pass
+            else:
+                # check if it's a potential combined xlsx
+                # save to temp first
+                temp_path = os.path.join(tmp_dir, f"_raw_{field_key}_{fname}")
+                f.save(temp_path)
+                # Try to detect combined - if it has 3 sheets with expected headers, split
+                # Only attempt if file hasn't been classified yet or if it's named as combined
+                is_combined = False
+                # Heuristic: filename contains "combined" or "io_template" or has more than 2 sheets with matching headers
+                # We'll try split for any xlsx that hasn't been classified as one of the 3
+                # Try split first
+                if _try_split_combined_xlsx(temp_path, tmp_dir):
+                    is_combined = True
+                    # remove raw temp
+                    try:
+                        os.remove(temp_path)
+                    except:
+                        pass
+                if not is_combined:
+                    pending_regular.append((field_key, temp_path, True))
+
+        # Second pass: classify remaining regular files
+        for field_key, f_or_path, is_path in pending_regular:
+            if is_path:
+                # f_or_path is a path
+                src_path = f_or_path
+                fname = os.path.basename(src_path)
+                target = _classify_upload(fname, field_key)
+                if not target and field_key in TARGET_MAP:
+                    target = TARGET_MAP[field_key]
+                if target:
+                    dest = os.path.join(tmp_dir, target)
+                    if os.path.abspath(src_path) != os.path.abspath(dest):
+                        shutil.copyfile(src_path, dest)
+                else:
+                    # if still not classified, keep file as is and try to guess later
+                    # Leave it, will be counted as existing if matches target name already
+                    pass
+            else:
+                # Should not happen, but handle file object
+                f = f_or_path
+                target = _classify_upload(f.filename, field_key)
+                if not target and field_key in TARGET_MAP:
+                    target = TARGET_MAP[field_key]
+                if target:
+                    f.save(os.path.join(tmp_dir, target))
+
+        # Also handle any files that were directly saved with target names via classification in first loop
+        # Ensure we have the 3 required files (try to find any file that matches keywords even if not exactly named)
+        for existing_file in os.listdir(tmp_dir):
+            if existing_file.startswith("_raw_") or existing_file.startswith("_upload_"):
+                continue
+            full = os.path.join(tmp_dir, existing_file)
+            if not os.path.isfile(full):
+                continue
+            # If file is already one of target names, keep
+            if existing_file in TARGET_MAP.values():
+                continue
+            # Try to classify loose files
+            target = _classify_upload(existing_file, existing_file)
+            if target and not os.path.exists(os.path.join(tmp_dir, target)):
+                shutil.copyfile(full, os.path.join(tmp_dir, target))
 
         # ensure all 3 present
         missing = [fn for fn in TARGET_MAP.values() if not os.path.exists(os.path.join(tmp_dir, fn))]
         if missing:
-            existing = os.listdir(tmp_dir)
-            return _json_error(f"missing files {missing}, got {existing}", 400)
+            existing = [f for f in os.listdir(tmp_dir) if not f.startswith("_raw_") and not f.startswith("_upload_")]
+            return _json_error(f"missing files {missing}, got {existing}. Hint: upload 3 separate files, or a zip containing them, or a single combined xlsx with 3 sheets (Item Master/Schedule Result/BOH Balance).", 400)
 
         os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
         for fn in TARGET_MAP.values():

@@ -43,19 +43,30 @@ async function render(){
 }
 
 function buildUploadSectionHTML(isCompact){
-  const title = isCompact ? '📁 Upload I/O Data' : '📁 Upload I/O Data (3 files required)';
+  const title = isCompact ? '📁 Upload I/O Data' : '📁 Upload I/O Data';
   return `<div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
       <div class="section-header">
         <span class="section-title">${title}</span>
         <div class="section-actions">
-          <a href="/api/io/templates/template" class="btn btn-sm btn-outline">📄 Template</a>
+          <a href="/api/io/templates/input_template.xlsx" class="btn btn-sm btn-outline">📄 Combined Template</a>
+          <a href="/api/io/templates/template" class="btn btn-sm btn-outline">📦 3 Templates (zip)</a>
           <a href="/api/io/templates/demo" class="btn btn-sm btn-outline">📦 Demo</a>
           <a href="/api/io/templates/schema" target="_blank" class="btn btn-sm btn-outline">📋 Schema</a>
           ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar">▼ Collapse</button>' : ''}
         </div>
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:10px;font-size:11px;color:#475569">Item Master + Schedule + BOH Balance. Supports 9 report types, drag left boxes to merge.</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:10px;font-size:11px;color:#475569">
+        <div style="font-weight:600;margin-bottom:4px">💡 One-Click Upload Supported:</div>
+        <div>• <strong>3 files at once</strong>: select Master + Schedule + Balance together &nbsp;|&nbsp; • <strong>Zip</strong>: zip containing 3 xlsx &nbsp;|&nbsp; • <strong>Combined xlsx</strong>: 1 workbook with 3 sheets (Item Master / Schedule Result / BOH Balance)</div>
+      </div>
       <div id="${isCompact ? 'uploadBarContent' : 'uploadFullContent'}">
+        <div class="upload-card" id="card_combined_${isCompact?'compact':'full'}" style="border:2px dashed #8b5cf6;background:#faf5ff;margin-bottom:10px">
+          <div class="upload-label">⚡ One-Click Upload — 3 files / Zip / Combined <span style="font-size:10px;background:#8b5cf6;color:#fff;padding:1px 6px;border-radius:8px">Recommended</span></div>
+          <div class="upload-hint">Select up to 3 files at once, or a .zip, or a single combined .xlsx with 3 sheets</div>
+          <input type="file" class="file-input" id="input_combined_${isCompact?'compact':'full'}" accept=".xlsx,.zip" multiple>
+          <div class="fname" id="fname_combined_${isCompact?'compact':'full'}" style="font-size:11px;color:#6d28d9;margin-top:6px;min-height:16px"></div>
+        </div>
+        <div style="font-size:11px;color:#94a3b8;margin:6px 0;text-align:center">— or upload individually —</div>
         <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
           <div class="upload-card" id="card_master_${isCompact?'compact':'full'}"><div class="upload-label">📁 Item Master <span class="req">*</span></div><input type="file" class="file-input" id="input_master_${isCompact?'compact':'full'}" accept=".xlsx"><div class="fname" id="fname_master_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_schedule_${isCompact?'compact':'full'}"><div class="upload-label">📁 Schedule <span class="req">*</span></div><input type="file" class="file-input" id="input_schedule_${isCompact?'compact':'full'}" accept=".xlsx"><div class="fname" id="fname_schedule_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
@@ -67,28 +78,159 @@ function buildUploadSectionHTML(isCompact){
 }
 function attachUploadLogic(isCompact){
   const suffix = isCompact ? 'compact' : 'full';
-  const files = { master: null, schedule: null, balance: null };
+  const files = { master: null, schedule: null, balance: null, combined: [] };
   function markHasFile(cardId, has){ document.getElementById(cardId)?.classList.toggle('has-file', !!has); }
-  function updateBtn(){ const ok = files.master && files.schedule && files.balance; const btn=document.getElementById('uploadBtn_'+suffix); if(btn) btn.disabled=!ok; }
+  function classifyByName(name){
+    const low = (name||'').toLowerCase();
+    if (low.includes('master') || low.includes('料号')) return 'master';
+    if (low.includes('sched') || low.includes('排产')) return 'schedule';
+    if (low.includes('bal') || low.includes('结存') || low.includes('boh')) return 'balance';
+    return null;
+  }
+  function updateBtn(){
+    const hasCombined = files.combined && files.combined.length>0;
+    const ok = hasCombined || (files.master && files.schedule && files.balance);
+    const btn=document.getElementById('uploadBtn_'+suffix);
+    if(btn) btn.disabled=!ok;
+    // update combined hint
+    const comboEl = document.getElementById('fname_combined_'+suffix);
+    if (comboEl && files.combined.length>0) {
+      if (files.combined.length===1) {
+        const f=files.combined[0];
+        const isZip = f.name.toLowerCase().endsWith('.zip');
+        const hint = isZip ? '📦 Zip' : '📄 Combined/ Single';
+        comboEl.textContent = `✓ ${hint}: ${f.name} (${(f.size/1024).toFixed(1)}KB)`;
+      } else {
+        comboEl.textContent = `✓ ${files.combined.length} files: ` + files.combined.map(f=>f.name).join(', ');
+      }
+    }
+  }
+  function setFileForKey(k, file){
+    files[k]=file;
+    const fnameEl=document.getElementById('fname_'+k+'_'+suffix);
+    if(fnameEl) fnameEl.textContent='✓ '+file.name;
+    markHasFile('card_'+k+'_'+suffix,true);
+  }
   ['master','schedule','balance'].forEach(k=>{
     const input=document.getElementById('input_'+k+'_'+suffix);
     if(!input) return;
     input.addEventListener('change', ()=>{
       if(input.files.length>0){ files[k]=input.files[0]; document.getElementById('fname_'+k+'_'+suffix).textContent='✓ '+input.files[0].name; markHasFile('card_'+k+'_'+suffix,true); }
-      else{ files[k]=null; markHasFile('card_'+k+'_'+suffix,false); }
+      else{ files[k]=null; const el=document.getElementById('fname_'+k+'_'+suffix); if(el) el.textContent=''; markHasFile('card_'+k+'_'+suffix,false); }
+      // Clear combined if individual changed
+      if (files.combined.length>0) {
+        files.combined=[];
+        const ce=document.getElementById('fname_combined_'+suffix);
+        if(ce) ce.textContent='';
+        markHasFile('card_combined_'+suffix,false);
+        const inp=document.getElementById('input_combined_'+suffix);
+        if(inp) inp.value='';
+      }
       updateBtn();
     });
   });
+  // One-click handler
+  const combinedInput=document.getElementById('input_combined_'+suffix);
+  if(combinedInput){
+    combinedInput.addEventListener('change', ()=>{
+      const selected = Array.from(combinedInput.files||[]);
+      if(selected.length===0){ files.combined=[]; markHasFile('card_combined_'+suffix,false); updateBtn(); return; }
+      // If single file that is zip or likely combined (1 file)
+      if(selected.length===1){
+        const f=selected[0];
+        const low=f.name.toLowerCase();
+        const isZip = low.endsWith('.zip');
+        const isCombinedName = low.includes('combined') || low.includes('io_template') || low.includes('template');
+        // Treat as combined mode
+        files.combined=[f];
+        // Clear individual
+        ['master','schedule','balance'].forEach(k=>{
+          files[k]=null;
+          const el=document.getElementById('fname_'+k+'_'+suffix);
+          if(el) el.textContent='';
+          markHasFile('card_'+k+'_'+suffix,false);
+          const inp=document.getElementById('input_'+k+'_'+suffix);
+          if(inp) inp.value='';
+        });
+        markHasFile('card_combined_'+suffix,true);
+        updateBtn();
+        return;
+      }
+      // Multiple files selected at once: auto-distribute
+      files.combined=[];
+      // Reset individual
+      ['master','schedule','balance'].forEach(k=>{
+        files[k]=null;
+        const el=document.getElementById('fname_'+k+'_'+suffix);
+        if(el) el.textContent='';
+        markHasFile('card_'+k+'_'+suffix,false);
+        const inp=document.getElementById('input_'+k+'_'+suffix);
+        if(inp) inp.value='';
+      });
+      // Classify each
+      const unclassified=[];
+      selected.forEach(f=>{
+        const cls=classifyByName(f.name);
+        if(cls && !files[cls]){ setFileForKey(cls,f); }
+        else if (!cls) { unclassified.push(f); }
+        else { // already assigned, push to unclassified to try assign to empty slot
+          unclassified.push(f);
+        }
+      });
+      // Fill remaining empty slots with unclassified in order
+      for(const k of ['master','schedule','balance']){
+        if(!files[k] && unclassified.length>0){ setFileForKey(k, unclassified.shift()); }
+      }
+      // If still has leftover, treat as combined multi? Keep them as combined as fallback
+      if(unclassified.length>0 && !files.master && !files.schedule && !files.balance){
+        files.combined=selected;
+      } else if (files.master && files.schedule && files.balance) {
+        // Successfully distributed to 3 slots, clear combined display, keep 3 slots
+        files.combined=[];
+        const ce=document.getElementById('fname_combined_'+suffix);
+        if(ce) ce.textContent=`✓ Auto-distributed ${selected.length} files → Master/Schedule/Balance`;
+        markHasFile('card_combined_'+suffix,true);
+      } else {
+        // Partial - keep whatever we have, but also store as combined for fallback
+        files.combined=selected;
+        // Show partial status
+        const ce=document.getElementById('fname_combined_'+suffix);
+        if(ce) ce.textContent=`✓ ${selected.length} files selected, classified ${['master','schedule','balance'].filter(k=>!!files[k]).length}/3. Click Upload to try auto-detect.`;
+      }
+      // If we have 3 individual filled, enable
+      updateBtn();
+      // If we have partial but user selected 3 files, we will actually upload all 3 as combined via backend auto-classify
+      if(selected.length>=3){
+        files.combined=selected;
+        markHasFile('card_combined_'+suffix,true);
+        updateBtn();
+      }
+    });
+  }
   document.getElementById('uploadBtn_'+suffix)?.addEventListener('click', async ()=>{
     const prog=document.getElementById('uploadProgress_'+suffix);
     const btn=document.getElementById('uploadBtn_'+suffix);
     btn.disabled=true; btn.textContent='Uploading...'; if(prog) prog.textContent='⏳ Processing...';
-    const form=new FormData(); form.append('master',files.master); form.append('schedule',files.schedule); form.append('balance',files.balance);
+    const form=new FormData();
+    if(files.combined && files.combined.length>0){
+      // One-click mode: append all combined files, backend will auto-classify and handle zip/combined
+      files.combined.forEach((f,i)=>{
+        form.append('file_'+i, f);
+        form.append('combined_'+i, f);
+      });
+      // Also append first file as generic 'file' for combined xlsx detection
+      if(files.combined.length===1){
+        form.append('combined', files.combined[0]);
+        form.append('file', files.combined[0]);
+      }
+    } else {
+      form.append('master',files.master); form.append('schedule',files.schedule); form.append('balance',files.balance);
+    }
     try{
       const resp=await fetch('/api/io/upload',{method:'POST',body:form});
       const result=await resp.json();
-      if(result.ok){ if(prog) prog.innerHTML=`<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB</span>`; setTimeout(()=>renderReportsPage(),800); }
-      else{ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${JSON.stringify(result)}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
+      if(result.ok){ if(prog) prog.innerHTML=`<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB — Success, keeping status</span>`; setTimeout(()=>renderReportsPage(),800); }
+      else{ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${result.error||JSON.stringify(result)}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
     }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
   });
   document.getElementById('btnRetryLoad_'+suffix)?.addEventListener('click', async ()=>{ const ok=await checkStatus(); if(ok) renderReportsPage(); else alert('No valid data'); });
