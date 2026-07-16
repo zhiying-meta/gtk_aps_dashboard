@@ -1,13 +1,13 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+.venv/
+venv/
+ENV/
 *.egg-info/
 .eggs/
-dist/
-dist_portable/
-build/
-*.spec
-!ProductionPlanReview.spec
+*.log
 
 # OS
 .DS_Store
@@ -17,21 +17,19 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+*.swo
 
-# Temp
-app/uploads/
+# App temp
 uploads/
-*.log
+app/__pycache__/
+app/modules/*/__pycache__/
 
-# Source data
+# Source data (local only)
 data/
 data-ref-xlsx/
 
 # Office temp files
 ~$*
-
-# IDE
-.idea/
 
 # Static cache (old location)
 app/static/report_data.json
@@ -40,5 +38,5 @@ app/static/meta.json
 # Design documents
 /*设计.xlsx
 
-
+# Local config
 opencode.json

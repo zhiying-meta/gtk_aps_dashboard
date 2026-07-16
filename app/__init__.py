@@ -1,25 +1,12 @@
 import os
-import sys
 from flask import Flask, send_from_directory
 
 
-def _get_base_path():
-    """Return base path, handles PyInstaller frozen env."""
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        return sys._MEIPASS
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _get_static_dir():
-    base = _get_base_path()
-    cand = os.path.join(base, 'static')
-    if os.path.isdir(cand):
-        return cand
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
-
-
 def create_app():
-    static_dir = _get_static_dir()
+    # Project root is one level above app/
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    static_dir = os.path.join(project_root, 'static')
+
     app = Flask(__name__, static_folder=static_dir, static_url_path="/static")
     app.config.from_object("app.config")
 
