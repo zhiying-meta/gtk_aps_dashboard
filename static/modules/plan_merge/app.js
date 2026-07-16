@@ -80,6 +80,8 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   form.append('etd_cut', document.getElementById('cfg-etd').value);
   form.append('output_cut', document.getElementById('cfg-output').value);
   form.append('gb_cut', document.getElementById('cfg-gb').value);
+  const offsetEl = document.getElementById('cfg-etd-packout-offset');
+  if (offsetEl) form.append('etd_packout_offset', offsetEl.value);
 
   document.getElementById('loading').style.display = 'flex';
   const warnEl = document.getElementById('upload-warnings');
@@ -98,7 +100,8 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
-    document.getElementById('upload-status').textContent = `✅ ${allRows.length} rows`;
+    const usedOffset = data.config ? data.config.etd_packout_offset : document.getElementById('cfg-etd-packout-offset')?.value;
+    document.getElementById('upload-status').textContent = `✅ ${allRows.length} rows | ETD offset=${usedOffset}d`;
 
     // Save filter & aggregate state
     const savedFilter = {};

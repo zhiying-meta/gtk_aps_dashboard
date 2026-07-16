@@ -70,7 +70,7 @@
     <!-- ===== Config Section ===== -->
     <div class="section" id="config-section">
       <div class="section-header">
-        <span class="section-title">⚙️ 2. Configure Cut Day of Week</span>
+        <span class="section-title">⚙️ 2. Configure Cut Day & ETD Offset</span>
       </div>
       <div class="config-grid">
         <div class="config-item">
@@ -105,6 +105,11 @@
             <option value="Friday">Fri</option><option value="Saturday">Sat</option>
             <option value="Sunday">Sun</option>
           </select>
+        </div>
+        <div class="config-item">
+          <label>ETD vs Packout Offset (n days) <span class="offset-badge" title="ETD Cum = Packout Cum N days before. e.g. n=2 → ETD on D uses Packout cum on D-2">ℹ️</span></label>
+          <input id="cfg-etd-packout-offset" class="cfg-select" type="number" min="0" max="30" step="1" value="2" style="width:90px">
+          <div style="font-size:10px;color:#64748b;margin-top:2px">ETD(D)=PackoutCum(D-n). 默认2</div>
         </div>
       </div>
       <div class="config-actions">

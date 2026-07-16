@@ -83,7 +83,7 @@ def process():
             return jsonify({"error": "No file uploaded"}), 400
 
         cfg = {}
-        for cfg_key in ['exf_cut', 'etd_cut', 'output_cut', 'gb_cut']:
+        for cfg_key in ['exf_cut', 'etd_cut', 'output_cut', 'gb_cut', 'etd_packout_offset']:
             val = request.form.get(cfg_key)
             if val: cfg[cfg_key] = val
 
