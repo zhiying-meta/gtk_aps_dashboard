@@ -88,9 +88,34 @@ With pywebview installed, the app opens a 1280x860 native window with the report
 ### Troubleshooting Desktop App
 
 - **Port in use**: App auto-tries 8502-8522
-- **Antivirus false positive** (Windows): One-file exe may trigger due to PyInstaller - use one-folder mode or add exception
+- **Antivirus / 被ban**: See `ANTIVIRUS_FIX.md` for full guide. Quick fixes:
+  - Use portable version (no exe): `python make_portable.py` → `dist_portable/windows/` (just .py + START.bat, never flagged)
+  - Or use safe build: `python build_safe.py` (disables UPX, one-folder, lowest false positive)
+  - Windows: Add exclusion for `ProductionPlanReview` folder in Windows Security → Virus & threat protection → Exclusions
+  - macOS: `xattr -cr dist/ProductionPlanReview.app` + `codesign --force --deep --sign - dist/ProductionPlanReview.app`, then Right-click → Open
+  - Corporate EDR: Use Docker or portable version, or ask IT to whitelist
 - **macOS Gatekeeper**: Right-click → Open to bypass unsigned warning, or codesign: `codesign --deep --force --sign - dist/ProductionPlanReview.app`
 - If browser doesn't open, check console / status window shows URL, manually open `http://127.0.0.1:8502`
+
+### Alternative Distributions (No Antivirus Issue)
+
+If exe is banned, use these that are **never flagged**:
+
+```bash
+# 1. Portable Python (recommended for strict corporate)
+python make_portable.py
+# Output:
+#   dist_portable/windows/  -> START.bat (double-click, no exe)
+#   dist_portable/macos_linux/ -> ./START.sh
+#   dist_portable/ProductionPlanReview.pyz -> python3 ProductionPlanReview.pyz
+
+# 2. Docker (if colleague has Docker)
+docker build -t ppr .
+docker run -p 8502:8502 ppr
+# Open http://localhost:8502
+```
+
+See `ANTIVIRUS_FIX.md` and `Dockerfile` for details.
 
 ## Usage
 

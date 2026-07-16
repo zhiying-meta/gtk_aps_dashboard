@@ -59,8 +59,8 @@ def build(onefile=False, windowed=False, with_webview=False):
     except ImportError:
         run([sys.executable, "-m", "pip", "install", "waitress"])
 
-    # Base command
-    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean"]
+    # Base command - safe defaults to avoid AV false positive
+    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--noupx"]
 
     if onefile:
         cmd.append("--onefile")

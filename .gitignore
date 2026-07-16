@@ -4,7 +4,10 @@ __pycache__/
 *.egg-info/
 .eggs/
 dist/
+dist_portable/
 build/
+*.spec
+!ProductionPlanReview.spec
 
 # OS
 .DS_Store
