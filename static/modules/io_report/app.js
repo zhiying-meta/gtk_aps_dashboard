@@ -582,7 +582,7 @@ function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
   dimOrder.forEach((d,i)=>{ const left=i*frozenW; h+=`<th class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:16">${esc(DIM_LABELS[d]||d)} <span class="expand-btn" onclick="window.ioExpandAll('${tableId}')">⊞</span></th>`; });
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
-  h+='</tr></thead><tbody id="tbody_${tableId}">';
+  h+=`</tr></thead><tbody id="tbody_${tableId}">`;
 
   function renderLevel(nodes, depth, path){
     let out='';
@@ -610,7 +610,7 @@ function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
         }
         out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
         columns.forEach(c=>{ out+=`<td class="num">${Number(agg2[c]).toLocaleString()}</td>`; });
-        out+='</tr><tr id="childrow_${pid}" style="display:none"><td colspan="${nDims+1+columns.length}" style="padding:0"><div id="children_${pid}"></div></td></tr>';
+        out+=`</tr><tr id="childrow_${pid}" style="display:none"><td colspan="${nDims+1+columns.length}" style="padding:0"><div id="children_${pid}"></div></td></tr>`;
       }
     });
     return out;
@@ -648,7 +648,7 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
   effDims.forEach((d,i)=>{ const left=lefts[i]; const w=i===nDims-1? typeW : frozenW; const label=d==='_REPORT_TYPE'?'Type':(DIM_LABELS[d]||d); h+=`<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)}</th>`; });
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
-  h+='</tr></thead><tbody id="tbody_${tableId}">';
+  h+=`</tr></thead><tbody id="tbody_${tableId}">`;
 
   function renderLevel(nodes, depth, path){
     let out='';
