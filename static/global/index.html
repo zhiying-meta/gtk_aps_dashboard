@@ -194,58 +194,10 @@
       </div>
     </div>
 
-    <!-- ===== I/O Report Section ===== -->
-    <div class="section" id="io-report-section" style="display:none">
-      <div class="section-header">
-        <span class="section-title">📈 I/O Report</span>
-        <div class="section-actions">
-          <button id="io-dl-excel" class="btn btn-sm">📥 Download Excel</button>
-          <span id="io-report-status" class="status-msg"></span>
-        </div>
-      </div>
-      <div class="dim-tabs">
-        <button class="dim-tab active" data-io-cat="FG">FG (Finished)</button>
-        <button class="dim-tab" data-io-cat="GB">GB (Component)</button>
-      </div>
-      <div class="io-toolbar">
-        <div class="io-controls">
-          <div class="io-control-group">
-            <label>Dimension</label>
-            <select id="io-dim" class="cfg-select">
-              <option value="ITEM_NO">Item</option>
-              <option value="LINE_CODE">Line</option>
-              <option value="STYLE">Style</option>
-            </select>
-          </div>
-          <div class="io-control-group">
-            <label>Column</label>
-            <select id="io-col-mode" class="cfg-select">
-              <option value="shift">Shift</option>
-              <option value="day">Day</option>
-              <option value="week">Week</option>
-              <option value="month">Month</option>
-            </select>
-          </div>
-          <div class="io-control-group">
-            <label>Filter</label>
-            <select id="io-filter" class="cfg-select">
-              <option value="">All</option>
-            </select>
-          </div>
-          <button id="io-load" class="btn btn-sm">▶ Load</button>
-          <span id="io-status" class="status-msg"></span>
-        </div>
-        <div class="io-report-tabs" id="io-report-tabs">
-          <button class="io-report-tab active" data-io-report="INPUT">Daily Input</button>
-          <button class="io-report-tab" data-io-report="OUTPUT">Daily Output</button>
-          <button class="io-report-tab" data-io-report="CUM_INPUT">Cum Input</button>
-          <button class="io-report-tab" data-io-report="CUM_OUTPUT">Cum Output</button>
-          <button class="io-report-tab" data-io-report="BALANCE">Balance</button>
-        </div>
-      </div>
-      <div class="table-wrapper" id="io-table-wrapper">
-        <table id="io-table"><thead id="io-table-head"></thead><tbody id="io-table-body"></tbody></table>
-      </div>
+    <!-- ===== I/O Report Section (Ported from Go aps-report) ===== -->
+    <div id="io-report-section" style="display:none">
+      <!-- Content rendered by static/modules/io_report/app.js -->
+      <div style="text-align:center;padding:40px;color:#94a3b8">Loading I/O Report...</div>
     </div>
 
     <div id="loading" class="loading" style="display:none">
@@ -267,6 +219,7 @@
   </main>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="/static/global/app.js"></script>
 <script src="/static/modules/plan_merge/app.js"></script>
 <script src="/static/modules/io_report/app.js"></script>
