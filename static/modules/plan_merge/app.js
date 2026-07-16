@@ -408,13 +408,13 @@ function renderPivotTable() {
 
     const vtCls = 'row-' + (g.fields['Version-Type'] || 'ExF');
     const rowCls = `pivot-group-row ${vtCls}${isExp?' pivot-expanded':''}${isNewGroup?' pivot-new-group':''}`;
-    html += `<tr class="${rowCls}" data-pidx="${idx}" data-pkey="${escAttr(gk)}" style="cursor:pointer">`;
+    html += `<tr class="${rowCls}" data-pidx="${idx}" data-pkey="${escAttr(gk)}" style="cursor:pointer" onclick="window._togglePivot(${idx});">`;
     for (const c of pivotColsFiltered) {
       const isLast = c === pivotColsFiltered[pivotColsFiltered.length - 1];
       const ex = isLast || !c.frozen ? ' frozen-last' : '';
       const s = `left:${c._left}px`;
       if (c.key === '_exp') {
-        html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:14px;font-weight:700;user-select:none" data-pidx="${idx}">${isExp?'▾':'▸'}</td>`;
+        html += `<td class="data-cell pivot-toggle frozen${ex}" style="${s};text-align:center;cursor:pointer;font-size:14px;font-weight:700;user-select:none" data-pidx="${idx}" onclick="window._togglePivot(${idx}); event.stopPropagation();">${isExp?'▾':'▸'}</td>`;
       } else if (c.key === '_dim') {
         const dm = g.children[0]?._dim || 'FG';
         html += `<td class="data-cell frozen${ex}" style="${s}"><span class="dim-badge dim-${dm}">${dm}</span></td>`;
@@ -478,9 +478,8 @@ function renderPivotTable() {
   }
   tb.innerHTML = html;
 
-  // Delegated toggle click — robust: click anywhere on pivot-group-row toggles, plus explicit window._togglePivot
-  tb.onclick = (e) => {
-    // Ignore clicks on badges etc that shouldn't toggle? But allow row click for better UX
+  // Delegated + inline toggle — robust for frozen columns and re-renders
+  const handlePivotToggle = (e) => {
     const tr = e.target.closest('tr.pivot-group-row');
     if (!tr) return;
     let key = null;
@@ -495,10 +494,25 @@ function renderPivotTable() {
     else pivotExpanded.add(key);
     renderPivotTable();
   };
-  // expose for console / inline fallback
+  // Remove old listeners, use addEventListener for robustness (onclick property can be cleared by renderTable)
+  tb.removeEventListener('click', tb._pivotClickHandler || (()=>{}));
+  tb._pivotClickHandler = handlePivotToggle;
+  tb.addEventListener('click', handlePivotToggle);
+  // Keep onclick property as fallback for older path
+  tb.onclick = handlePivotToggle;
+
+  // expose for console / inline fallback — also handles direct idx toggle
   window._togglePivot = function(idx) {
     try {
-      const key = _pivotGroupKeys[idx];
+      // idx may be number or string key
+      let key = null;
+      if (typeof idx === 'number' || !isNaN(parseInt(idx))) {
+        const i = parseInt(idx);
+        if (!isNaN(i) && _pivotGroupKeys[i] !== undefined) key = _pivotGroupKeys[i];
+        else key = String(idx);
+      } else {
+        key = String(idx);
+      }
       if (!key) {
         console.warn('_togglePivot: no key for idx', idx);
         return;
@@ -509,6 +523,14 @@ function renderPivotTable() {
     } catch(err) {
       console.error('togglePivot error', err);
     }
+  };
+  window._togglePivotByKey = function(k){
+    try{
+      if(!k) return;
+      if (pivotExpanded.has(k)) pivotExpanded.delete(k);
+      else pivotExpanded.add(k);
+      renderPivotTable();
+    }catch(e){ console.error(e); }
   };
 }
 

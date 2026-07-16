@@ -696,30 +696,53 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
 
 // lazy toggle
 window.ioToggleLazy = function(tableId, pathStr, depth){
-  const path = pathStr.split(',').map(x=> parseInt(x));
+  try{
+  const path = pathStr.split(',').map(x=> { const n=parseInt(x); return isNaN(n)?0:n; });
   const pid=`${tableId}_${path.join('_')}`;
   const tog=document.getElementById(`tog_${pid}`);
-  const childRow=document.getElementById(`childrow_${pid}`);
-  const childrenDiv=document.getElementById(`children_${pid}`);
-  if(!childRow||!childrenDiv) return;
-  const isOpen = childRow.style.display!=='none';
+  let childRow=document.getElementById(`childrow_${pid}`);
+  let childrenDiv=document.getElementById(`children_${pid}`);
+  if(!childRow) childRow=document.querySelector(`[id="childrow_${CSS.escape(pid)}"]`);
+  if(!childrenDiv) childrenDiv=document.querySelector(`[id="children_${CSS.escape(pid)}"]`);
+  if(!childRow||!childrenDiv){
+    console.warn('ioToggleLazy: childRow/childrenDiv not found', pid, tableId, pathStr);
+    return;
+  }
+  const isOpen = childRow.dataset.open==='1' || childRow.style.display==='' || (childRow.style.display!=='none' && getComputedStyle(childRow).display!=='none' && childrenDiv.dataset.rendered==='1');
   if(isOpen){
     childRow.style.display='none';
+    childRow.dataset.open='0';
     if(tog) tog.textContent='▶';
     return;
   }
   // find node
   let nodeList=treeCache[tableId];
+  if(!nodeList){
+    console.warn('ioToggleLazy: treeCache miss for', tableId);
+    return;
+  }
   let node=null;
   for(let i=0;i<path.length;i++){
     if(!nodeList) break;
     node=nodeList[path[i]];
+    if(!node) break;
     if(i<path.length-1) nodeList=node.items;
   }
-  if(!node||!node.items||node.items.length===0) return;
+  if(!node){
+    console.warn('ioToggleLazy: node not found', pathStr, tableId);
+    return;
+  }
+  if(!node.items||node.items.length===0){
+    // leaf – nothing to expand, but toggle state
+    childRow.style.display='';
+    childRow.dataset.open='1';
+    if(tog) tog.textContent='▼';
+    return;
+  }
   // if already rendered, just show
   if(childrenDiv.dataset.rendered==='1'){
     childRow.style.display='';
+    childRow.dataset.open='1';
     if(tog) tog.textContent='▼';
     return;
   }
@@ -793,7 +816,11 @@ window.ioToggleLazy = function(tableId, pathStr, depth){
   childrenDiv.innerHTML=html;
   childrenDiv.dataset.rendered='1';
   childRow.style.display='';
+  childRow.dataset.open='1';
   if(tog) tog.textContent='▼';
+  }catch(e){
+    console.error('ioToggleLazy error', e, tableId, pathStr);
+  }
 };
 
 window.ioExpandAll = function(tableId){
