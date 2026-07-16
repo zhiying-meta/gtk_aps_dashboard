@@ -1,8 +1,7 @@
 /**
- * I/O Report - 9 Tables with Mergeable Groups via Drag & Drop
- * Features:
- * - Row dim drag to order, col dim Day default
- * - Report Types draggable to merge into one table, with Type column + row colors
+ * I/O Report - 9 Tables with Left Group Boxes Manager
+ * UX: 左侧一列方框，每个方框一个标签起步，可拖动标签拼到另一个方框合并为一张表（多合一）
+ * 支持多组合并共存，行维度优先，同一 Line/PN 的不同 Type 相邻
  */
 (() => {
 const DIM_LABELS = { ITEM_NO: 'PN', LINE_CODE: 'Line', STYLE: 'Style' };
@@ -26,10 +25,9 @@ let COL_DIM = 'day';
 let dragFromDim = null;
 const filterVals = { lineCode: '', itemNo: '', style: '' };
 let ioRoot = null;
-
-// --- merge groups state ---
-let reportGroups = REPORTS.map(r => [r]); // 9 separate initially
-let draggedReport = null; // {type, fromGroup}
+let reportGroups = REPORTS.map(r => [r]);
+let pendingNewGroup = [];
+let draggedReport = null;
 
 function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 function getRoot(){ return document.getElementById('io-report-section'); }
@@ -44,10 +42,8 @@ async function render(){
   else renderUploadPage();
 }
 
-// ---------- Upload ----------
 function buildUploadSectionHTML(isCompact){
-  const title = isCompact ? '📁 Upload I/O Data (Re-upload to update)' : '📁 Upload I/O Data (3 files required)';
-  const gridStyle = isCompact ? 'display:grid;grid-template-columns:repeat(3,1fr) 1.2fr;gap:10px;align-items:end' : 'display:grid;grid-template-columns:repeat(3,1fr);gap:12px';
+  const title = isCompact ? '📁 Upload I/O Data' : '📁 Upload I/O Data (3 files required)';
   return `
     <div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
       <div class="section-header">
@@ -59,45 +55,30 @@ function buildUploadSectionHTML(isCompact){
           ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar">▼ Collapse</button>' : ''}
         </div>
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:10px;font-size:11px;color:#475569;line-height:1.5">
-        <strong>Required:</strong> Item Master (<code>ITEM_NO, PRODUCT_CATEGORY=FG/GB, PRODUCT_STYLE</code>) |
-        Schedule Result (<code>LINE_CODE, SHIFT_NAME, PLAN_ITEM=INPUT/OUTPUT/CHECKIN/CHECKOUT, SKU, PLAN_DATE, PLAN_VALUE</code>) |
-        BOH Balance (<code>PLAN_DATE, SHIFT_NAME, ITEM_CODE, BALANCE_QTY</code>)<br>
-        Place 3 files in <code>data/</code> and click Recheck, or upload below.
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:10px;font-size:11px;color:#475569">
+        Item Master + Schedule Result + BOH Balance. Place 3 files in <code>data/</code> or upload below.
       </div>
       <div id="${isCompact ? 'uploadBarContent' : 'uploadFullContent'}">
-        <div class="upload-grid" style="${gridStyle}">
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
           <div class="upload-card" id="card_master_${isCompact?'compact':'full'}">
             <div class="upload-label">📁 Item Master <span class="req">*</span></div>
-            <div class="upload-hint">料号主表.xlsx<br>ITEM_NO, CATEGORY, STYLE</div>
             <input type="file" class="file-input" id="input_master_${isCompact?'compact':'full'}" accept=".xlsx">
             <div class="fname" id="fname_master_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div>
           </div>
           <div class="upload-card" id="card_schedule_${isCompact?'compact':'full'}">
             <div class="upload-label">📁 Schedule <span class="req">*</span></div>
-            <div class="upload-hint">排产结果表.xlsx<br>LINE, SHIFT, PLAN_ITEM, SKU, DATE, VALUE</div>
             <input type="file" class="file-input" id="input_schedule_${isCompact?'compact':'full'}" accept=".xlsx">
             <div class="fname" id="fname_schedule_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div>
           </div>
           <div class="upload-card" id="card_balance_${isCompact?'compact':'full'}">
             <div class="upload-label">📁 BOH Balance <span class="req">*</span></div>
-            <div class="upload-hint">结存表.xlsx<br>DATE, SHIFT, ITEM_CODE, BALANCE_QTY</div>
             <input type="file" class="file-input" id="input_balance_${isCompact?'compact':'full'}" accept=".xlsx">
             <div class="fname" id="fname_balance_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div>
           </div>
-          ${isCompact ? '' : `
-          <div class="upload-card" id="card_folder_full" style="border-style:dashed">
-            <div class="upload-label">📂 Folder (3 files)</div>
-            <div class="upload-hint">Select folder containing 3 xlsx, auto-matched</div>
-            <input type="file" id="input_folder_full" webkitdirectory style="display:none">
-            <button class="btn btn-sm btn-outline" id="btnFolder_full" style="margin-top:6px">Choose Folder</button>
-            <div class="fname" id="fname_folder_full" style="font-size:11px;color:#3b82f6;margin-top:6px"></div>
-          </div>
-          `}
         </div>
-        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled style="padding:6px 20px">▶ Upload & Analyze</button>
-          <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck data/ folder</button>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+          <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled>▶ Upload & Analyze</button>
+          <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck data/</button>
           <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
         </div>
       </div>
@@ -123,8 +104,7 @@ function attachUploadLogic(isCompact){
     input.addEventListener('change', ()=>{
       if(input.files.length>0){
         files[k]=input.files[0];
-        const fn = document.getElementById('fname_'+k+'_'+suffix);
-        if(fn) fn.textContent = '✓ ' + input.files[0].name;
+        document.getElementById('fname_'+k+'_'+suffix).textContent = '✓ ' + input.files[0].name;
         markHasFile('card_'+k+'_'+suffix, true);
       }else{
         files[k]=null;
@@ -133,35 +113,6 @@ function attachUploadLogic(isCompact){
       updateBtn();
     });
   });
-  if(!isCompact){
-    const folderInput = document.getElementById('input_folder_full');
-    const folderBtn = document.getElementById('btnFolder_full');
-    if(folderBtn) folderBtn.addEventListener('click', ()=> folderInput.click());
-    if(folderInput){
-      folderInput.addEventListener('change', ()=>{
-        if(!folderInput.files.length) return;
-        for(const f of folderInput.files){
-          const lower = f.name.toLowerCase();
-          if(lower.includes('master') || f.name.includes('料号')){
-            files.master=f; document.getElementById('fname_master_full').textContent='✓ '+f.name; markHasFile('card_master_full',true);
-          }else if(lower.includes('schedule') || lower.includes('result') || f.name.includes('排产')){
-            files.schedule=f; document.getElementById('fname_schedule_full').textContent='✓ '+f.name; markHasFile('card_schedule_full',true);
-          }else if(lower.includes('balance') || lower.includes('boh') || f.name.includes('结存')){
-            files.balance=f; document.getElementById('fname_balance_full').textContent='✓ '+f.name; markHasFile('card_balance_full',true);
-          }
-        }
-        const xlsx = Array.from(folderInput.files).filter(x=> x.name.endsWith('.xlsx'));
-        if(xlsx.length>=3){
-          if(!files.master){ files.master=xlsx[0]; document.getElementById('fname_master_full').textContent='✓ '+xlsx[0].name; markHasFile('card_master_full',true); }
-          if(!files.schedule){ files.schedule=xlsx[1]; document.getElementById('fname_schedule_full').textContent='✓ '+xlsx[1].name; markHasFile('card_schedule_full',true); }
-          if(!files.balance){ files.balance=xlsx[2]; document.getElementById('fname_balance_full').textContent='✓ '+xlsx[2].name; markHasFile('card_balance_full',true); }
-        }
-        const ff = document.getElementById('fname_folder_full');
-        if(ff){ const cnt=Object.values(files).filter(Boolean).length; ff.textContent = cnt===3 ? '✅ Matched 3 files' : `⚠️ Matched ${cnt}/3`; }
-        updateBtn();
-      });
-    }
-  }
   const uploadBtn = document.getElementById('uploadBtn_'+suffix);
   if(uploadBtn){
     uploadBtn.addEventListener('click', async ()=>{
@@ -176,11 +127,11 @@ function attachUploadLogic(isCompact){
       try{
         const resp = await fetch('/api/io/upload', { method: 'POST', body: form });
         const result = await resp.json();
-        if(result.ok || result.fg!==undefined){
-          if(prog) prog.innerHTML = `<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB - Refreshing...</span>`;
-          setTimeout(()=> renderReportsPage(), 1000);
+        if(result.ok){
+          if(prog) prog.innerHTML = `<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB</span>`;
+          setTimeout(()=> renderReportsPage(), 800);
         }else{
-          if(prog) prog.innerHTML = `<span style="color:#dc2626">❌ Failed: ${JSON.stringify(result)}</span>`;
+          if(prog) prog.innerHTML = `<span style="color:#dc2626">❌ ${JSON.stringify(result)}</span>`;
           uploadBtn.disabled = false;
           uploadBtn.textContent = '▶ Upload & Analyze';
         }
@@ -195,26 +146,18 @@ function attachUploadLogic(isCompact){
   if(retryBtn){
     retryBtn.addEventListener('click', async ()=>{
       const ok = await checkStatus();
-      const prog = document.getElementById('uploadProgress_'+suffix);
-      if(ok){
-        if(prog) prog.textContent='✅ Data found, loading reports...';
-        renderReportsPage();
-      }else{
-        alert('No valid data in data/. Place 3 files: 料号主表.xlsx, 排产结果表.xlsx, 结存表.xlsx');
-      }
+      if(ok) renderReportsPage();
+      else alert('No valid data in data/');
     });
   }
   if(isCompact){
-    const toggle = document.getElementById('toggleUploadBar');
-    if(toggle){
-      toggle.addEventListener('click', ()=>{
-        const content = document.getElementById('uploadBarContent');
-        if(!content) return;
-        const isHidden = content.style.display==='none';
-        content.style.display = isHidden ? 'block' : 'none';
-        toggle.textContent = isHidden ? '▼ Collapse' : '▶ Expand';
-      });
-    }
+    document.getElementById('toggleUploadBar')?.addEventListener('click', ()=>{
+      const c = document.getElementById('uploadBarContent');
+      if(!c) return;
+      const hid = c.style.display==='none';
+      c.style.display = hid ? 'block' : 'none';
+      document.getElementById('toggleUploadBar').textContent = hid ? '▼ Collapse' : '▶ Expand';
+    });
   }
 }
 
@@ -223,16 +166,15 @@ function renderUploadPage(){
   attachUploadLogic(false);
 }
 
-// ---------- Reports Page ----------
+// ---------- New Left Group Boxes UX ----------
 function renderReportsPage(){
   ioRoot.innerHTML = buildUploadSectionHTML(true) + `
     <div class="section" id="io-main-section">
       <div class="section-header">
         <span class="section-title">📈 I/O Report</span>
         <div class="section-actions">
-          <span id="io-report-status" style="font-size:12px;color:#059669"></span>
-          <button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All (Excel)</button>
-          <button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset Groups</button>
+          <button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button>
+          <button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button>
         </div>
       </div>
 
@@ -243,21 +185,17 @@ function renderReportsPage(){
 
       <div class="toolbar" id="io-toolbar">
         <div class="panels-row">
-          <div class="panel" style="flex:1;min-width:260px">
+          <div class="panel" style="flex:1;min-width:220px">
             <div class="panel-label">Row Dimensions (drag to order)</div>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
               <span class="dim-chip available" draggable="true" data-dim="LINE_CODE">Line</span>
               <span class="dim-chip available" draggable="true" data-dim="ITEM_NO">PN</span>
               <span class="dim-chip available" draggable="true" data-dim="STYLE">Style</span>
-              <div id="ioDimWell" class="dim-well">
-                <span class="placeholder">Drop dimensions here</span>
-              </div>
+              <div id="ioDimWell" class="dim-well"><span class="placeholder">Drop dimensions here</span></div>
             </div>
-            <div style="font-size:10px;color:#94a3b8;margin-top:4px">Drag to order. 1 dim = flat, 2+ = expandable groups.</div>
           </div>
-
-          <div class="panel" style="min-width:200px">
-            <div class="panel-label">Column Dimensions</div>
+          <div class="panel" style="min-width:160px">
+            <div class="panel-label">Column</div>
             <div class="btn-group" id="ioColDimTabs" style="margin-top:6px">
               <button class="btn" data-coldim="shift">Shift</button>
               <button class="btn active" data-coldim="day">Day</button>
@@ -265,69 +203,55 @@ function renderReportsPage(){
               <button class="btn" data-coldim="month">Month</button>
             </div>
           </div>
-
-          <div class="panel" style="flex:1;min-width:300px">
+          <div class="panel" style="flex:1;min-width:260px">
             <div class="panel-label">Filters</div>
             <div class="filter-row" style="margin-top:6px">
-              <div class="filter-group">
-                <label>Line</label>
-                <div class="filter-input-wrap" id="fiw_lineCode">
-                  <input type="text" class="filter-input" id="fi_lineCode" placeholder="All" autocomplete="off">
-                  <span class="filter-arrow">▾</span>
-                  <div class="filter-dropdown" id="fd_lineCode"></div>
-                </div>
-              </div>
-              <div class="filter-group">
-                <label>PN</label>
-                <div class="filter-input-wrap" id="fiw_itemNo">
-                  <input type="text" class="filter-input" id="fi_itemNo" placeholder="All" autocomplete="off">
-                  <span class="filter-arrow">▾</span>
-                  <div class="filter-dropdown" id="fd_itemNo"></div>
-                </div>
-              </div>
-              <div class="filter-group">
-                <label>Style</label>
-                <div class="filter-input-wrap" id="fiw_style">
-                  <input type="text" class="filter-input" id="fi_style" placeholder="All" autocomplete="off">
-                  <span class="filter-arrow">▾</span>
-                  <div class="filter-dropdown" id="fd_style"></div>
-                </div>
-              </div>
-              <div class="filter-group" style="justify-content:flex-end">
-                <button id="ioRefreshBtn" class="btn btn-outline btn-sm" style="margin-top:14px">Refresh</button>
-              </div>
+              <div class="filter-group"><label>Line</label><div class="filter-input-wrap" id="fiw_lineCode"><input type="text" class="filter-input" id="fi_lineCode" placeholder="All"><span class="filter-arrow">▾</span><div class="filter-dropdown" id="fd_lineCode"></div></div></div>
+              <div class="filter-group"><label>PN</label><div class="filter-input-wrap" id="fiw_itemNo"><input type="text" class="filter-input" id="fi_itemNo" placeholder="All"><span class="filter-arrow">▾</span><div class="filter-dropdown" id="fd_itemNo"></div></div></div>
+              <div class="filter-group"><label>Style</label><div class="filter-input-wrap" id="fiw_style"><input type="text" class="filter-input" id="fi_style" placeholder="All"><span class="filter-arrow">▾</span><div class="filter-dropdown" id="fd_style"></div></div></div>
+              <div class="filter-group" style="justify-content:flex-end"><button id="ioRefreshBtn" class="btn btn-outline btn-sm" style="margin-top:14px">Refresh</button></div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="merge-info" style="margin-top:12px;padding:8px 12px;background:#f0f9ff;border:1px dashed #93c5fd;border-radius:6px;font-size:11px;color:#334155;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <span>💡 <strong>Merge:</strong> drag芯片到另一卡片合并为一张表（多合一），合并表新增 <code>Type</code> 列并按类型着色。支持同时存在多个合并组，例如 Group1=Daily+Cum Input，Group2=Daily+Cum Output。</span>
-        <span style="color:#64748b">Groups: <span id="mergeGroupCount">9</span></span>
-        <button id="addEmptyGroupBtn" class="btn btn-sm btn-outline" style="padding:2px 8px;font-size:11px">➕ Add Empty Group</button>
+      <div class="merge-info" style="margin-top:12px;padding:10px 12px;background:#f0f9ff;border:1px solid #bfdbfe;border-radius:8px;font-size:11px;color:#334155">
+        <div style="font-weight:600;margin-bottom:4px">💡 合并方案：左侧一列方框，每框1个标签起步 → 拖动标签拼到另一框合并 → 右侧生成一张大表（同Line/PN相邻）</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span>Groups: <strong id="mergeGroupCount">9</strong></span>
+          <span style="color:#64748b">支持多组合并并存，例如 Group1=Daily+Cum Input，Group2=Daily+Cum Output</span>
+          <button id="addEmptyGroupBtn" class="btn btn-sm btn-outline">➕ Add Group</button>
+        </div>
       </div>
 
-      <div class="container-fluid" style="padding:0;margin-top:12px">
-        <div class="row" style="display:flex;gap:12px">
-          <div class="col-1" style="flex:0 0 160px;max-width:160px">
-            <div class="io-sidebar" style="position:sticky;top:70px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
-              <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:8px;text-transform:uppercase">Report Types (9)</div>
-              ${REPORTS.map((r,i)=> `<a class="anchor report-anchor" href="#" data-type="${r}" style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:4px;font-size:12px;color:#334155;text-decoration:none;margin-bottom:2px;cursor:pointer"><span class="type-dot dot-${r}" style="width:8px;height:8px;border-radius:50%;display:inline-block"></span>${i+1}. ${esc(REPORT_NAMES[r])}</a>`).join('')}
-              <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:10px;color:#94a3b8">Click to jump. Drag chips to merge.<br>支持多组合并：可同时存在 Group1=Daily+Cum Input, Group2=Output+BOH 等。</div>
-              <div id="unassignedDrop" class="unassigned-drop" style="margin-top:12px;border:2px dashed #cbd5e1;border-radius:6px;padding:8px;text-align:center;font-size:11px;color:#94a3b8">Drop here to split into separate group</div>
-              <div id="newMergedDrop" class="unassigned-drop" style="margin-top:8px;border:2px dashed #8b5cf6;border-radius:6px;padding:8px;text-align:center;font-size:11px;color:#6d28d9;background:#faf5ff">➕ Drop here to create NEW merged group<br><small style="font-size:10px;color:#94a3b8">拖入多个类型自动合并</small></div>
+      <div style="display:flex;gap:12px;margin-top:12px;align-items:flex-start">
+        <!-- LEFT: Group Boxes Manager -->
+        <div style="flex:0 0 220px;max-width:220px;position:sticky;top:70px">
+          <div class="io-left-manager" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
+            <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+              <span>📦 Group Boxes</span>
+              <span style="font-size:10px;color:#94a3b8">${REPORTS.length} types</span>
+            </div>
+            <div id="leftGroupBoxes" style="display:flex;flex-direction:column;gap:8px"></div>
+            <div id="pendingBox" style="margin-top:10px;display:none"></div>
+            <div id="newMergedDrop" class="group-box empty" style="margin-top:10px;border:2px dashed #8b5cf6;background:#faf5ff;padding:12px;text-align:center;font-size:11px;color:#6d28d9;border-radius:8px;cursor:copy">
+              ➕ 拖入多个标签<br>创建新合并组<br><small style="color:#94a3b8">Drop multiple chips here</small>
+            </div>
+            <div style="margin-top:10px;font-size:10px;color:#94a3b8;line-height:1.4">
+              • 拖动标签拼到另一框合并<br>
+              • 点击方框跳转右侧<br>
+              • 点击 × 拆分<br>
+              • 合并表：行维度优先，同Line/PN相邻，Type列区分
             </div>
           </div>
-          <div class="col-11" style="flex:1;min-width:0">
-            <div id="ioReportContent">
-              <div style="text-align:center;padding:40px;color:#94a3b8">Please drag row dimensions into the box above</div>
-            </div>
-          </div>
+        </div>
+        <!-- RIGHT: Tables -->
+        <div style="flex:1;min-width:0">
+          <div id="ioReportContent"></div>
         </div>
       </div>
     </div>
   `;
-
   attachUploadLogic(true);
   initReportsPage();
   initMergeDragDrop();
@@ -353,38 +277,18 @@ function initReportsPage(){
   initSearchableSelect('lineCode');
   initSearchableSelect('itemNo');
   initSearchableSelect('style');
-
   dimOrder = [];
   allData = null;
   renderDimWell();
   initDimDragDrop();
   refreshMeta().then(()=> loadAllReports());
-
-  const rb = document.getElementById('ioRefreshBtn');
-  if(rb) rb.addEventListener('click', loadAllReports);
-  const dlAll = document.getElementById('io-dl-all');
-  if(dlAll) dlAll.addEventListener('click', downloadAll);
-  const resetBtn = document.getElementById('io-reset-groups');
-  if(resetBtn) resetBtn.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); pendingNewGroup = []; renderAllReports(); });
-  const addEmptyBtn = document.getElementById('addEmptyGroupBtn');
-  if(addEmptyBtn) addEmptyBtn.addEventListener('click', ()=>{ addEmptyGroup(); });
-
-  // sidebar anchor jump - now jumps to group containing type
-  document.querySelectorAll('.report-anchor').forEach(a=>{
-    a.addEventListener('click', (e)=>{
-      e.preventDefault();
-      const rtype = a.dataset.type;
-      const gIdx = reportGroups.findIndex(g=> g.includes(rtype));
-      const el = document.getElementById(gIdx>=0 ? `io_group_${gIdx}` : `io_sec_${rtype}`);
-      el?.scrollIntoView({behavior:'smooth', block:'start'});
-      document.querySelectorAll('.report-anchor').forEach(x=> x.style.background='');
-      a.style.background='#eff6ff';
-      a.style.color='#3b82f6';
-    });
-  });
+  document.getElementById('ioRefreshBtn')?.addEventListener('click', loadAllReports);
+  document.getElementById('io-dl-all')?.addEventListener('click', downloadAll);
+  document.getElementById('io-reset-groups')?.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); pendingNewGroup=[]; renderAllReports(); });
+  document.getElementById('addEmptyGroupBtn')?.addEventListener('click', ()=>{ reportGroups.push([]); renderAllReports(); });
 }
 
-// ---------- Searchable selects ----------
+// searchable selects
 function initSearchableSelect(key){
   const input = document.getElementById('fi_' + key);
   const dd = document.getElementById('fd_' + key);
@@ -412,8 +316,7 @@ function filterDropdown(key, text){
   const dd = document.getElementById('fd_' + key);
   if(!dd) return;
   dd.querySelectorAll('.fo').forEach(item=>{
-    if(item.dataset.value===''){ item.style.display=''; }
-    else{ item.style.display = item.textContent.toLowerCase().includes(text.toLowerCase()) ? '' : 'none'; }
+    item.style.display = item.dataset.value==='' ? '' : (item.textContent.toLowerCase().includes(text.toLowerCase()) ? '' : 'none');
   });
 }
 function populateFilter(key, options){
@@ -428,7 +331,7 @@ function populateFilter(key, options){
   dd.innerHTML = html;
 }
 
-// ---------- Dim drag drop ----------
+// dim drag
 function initDimDragDrop(){
   document.querySelectorAll('#io-report-section .dim-chip.available').forEach(chip=>{
     chip.addEventListener('dragstart', e=>{
@@ -440,11 +343,11 @@ function initDimDragDrop(){
   });
   const well = document.getElementById('ioDimWell');
   if(well){
-    well.addEventListener('dragover', e=>{ if(e.dataTransfer.types.includes('text/x-dim')|| e.dataTransfer.getData('text/plain') in DIM_LABELS || true){ e.preventDefault(); well.classList.add('drag-over'); }});
+    well.addEventListener('dragover', e=>{ if(e.dataTransfer.types.includes('text/x-dim')||true){ e.preventDefault(); well.classList.add('drag-over'); }});
     well.addEventListener('dragleave', ()=> well.classList.remove('drag-over'));
     well.addEventListener('drop', e=>{
       e.preventDefault(); well.classList.remove('drag-over');
-      if(e.dataTransfer.getData('text/x-report')) return; // ignore report chips
+      if(e.dataTransfer.getData('text/x-report')) return;
       const dim = e.dataTransfer.getData('text/plain');
       if(!dim || !DIM_LABELS[dim]) return;
       if(dragFromDim){
@@ -498,7 +401,7 @@ async function refreshMeta(){
         filterVals[fk]=''; const inp = document.getElementById('fi_'+fk); if(inp) inp.value='';
       }
     }
-  }catch(e){ console.error('refreshMeta fail', e); }
+  }catch(e){ console.error(e); }
 }
 async function loadAllReports(){
   const dim = getDimParam();
@@ -506,9 +409,10 @@ async function loadAllReports(){
   if(!dim){
     allData=null;
     if(content) content.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8">Please drag row dimensions into the box above</div>';
+    renderLeftGroupBoxes();
     return;
   }
-  if(content) content.innerHTML = '<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading reports...</div>';
+  if(content) content.innerHTML = '<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading...</div>';
   const groupParam = currentGroup === 'FG' ? '成品' : 'GB';
   const params = new URLSearchParams({group:groupParam, dim, col_dim:COL_DIM, line_code:filterVals.lineCode, item_no:filterVals.itemNo, style:filterVals.style});
   try{
@@ -518,33 +422,54 @@ async function loadAllReports(){
     allData = data;
     renderAllReports();
   }catch(e){
-    if(content) content.innerHTML = `<div style="text-align:center;padding:24px;color:#dc2626">❌ Load failed: ${esc(e.message)}</div>`;
+    if(content) content.innerHTML = `<div style="text-align:center;padding:24px;color:#dc2626">❌ ${esc(e.message)}</div>`;
   }
 }
 
-// ---------- Merge logic - supports multiple merged groups ----------
-let pendingNewGroup = []; // for creating new merged group via drop zone
+// ---------- Left Group Boxes Manager ----------
+function renderLeftGroupBoxes(){
+  const container = document.getElementById('leftGroupBoxes');
+  if(!container) return;
+  let html = '';
+  // pending new merged group on left top
+  if(pendingNewGroup.length>0){
+    html += `<div class="group-box merged pending" style="border-color:#8b5cf6;background:#faf5ff">
+      <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px">🆕 NEW (${pendingNewGroup.length}) — Confirm to create</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+        ${pendingNewGroup.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-pending="1" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])}<span class="remove" onclick="event.stopPropagation(); ioRemovePendingType('${t}')">×</span></span>`).join('')}
+      </div>
+      <div style="display:flex;gap:4px"><button class="btn btn-sm" style="flex:1" onclick="ioConfirmPendingGroup()">✓ Confirm</button><button class="btn btn-sm btn-outline" style="flex:1" onclick="ioClearPendingGroup()">✕ Cancel</button></div>
+    </div>`;
+  }
+  reportGroups.forEach((groupTypes, gIdx)=>{
+    if(!groupTypes) groupTypes=[];
+    const isEmpty = groupTypes.length===0;
+    const isMerged = groupTypes.length>1;
+    const border = isEmpty ? '#cbd5e1' : (isMerged ? '#8b5cf6' : '#3b82f6');
+    const bg = isEmpty ? '#f8fafc' : (isMerged ? '#faf5ff' : '#fff');
+    if(isEmpty){
+      html += `<div class="group-box empty" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" style="border:2px dashed ${border};background:${bg};border-radius:8px;padding:12px;text-align:center;cursor:copy">
+        <div style="font-size:11px;color:#94a3b8">📭 Empty Box ${gIdx+1}<br>Drop chips here</div>
+        <button class="btn btn-sm btn-outline" style="margin-top:6px" onclick="reportGroups.splice(${gIdx},1); renderAllReports();">✕ Remove</button>
+      </div>`;
+    }else{
+      const chips = groupTypes.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-group="${gIdx}" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])}<span class="remove" onclick="event.stopPropagation(); ioSplitType(${gIdx},'${t}')">×</span></span>`).join('');
+      html += `<div class="group-box ${isMerged?'merged':''}" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" onclick="ioJumpToGroup(${gIdx})" style="border:1px solid ${border};background:${bg};border-radius:8px;padding:8px;cursor:pointer;transition:all .15s">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:10px;font-weight:700;color:#475569">BOX ${gIdx+1} ${isMerged?`(${groupTypes.length} merged)`:`(1)`}</span>
+          <span style="font-size:10px;color:#94a3b8">${isMerged?'🔗 Merged':''}</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${chips}</div>
+        ${isMerged?`<div style="margin-top:6px;font-size:10px;color:#6d28d9">Type列区分，同维度相邻</div>`:''}
+      </div>`;
+    }
+  });
+  container.innerHTML = html || '<div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px">No groups — click Reset</div>';
+  const countEl = document.getElementById('mergeGroupCount');
+  if(countEl) countEl.textContent = String(reportGroups.filter(g=>g.length>0).length + (pendingNewGroup.length>0?1:0));
+}
 
 function initMergeDragDrop(){
-  const unassigned = document.getElementById('unassignedDrop');
-  if(unassigned){
-    unassigned.addEventListener('dragover', e=>{ if(draggedReport){ e.preventDefault(); unassigned.classList.add('drag-over'); }});
-    unassigned.addEventListener('dragleave', ()=> unassigned.classList.remove('drag-over'));
-    unassigned.addEventListener('drop', e=>{
-      e.preventDefault(); unassigned.classList.remove('drag-over');
-      if(!draggedReport) return;
-      const {type, fromGroup} = draggedReport;
-      const from = reportGroups[fromGroup];
-      if(from){
-        const idx = from.indexOf(type);
-        if(idx>=0) from.splice(idx,1);
-        if(from.length===0) reportGroups.splice(fromGroup,1);
-      }
-      reportGroups.push([type]);
-      draggedReport=null;
-      renderAllReports();
-    });
-  }
   const newMerged = document.getElementById('newMergedDrop');
   if(newMerged){
     newMerged.addEventListener('dragover', e=>{ if(draggedReport){ e.preventDefault(); newMerged.classList.add('drag-over'); }});
@@ -559,7 +484,6 @@ function initMergeDragDrop(){
         if(idx>=0) from.splice(idx,1);
         if(from.length===0) reportGroups.splice(fromGroup,1);
       }
-      // accumulate into pendingNewGroup
       if(!pendingNewGroup.includes(type)) pendingNewGroup.push(type);
       draggedReport=null;
       renderAllReports();
@@ -567,16 +491,12 @@ function initMergeDragDrop(){
   }
 }
 
-function addEmptyGroup(){
-  reportGroups.push([]);
-  renderAllReports();
-}
+function addEmptyGroup(){ reportGroups.push([]); renderAllReports(); }
 window.ioAddEmptyGroup = addEmptyGroup;
 
 function handleReportDragStart(e){
   const type = e.currentTarget.dataset.type;
   const fromGroup = e.currentTarget.dataset.group ? parseInt(e.currentTarget.dataset.group) : -1;
-  // if from pending group
   if(e.currentTarget.dataset.pending){
     draggedReport = {type, fromGroup: -2, fromPending: true};
   }else{
@@ -589,26 +509,23 @@ function handleReportDragStart(e){
 }
 function handleReportDragEnd(e){
   e.currentTarget.classList.remove('dragging');
-  document.querySelectorAll('.merge-group').forEach(el=> el.classList.remove('drag-over'));
-  document.querySelectorAll('.unassigned-drop').forEach(el=> el.classList.remove('drag-over'));
+  document.querySelectorAll('.group-box').forEach(el=> el.classList.remove('drag-over'));
+  document.querySelectorAll('.report-section').forEach(el=> el.classList.remove('drag-over'));
+  document.getElementById('newMergedDrop')?.classList.remove('drag-over');
 }
 function handleGroupDragOver(e){
   if(!draggedReport) return;
   e.preventDefault();
   e.currentTarget.classList.add('drag-over');
 }
-function handleGroupDragLeave(e){
-  e.currentTarget.classList.remove('drag-over');
-}
+function handleGroupDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
 function handleGroupDrop(e, toGroupIdx){
   e.preventDefault();
   e.currentTarget.classList.remove('drag-over');
   if(!draggedReport) return;
   const {type, fromGroup, fromPending} = draggedReport;
   if(!fromPending && fromGroup===toGroupIdx) { draggedReport=null; return; }
-
   if(fromPending){
-    // from pending new group to existing group
     const idx = pendingNewGroup.indexOf(type);
     if(idx>=0) pendingNewGroup.splice(idx,1);
     const to = reportGroups[toGroupIdx];
@@ -616,7 +533,7 @@ function handleGroupDrop(e, toGroupIdx){
   }else{
     const from = reportGroups[fromGroup];
     const to = reportGroups[toGroupIdx];
-    if(!from || !to) { draggedReport=null; return; }
+    if(!from || !to){ draggedReport=null; return; }
     const idx = from.indexOf(type);
     if(idx>=0) from.splice(idx,1);
     if(from.length===0){
@@ -643,9 +560,7 @@ function splitReportType(groupIdx, type){
   if(!g) return;
   const pos = g.indexOf(type);
   if(pos>=0) g.splice(pos,1);
-  if(g.length===0){
-    reportGroups.splice(groupIdx,1);
-  }
+  if(g.length===0) reportGroups.splice(groupIdx,1);
   reportGroups.push([type]);
   renderAllReports();
 }
@@ -657,29 +572,33 @@ function removePendingType(type){
   renderAllReports();
 }
 window.ioRemovePendingType = removePendingType;
-
 function confirmPendingGroup(){
   if(pendingNewGroup.length>0){
     reportGroups.push([...pendingNewGroup]);
-    pendingNewGroup = [];
+    pendingNewGroup=[];
     renderAllReports();
   }
 }
 window.ioConfirmPendingGroup = confirmPendingGroup;
-
 function clearPendingGroup(){
-  // return types to separate groups
   pendingNewGroup.forEach(t=> reportGroups.push([t]));
-  pendingNewGroup = [];
+  pendingNewGroup=[];
   renderAllReports();
 }
 window.ioClearPendingGroup = clearPendingGroup;
 
-// Merge helpers
+function jumpToGroup(gIdx){
+  const el = document.getElementById(`io_group_${gIdx}`);
+  el?.scrollIntoView({behavior:'smooth', block:'start'});
+  el?.classList.add('jump-highlight');
+  setTimeout(()=> el?.classList.remove('jump-highlight'), 1500);
+}
+window.ioJumpToGroup = jumpToGroup;
+
+// merge helpers
 function mergeTypesData(types){
   let columns = [];
   let colSet = new Set();
-  // union columns preserving order of first occurrence
   types.forEach(t=>{
     const d = allData[t];
     if(!d || !d.columns) return;
@@ -689,137 +608,106 @@ function mergeTypesData(types){
   types.forEach(t=>{
     const d = allData[t];
     if(!d || !d.rows) return;
-    d.rows.forEach(r=>{
-      rows.push({ ...r, _REPORT_TYPE: REPORT_NAMES[t], _REPORT_KEY: t });
-    });
+    d.rows.forEach(r=>{ rows.push({ ...r, _REPORT_TYPE: REPORT_NAMES[t], _REPORT_KEY: t }); });
   });
   return { columns, rows };
 }
 
 function renderAllReports(){
   const content = document.getElementById('ioReportContent');
-  const countEl = document.getElementById('mergeGroupCount');
   if(!content) return;
+  renderLeftGroupBoxes();
   if(!allData){ content.innerHTML = '<div style="text-align:center;padding:24px;color:#94a3b8">No data</div>'; return; }
-  // keep empty groups for UX, but ensure at least one group
   if(reportGroups.length===0) reportGroups = REPORTS.map(r=>[r]);
-  // count display: include pending as half?
-  if(countEl) countEl.textContent = String(reportGroups.filter(g=>g.length>0).length + (pendingNewGroup.length>0?1:0));
 
   let html = '';
-
-  // render pending new merged group on top if exists
-  if(pendingNewGroup.length>0){
-    html += `<div class="report-section merge-group merged pending" id="io_group_pending" style="border-color:#8b5cf6;background:#faf5ff" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="event.preventDefault(); if(!draggedReport) return; const {type,fromGroup,fromPending}=draggedReport; if(fromPending){ const idx=pendingNewGroup.indexOf(type); if(idx>=0) pendingNewGroup.splice(idx,1); }else{ const from=reportGroups[fromGroup]; if(from){ const i=from.indexOf(type); if(i>=0) from.splice(i,1); if(from.length===0) reportGroups.splice(fromGroup,1); } } if(!pendingNewGroup.includes(type)) pendingNewGroup.push(type); draggedReport=null; renderAllReports();">
-      <div class="group-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:2px dashed #8b5cf6;padding-bottom:6px;margin-bottom:8px">
-        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-          <span style="font-size:11px;font-weight:700;color:#6d28d9">🆕 NEW GROUP (${pendingNewGroup.length} types):</span>
-          ${pendingNewGroup.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-pending="1" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])} <span class="remove" onclick="event.stopPropagation(); ioRemovePendingType('${t}')">×</span></span>`).join('')}
-        </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-sm" onclick="ioConfirmPendingGroup()">✓ Confirm</button>
-          <button class="btn btn-sm btn-outline" onclick="ioClearPendingGroup()">✕ Cancel</button>
-        </div>
-      </div>
-      <div style="font-size:11px;color:#64748b">Will be <strong>${pendingNewGroup.map(t=>REPORT_NAMES[t]).join(' + ')}</strong> ${pendingNewGroup.length>1?'(merged with Type column)':''}</div>
-    </div>`;
-  }
   reportGroups.forEach((groupTypes, gIdx)=>{
-    if(!groupTypes || groupTypes.length===0){
-      html += `<div class="report-section merge-group empty" id="io_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" style="border:2px dashed #cbd5e1;background:#f8fafc">
-        <div style="text-align:center;padding:20px;color:#94a3b8">📭 Empty Group ${gIdx+1} — Drop report type chips here to create ${'<strong>multiple merged groups</strong>同时共存'}<br><small>可拖入多个类型形成合并表，例如 Daily+Cum Input 为一组，Daily+Cum Output 为另一组</small></div>
-        <div style="text-align:center;margin-top:8px"><button class="btn btn-sm btn-outline" onclick="reportGroups.splice(${gIdx},1); renderAllReports();">✕ Remove Empty Group</button></div>
-      </div>`;
-      return;
-    }
+    if(!groupTypes || groupTypes.length===0) return; // empty boxes only in left, no table on right
     const isMerged = groupTypes.length > 1;
     const titles = groupTypes.map(t=> REPORT_NAMES[t]).join(' + ');
     const isDetail = getDimParam()==='detail' && dimOrder.length>=2;
     let tableHTML = '';
-    let totalRows = 0;
-    let totalCols = 0;
+    let totalRows = 0, totalCols = 0;
 
     if(isMerged){
       const merged = mergeTypesData(groupTypes);
       totalRows = merged.rows.length;
       totalCols = merged.columns.length;
-      if(totalRows===0){
-        tableHTML = '<div style="text-align:center;padding:20px;color:#94a3b8">No data for current filters</div>';
-      }else{
-        if(isDetail){
-          tableHTML = buildMergedHierarchicalTable(merged, dimOrder);
-        }else{
-          tableHTML = buildMergedFlatTable(merged, dimOrder[0] || 'ITEM_NO');
-        }
-      }
+      tableHTML = totalRows===0 ? '<div style="text-align:center;padding:20px;color:#94a3b8">No data</div>' : (isDetail ? buildMergedHierarchicalTable(merged, dimOrder) : buildMergedFlatTable(merged, dimOrder[0] || 'ITEM_NO'));
     }else{
       const rtype = groupTypes[0];
       const data = allData[rtype];
       totalRows = data ? data.rows.length : 0;
       totalCols = data ? data.columns.length : 0;
       if(!data || !data.rows || data.rows.length===0){
-        tableHTML = '<div style="text-align:center;padding:20px;color:#94a3b8">No data for current filters</div>';
+        tableHTML = '<div style="text-align:center;padding:20px;color:#94a3b8">No data</div>';
       }else{
         const enriched = { columns: data.columns, rows: data.rows.map(r=> ({...r, _REPORT_TYPE: REPORT_NAMES[rtype], _REPORT_KEY: rtype})) };
-        if(isDetail){
-          tableHTML = isMerged ? buildMergedHierarchicalTable(enriched, dimOrder) : buildHierarchicalTable(enriched, dimOrder, rtype);
-        }else{
-          tableHTML = isMerged ? buildMergedFlatTable(enriched, dimOrder[0]||'ITEM_NO') : buildFlatTable(enriched, dimOrder[0]||'ITEM_NO', rtype);
-        }
+        tableHTML = isDetail ? buildHierarchicalTable(enriched, dimOrder, rtype) : buildFlatTable(enriched, dimOrder[0]||'ITEM_NO', rtype);
       }
     }
 
-    const chips = groupTypes.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-group="${gIdx}" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])} <span class="remove" onclick="event.stopPropagation(); ioSplitType(${gIdx},'${t}')">×</span></span>`).join('');
+    const badges = groupTypes.map(t=> `<span class="type-badge type-${t}">${esc(REPORT_NAMES[t])}</span>`).join(' ');
 
-    html += `<div class="report-section merge-group ${isMerged?'merged':''}" id="io_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})">
-      <div class="group-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:2px solid ${isMerged?'#8b5cf6':'#3b82f6'};padding-bottom:6px;margin-bottom:8px">
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px">${chips}</div>
-          <div style="font-size:11px;color:#64748b">${esc(titles)} — ${totalRows} rows × ${totalCols} cols ${isMerged?'<span style="color:#8b5cf6;font-weight:600"> (Merged, Type column added)</span>':''}</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
-          ${isMerged
-            ? `<button class="btn btn-sm btn-outline" onclick="window.ioDownloadMerged(${gIdx})">📥 Excel</button>`
-            : `<button class="btn btn-sm btn-outline" onclick="window.ioDownloadExcel('${groupTypes[0]}')">📥 Excel</button>`
-          }
-        </div>
+    html += `<div class="report-section merge-group ${isMerged?'merged':''}" id="io_group_${gIdx}" data-group-idx="${gIdx}">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid ${isMerged?'#8b5cf6':'#3b82f6'};padding-bottom:6px;margin-bottom:8px">
+        <div><h6 style="margin:0;font-size:13px;font-weight:700">${esc(titles)}</h6><div style="font-size:11px;color:#64748b">${totalRows} rows × ${totalCols} cols ${isMerged?'<span style="color:#8b5cf6">(Merged, 同维度相邻)</span>':''} — ${badges}</div></div>
+        <div style="display:flex;gap:6px"><button class="btn btn-sm btn-outline" onclick="window.${isMerged?'ioDownloadMerged':'ioDownloadExcel'}(${isMerged?gIdx:`'${groupTypes[0]}'`})">📥 Excel</button></div>
       </div>
       ${tableHTML}
     </div>`;
   });
-
-  content.innerHTML = html;
+  content.innerHTML = html || '<div style="text-align:center;padding:40px;color:#94a3b8">No tables — add groups on left</div>';
 }
 
-// ---------- Tables ----------
+function renderLeftGroupBoxes(){
+  const container = document.getElementById('leftGroupBoxes');
+  if(!container) return;
+  let html = '';
+  if(pendingNewGroup.length>0){
+    html += `<div class="group-box merged pending" style="border-color:#8b5cf6;background:#faf5ff;border:2px dashed #8b5cf6;border-radius:8px;padding:8px">
+      <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px">🆕 NEW (${pendingNewGroup.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+        ${pendingNewGroup.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-pending="1" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])}<span class="remove" onclick="event.stopPropagation(); ioRemovePendingType('${t}')">×</span></span>`).join('')}
+      </div>
+      <div style="display:flex;gap:4px"><button class="btn btn-sm" style="flex:1" onclick="ioConfirmPendingGroup()">✓ Confirm</button><button class="btn btn-sm btn-outline" style="flex:1" onclick="ioClearPendingGroup()">✕</button></div>
+    </div>`;
+  }
+  reportGroups.forEach((groupTypes, gIdx)=>{
+    if(!groupTypes) groupTypes=[];
+    const isEmpty = groupTypes.length===0;
+    const isMerged = groupTypes.length>1;
+    const border = isEmpty ? '#cbd5e1' : (isMerged ? '#8b5cf6' : '#3b82f6');
+    const bg = isEmpty ? '#f8fafc' : (isMerged ? '#faf5ff' : '#fff');
+    if(isEmpty){
+      html += `<div class="group-box empty" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" style="border:2px dashed ${border};background:${bg};border-radius:8px;padding:12px;text-align:center;cursor:copy"><div style="font-size:11px;color:#94a3b8">📭 Empty Box ${gIdx+1}<br>Drop here</div><button class="btn btn-sm btn-outline" style="margin-top:6px" onclick="reportGroups.splice(${gIdx},1); renderAllReports();">✕ Remove</button></div>`;
+    }else{
+      const chips = groupTypes.map(t=> `<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-group="${gIdx}" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])}<span class="remove" onclick="event.stopPropagation(); ioSplitType(${gIdx},'${t}')">×</span></span>`).join('');
+      html += `<div class="group-box ${isMerged?'merged':''}" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" onclick="ioJumpToGroup(${gIdx})" style="border:1px solid ${border};background:${bg};border-radius:8px;padding:8px;cursor:pointer">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:10px;font-weight:700;color:#475569">BOX ${gIdx+1} ${isMerged?`(${groupTypes.length} merged)`:''}</span><span style="font-size:10px;color:#94a3b8">${isMerged?'🔗':''}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${chips}</div>
+      </div>`;
+    }
+  });
+  container.innerHTML = html || '<div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px">No groups</div>';
+  const countEl = document.getElementById('mergeGroupCount');
+  if(countEl) countEl.textContent = String(reportGroups.filter(g=>g.length>0).length + (pendingNewGroup.length>0?1:0));
+}
+
+// ---------- Tables (dim-first) ----------
 function buildFlatTable(data, dim, reportKey){
   const { columns, rows } = data;
   const dimLabel = DIM_LABELS[dim] || dim;
   const frozenW = 120;
-  const typeW = 110;
-  const isEnriched = rows.length>0 && rows[0]._REPORT_KEY;
-  // For single table, we show Type as first column only if we want colors? But requirement is Type column for merged only.
-  // For single, we still add type class for coloring but not show Type column (or show as badge?). We'll hide Type column for single to keep familiar, but row colors by type.
-  const showTypeCol = false;
-
-  const dividerLeft = showTypeCol ? typeW+frozenW : frozenW;
+  const dividerLeft = frozenW;
   const lastCol = columns[columns.length-1];
   let total=0, nz=0;
   rows.forEach(r=>{ const v=r[lastCol]||0; total+=v; if(v>0) nz++; });
-
-  let html = `<div class="stat-row"><strong>${rows.length}</strong> rows &nbsp; <strong>${columns.length}</strong> cols &nbsp; Last col total: <strong>${total.toLocaleString()}</strong> &nbsp; Non-zero: <strong>${nz}</strong></div>`;
+  let html = `<div class="stat-row"><strong>${rows.length}</strong> rows &nbsp; <strong>${columns.length}</strong> cols &nbsp; Last total: <strong>${total.toLocaleString()}</strong></div>`;
   html += '<div class="table-wrapper"><table><thead><tr>';
-  if(showTypeCol){
-    html += `<th class="frozen" style="left:0;min-width:${typeW}px;z-index:16">Type</th>`;
-    html += `<th class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
-  }else{
-    html += `<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
-  }
+  html += `<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
   html += `<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
-  columns.forEach(c=>{
-    const p=c.split('_');
-    html += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
-  });
+  columns.forEach(c=>{ const p=c.split('_'); html += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
   html += '</tr></thead><tbody>';
   let prevVal=null;
   rows.forEach((r)=>{
@@ -827,20 +715,8 @@ function buildFlatTable(data, dim, reportKey){
     const isNewGroup = prevVal!==null && prevVal!==curVal;
     prevVal=curVal;
     const rKey = r._REPORT_KEY || reportKey || '';
-    const rowCls = `row-${rKey} ${isNewGroup ? 'row-new-group' : ''}`;
-    html += `<tr class="${rowCls}">`;
-    if(showTypeCol){
-      html += `<td class="frozen" style="left:0;min-width:${typeW}px;z-index:5"><span class="type-badge type-${rKey}">${esc(r._REPORT_TYPE||'')}</span></td>`;
-      html += `<td class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
-    }else{
-      html += `<td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
-    }
-    html += `<td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-    columns.forEach(c=>{
-      const v=r[c];
-      const cls = v>0 ? 'num num-pos' : v===0 ? 'num num-zero' : 'num';
-      html += `<td class="${cls}">${v!=null ? Number(v).toLocaleString() : ''}</td>`;
-    });
+    html += `<tr class="row-${rKey} ${isNewGroup ? 'row-new-group' : ''}"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td><td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+    columns.forEach(c=>{ const v=r[c]; html += `<td class="num ${v>0?'num-pos':v===0?'num-zero':''}">${v!=null ? Number(v).toLocaleString() : ''}</td>`; });
     html += '</tr>';
   });
   html += '</tbody></table></div>';
@@ -850,44 +726,26 @@ function buildFlatTable(data, dim, reportKey){
 function buildMergedFlatTable(data, dim){
   const { columns, rows } = data;
   const dimLabel = DIM_LABELS[dim] || dim;
-  const typeW = 130;
-  const frozenW = 120;
-  const dividerLeft = frozenW + typeW; // dim first, then Type
-
-  let html = `<div class="stat-row"><strong>${rows.length}</strong> rows (merged) &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong> — 同一 ${esc(dimLabel)} 的不同 Type 相邻显示</div>`;
+  const typeW = 130; const frozenW = 120; const dividerLeft = frozenW + typeW;
+  let html = `<div class="stat-row"><strong>${rows.length}</strong> merged &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong> — 同一 ${esc(dimLabel)} 相邻</div>`;
   html += '<div class="table-wrapper"><table><thead><tr>';
   html += `<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
   html += `<th class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:16">Type</th>`;
   html += `<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
-  columns.forEach(c=>{
-    const p=c.split('_');
-    html += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
-  });
+  columns.forEach(c=>{ const p=c.split('_'); html += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
   html += '</tr></thead><tbody>';
-  // sort by dim first, then Type (REPORTS order) — 同一 dimension 的不同 Type 相邻
-  const typeOrder = {};
-  REPORTS.forEach((t,i)=> typeOrder[t]=i);
+  const typeOrder = {}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
   const sorted = [...rows].sort((a,b)=>{
     const av = a[dim]||'', bv = b[dim]||'';
-    if(av < bv) return -1;
-    if(av > bv) return 1;
-    const ao = typeOrder[a._REPORT_KEY] ?? 99, bo = typeOrder[b._REPORT_KEY] ?? 99;
-    return ao - bo;
+    if(av < bv) return -1; if(av > bv) return 1;
+    return (typeOrder[a._REPORT_KEY]??99)-(typeOrder[b._REPORT_KEY]??99);
   });
   let prevVal=null;
   sorted.forEach((r)=>{
-    const curVal=r[dim];
-    const isNewGroup = prevVal!==null && prevVal!==curVal;
-    prevVal=curVal;
-    const rowCls = `row-${r._REPORT_KEY} ${isNewGroup ? 'row-new-group' : ''}`;
-    html += `<tr class="${rowCls}">`;
-    html += `<td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
-    html += `<td class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${r._REPORT_KEY}">${esc(r._REPORT_TYPE||'')}</span></td>`;
-    html += `<td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-    columns.forEach(c=>{
-      const v=r[c];
-      html += `<td class="num ${v>0?'num-pos':v===0?'num-zero':''}">${v!=null ? Number(v).toLocaleString() : ''}</td>`;
-    });
+    const isNewGroup = prevVal!==null && prevVal!==r[dim];
+    prevVal=r[dim];
+    html += `<tr class="row-${r._REPORT_KEY} ${isNewGroup?'row-new-group':''}"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td><td class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${r._REPORT_KEY}">${esc(r._REPORT_TYPE||'')}</span></td><td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+    columns.forEach(c=>{ const v=r[c]; html += `<td class="num">${v!=null?Number(v).toLocaleString():''}</td>`; });
     html += '</tr>';
   });
   html += '</tbody></table></div>';
@@ -896,213 +754,94 @@ function buildMergedFlatTable(data, dim){
 
 function buildHierarchicalTable(data, dimOrder, reportKey){
   const { columns, rows } = data;
-  const nDims = dimOrder.length;
-  const frozenW = 120;
-  const divLeft = nDims*frozenW;
-
+  const nDims = dimOrder.length; const frozenW=120; const divLeft=nDims*frozenW;
   function groupRows(items, depth){
-    if(depth>=nDims){ return items.map(r=> ({ key: null, items: [], allRows: [r] })); }
+    if(depth>=nDims) return items.map(r=> ({ key:null, items:[], allRows:[r] }));
     const dim = dimOrder[depth];
-    const groups = {};
-    items.forEach(r=>{ const k=r[dim]||'(blank)'; if(!groups[k]) groups[k]=[]; groups[k].push(r); });
+    const groups = {}; items.forEach(r=>{ const k=r[dim]||'(blank)'; if(!groups[k]) groups[k]=[]; groups[k].push(r); });
     return Object.keys(groups).sort().map(k=> ({ key:k, items: groupRows(groups[k], depth+1), allRows: groups[k] }));
   }
-  const tree = groupRows(rows, 0);
-  function sumRows(arr){
-    const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s;
-  }
+  const tree = groupRows(rows,0);
+  function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
   const grandTotal = sumRows(rows);
-
-  let h = `<div class="stat-row"><strong>${rows.length}</strong> detail rows &nbsp; <strong>${columns.length}</strong> cols</div>`;
-  h += '<div class="table-wrapper"><table><thead><tr>';
-  dimOrder.forEach((d,i)=>{
-    const btn = i < nDims-1 ? `<span class="expand-btn" onclick="window.ioExpandLevel(event,${i})" title="Expand/Collapse all">⊞</span>` : '';
-    const left = i*frozenW;
-    h += `<th class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:16">${esc(DIM_LABELS[d]||d)} ${btn}</th>`;
-  });
-  h += `<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
-  columns.forEach(c=>{
-    const p=c.split('_');
-    h += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
-  });
-  h += '</tr></thead><tbody>';
-
-  let path=[];
-  const uidBase = Date.now();
+  let h = `<div class="stat-row"><strong>${rows.length}</strong> detail rows</div><div class="table-wrapper"><table><thead><tr>`;
+  dimOrder.forEach((d,i)=>{ const left=i*frozenW; h+=`<th class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:16">${esc(DIM_LABELS[d]||d)} <span class="expand-btn" onclick="window.ioExpandLevel(event,${i})">⊞</span></th>`; });
+  h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
+  columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
+  h+='</tr></thead><tbody>';
+  let path=[]; const uidBase=Date.now();
   function renderTree(nodes, depth){
     nodes.forEach((node, idx)=>{
-      path[depth]=idx;
-      const pid = uidBase+'_'+path.slice(0,depth+1).join('_');
+      path[depth]=idx; const pid=uidBase+'_'+path.slice(0,depth+1).join('_');
       if(depth===nDims-1){
-        const agg = sumRows(node.allRows);
-        const sampleKey = node.allRows[0]?._REPORT_KEY || reportKey || '';
-        h += `<tr class="agg-row row-new-group row-${sampleKey}">`;
-        for(let d=0; d<nDims; d++){
-          const left = d*frozenW;
-          const val = d<depth ? '' : node.key;
-          h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(val)}</td>`;
-        }
-        h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ h+= `<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
-        h += '</tr>';
+        const agg=sumRows(node.allRows); const rk=node.allRows[0]?._REPORT_KEY||reportKey||'';
+        h+=`<tr class="agg-row row-new-group row-${rk}">`;
+        for(let d=0; d<nDims; d++){ const left=d*frozenW; h+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(d<depth?'':node.key)}</td>`; }
+        h+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ h+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        h+='</tr>';
       }else{
-        const aggregated = node.items.flatMap(n=> n.allRows || []);
-        const agg = sumRows(aggregated);
-        const sampleKey = aggregated[0]?._REPORT_KEY || reportKey || '';
-        h += `<tr class="hierarchy-row agg-row row-new-group row-${sampleKey}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
-        for(let d=0; d<nDims; d++){
-          const left = d*frozenW;
-          if(d===depth){
-            h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`;
-          }else if(d===depth+1){
-            h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${node.items.length} items</td>`;
-          }else{
-            h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
-          }
-        }
-        h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ h+= `<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
-        h += '</tr>';
-        h += `<tbody id="children_${pid}" data-parent="${pid}" style="display:none">`;
-        renderTree(node.items, depth+1);
-        h += '</tbody>';
+        const aggregated=node.items.flatMap(n=> n.allRows||[]); const agg=sumRows(aggregated); const rk=aggregated[0]?._REPORT_KEY||''; 
+        h+=`<tr class="hierarchy-row agg-row row-new-group row-${rk}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
+        for(let d=0; d<nDims; d++){ const left=d*frozenW; if(d===depth) h+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`; else if(d===depth+1) h+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${node.items.length} items</td>`; else h+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`; }
+        h+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ h+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        h+='</tr><tbody id="children_${pid}" style="display:none">'; renderTree(node.items, depth+1); h+='</tbody>';
       }
     });
   }
   renderTree(tree,0);
-
-  h += '<tr class="total-row">';
-  for(let d=0; d<nDims; d++){
-    const left = d*frozenW;
-    h += d===0 ? `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><strong>Total</strong></td>` : `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
-  }
-  h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-  columns.forEach(c=>{ h+= `<td class="num"><strong>${Number(grandTotal[c]).toLocaleString()}</strong></td>`; });
-  h += '</tr></tbody></table></div>';
+  h+=`<tr class="total-row"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5"><strong>Total</strong></td>${Array(nDims-1).fill(0).map((_,i)=>`<td class="frozen" style="left:${(i+1)*frozenW}px;min-width:${frozenW}px;z-index:5"></td>`).join('')}<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+  columns.forEach(c=>{ h+=`<td class="num"><strong>${Number(grandTotal[c]).toLocaleString()}</strong></td>`; });
+  h+='</tr></tbody></table></div>';
   return h;
 }
 
 function buildMergedHierarchicalTable(data, dimOrder){
   const { columns, rows } = data;
-  // New requirement: row dimension first, Type last — 同一 Line/PN 的不同 Type 相邻
   const effDims = [...dimOrder, '_REPORT_TYPE'];
   const nDims = effDims.length;
-  const frozenW = 120;
-  const typeW = 130;
-  const lefts = [];
-  let curL = 0;
-  effDims.forEach((_, i)=>{
-    lefts.push(curL);
-    curL += (i===nDims-1? typeW : frozenW);
-  });
-  const divLeft = curL;
-
+  const frozenW=120, typeW=130;
+  const lefts=[]; let curL=0; effDims.forEach((_,i)=>{ lefts.push(curL); curL+= (i===nDims-1? typeW : frozenW); });
+  const divLeft=curL;
   function groupRows(items, depth){
     if(depth>=nDims) return items.map(r=> ({ key:null, items:[], allRows:[r] }));
     const dim = effDims[depth];
-    const groups = {};
-    items.forEach(r=>{ const k = r[dim]||'(blank)'; if(!groups[k]) groups[k]=[]; groups[k].push(r); });
-    const keys = Object.keys(groups);
-    if(dim==='_REPORT_TYPE'){
-      // Type 按 REPORTS 顺序
-      keys.sort((a,b)=>{
-        const ia = REPORTS.findIndex(t=> REPORT_NAMES[t]===a);
-        const ib = REPORTS.findIndex(t=> REPORT_NAMES[t]===b);
-        return ia-ib;
-      });
-    }else{
-      keys.sort();
-    }
+    const groups={}; items.forEach(r=>{ const k=r[dim]||'(blank)'; if(!groups[k]) groups[k]=[]; groups[k].push(r); });
+    const keys=Object.keys(groups);
+    if(dim==='_REPORT_TYPE') keys.sort((a,b)=>{ const ia=REPORTS.findIndex(t=> REPORT_NAMES[t]===a); const ib=REPORTS.findIndex(t=> REPORT_NAMES[t]===b); return ia-ib; }); else keys.sort();
     return keys.map(k=> ({ key:k, items: groupRows(groups[k], depth+1), allRows: groups[k], repKey: groups[k][0]?._REPORT_KEY||'' }));
   }
-  const tree = groupRows(rows, 0);
-  function sumRows(arr){
-    const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s;
-  }
-  const grandTotal = sumRows(rows);
-
-  let h = `<div class="stat-row"><strong>${rows.length}</strong> detail rows merged &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: ${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')} — 按行维度优先，同一 ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} 的不同 Type 相邻</div>`;
-  h += '<div class="table-wrapper"><table><thead><tr>';
-  effDims.forEach((d,i)=>{
-    const btn = i < nDims-1 ? `<span class="expand-btn" onclick="window.ioExpandLevel(event,${i})" title="Expand/Collapse all">⊞</span>` : '';
-    const left = lefts[i];
-    const w = i===nDims-1? typeW : frozenW;
-    const label = d==='_REPORT_TYPE' ? 'Type' : (DIM_LABELS[d]||d);
-    h += `<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)} ${btn}</th>`;
-  });
-  h += `<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
-  columns.forEach(c=>{
-    const p=c.split('_');
-    h += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
-  });
-  h += '</tr></thead><tbody>';
-
-  let path=[];
-  const uidBase = Date.now();
+  const tree=groupRows(rows,0);
+  function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
+  const grandTotal=sumRows(rows);
+  let h=`<div class="stat-row"><strong>${rows.length}</strong> merged — 按行维度优先，同 ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} 相邻</div><div class="table-wrapper"><table><thead><tr>`;
+  effDims.forEach((d,i)=>{ const left=lefts[i]; const w=i===nDims-1? typeW : frozenW; const label=d==='_REPORT_TYPE'?'Type':(DIM_LABELS[d]||d); h+=`<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)} <span class="expand-btn" onclick="window.ioExpandLevel(event,${i})">⊞</span></th>`; });
+  h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
+  columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
+  h+='</tr></thead><tbody>';
+  let path=[]; const uidBase=Date.now();
   function renderTree(nodes, depth){
     nodes.forEach((node, idx)=>{
-      path[depth]=idx;
-      const pid = uidBase+'_'+path.slice(0,depth+1).join('_');
-      const isTypeDepth = effDims[depth]==='_REPORT_TYPE';
-      const rk = node.repKey || node.allRows[0]?._REPORT_KEY || '';
+      path[depth]=idx; const pid=uidBase+'_'+path.slice(0,depth+1).join('_');
+      const isTypeDepth=effDims[depth]==='_REPORT_TYPE'; const rk=node.repKey||node.allRows[0]?._REPORT_KEY||'';
       if(depth===nDims-1){
-        // leaf: Type row
-        const agg = sumRows(node.allRows);
-        h += `<tr class="agg-row row-new-group row-${rk}">`;
-        for(let d=0; d<nDims; d++){
-          const left = lefts[d];
-          const val = d<depth ? '' : node.key;
-          if(effDims[d]==='_REPORT_TYPE'){
-            h += `<td class="frozen" style="left:${left}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${rk}">${esc(val)}</span></td>`;
-          }else{
-            h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(val)}</td>`;
-          }
-        }
-        h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ h+= `<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
-        h += '</tr>';
+        const agg=sumRows(node.allRows);
+        h+=`<tr class="agg-row row-new-group row-${rk}">`;
+        for(let d=0; d<nDims; d++){ const left=lefts[d]; const val=d<depth?'':node.key; if(effDims[d]==='_REPORT_TYPE') h+=`<td class="frozen" style="left:${left}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${rk}">${esc(val)}</span></td>`; else h+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(val)}</td>`; }
+        h+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ h+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; }); h+='</tr>';
       }else{
-        const aggregated = node.items.flatMap(n=> n.allRows || []);
-        const agg = sumRows(aggregated);
-        const repKey = isTypeDepth ? rk : (aggregated[0]?._REPORT_KEY || rk || '');
-        // For non-type depths, row color from first child if needed
-        const rowCls = isTypeDepth ? `row-${rk}` : `row-${repKey}`;
-        h += `<tr class="hierarchy-row agg-row row-new-group ${rowCls}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
-        for(let d=0; d<nDims; d++){
-          const left = lefts[d];
-          const w = d===nDims-1? typeW : frozenW;
-          if(d===depth){
-            if(effDims[d]==='_REPORT_TYPE'){
-              h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span><span class="type-badge type-${rk}">${esc(node.key)}</span></td>`;
-            }else{
-              h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`;
-            }
-          }else if(d===depth+1){
-            h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5">${node.items.length} items</td>`;
-          }else{
-            h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
-          }
-        }
-        h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ h+= `<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
-        h += '</tr>';
-        h += `<tbody id="children_${pid}" data-parent="${pid}" style="display:none">`;
-        renderTree(node.items, depth+1);
-        h += '</tbody>';
+        const aggregated=node.items.flatMap(n=> n.allRows||[]); const agg=sumRows(aggregated); const repKey=node.items.length? aggregated[0]?._REPORT_KEY||'' : rk;
+        h+=`<tr class="hierarchy-row agg-row row-new-group row-${repKey}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
+        for(let d=0; d<nDims; d++){ const left=lefts[d]; const w=d===nDims-1? typeW : frozenW; if(d===depth) h+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`; else if(d===depth+1) h+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5">${node.items.length} items</td>`; else h+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`; }
+        h+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ h+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; }); h+='</tr><tbody id="children_${pid}" style="display:none">'; renderTree(node.items, depth+1); h+='</tbody>';
       }
     });
   }
   renderTree(tree,0);
-
-  h += '<tr class="total-row">';
-  for(let d=0; d<nDims; d++){
-    const left = lefts[d];
-    const w = d===nDims-1? typeW : frozenW;
-    h += d===0 ? `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><strong>Total</strong></td>` : `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
-  }
-  h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-  columns.forEach(c=>{ h+= `<td class="num"><strong>${Number(grandTotal[c]).toLocaleString()}</strong></td>`; });
-  h += '</tr></tbody></table></div>';
+  h+=`<tr class="total-row">`; for(let d=0; d<nDims; d++){ const left=lefts[d]; const w=d===nDims-1? typeW : frozenW; h+=d===0?`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><strong>Total</strong></td>`:`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`; } h+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`; columns.forEach(c=>{ h+=`<td class="num"><strong>${Number(grandTotal[c]).toLocaleString()}</strong></td>`; }); h+='</tr></tbody></table></div>';
   return h;
 }
 
@@ -1112,9 +851,8 @@ window.ioToggleDetail = function(pid){
   const open = t.textContent==='▼';
   const children = document.getElementById('children_'+pid);
   if(!children) return;
-  const show = !open;
-  children.style.display = show ? '' : 'none';
-  if(!show){
+  children.style.display = open ? 'none' : '';
+  if(open){
     children.querySelectorAll('[id^="children_"]').forEach(el=>{ el.style.display='none'; });
     children.querySelectorAll('[id^="tog_"]').forEach(el=>{ el.textContent='▶'; });
   }
@@ -1129,133 +867,86 @@ window.ioExpandLevel = function(event, level){
   const firstTog = rows[0].querySelector('[id^="tog_"]');
   const allExpanded = firstTog && firstTog.textContent==='▼';
   rows.forEach(row=>{
-    const pid=row.id;
-    const t=document.getElementById('tog_'+pid);
-    const children=document.getElementById('children_'+pid);
+    const pid=row.id; const t=document.getElementById('tog_'+pid); const children=document.getElementById('children_'+pid);
     if(!t||!children) return;
-    if(allExpanded){
-      children.style.display='none';
-      children.querySelectorAll('[id^="children_"]').forEach(el=> el.style.display='none');
-      children.querySelectorAll('[id^="tog_"]').forEach(el=> el.textContent='▶');
-      t.textContent='▶';
-    }else{
-      children.style.display='';
-      t.textContent='▼';
-    }
+    if(allExpanded){ children.style.display='none'; t.textContent='▶'; }else{ children.style.display=''; t.textContent='▼'; }
   });
 };
 
 function downloadExcel(type){
   const data = allData?.[type];
-  if(!data || !data.rows || !data.rows.length) return;
+  if(!data || !data.rows.length) return;
   const dim = getDimParam();
   const headers = dim==='detail' ? dimOrder : [dimOrder[0] || 'ITEM_NO'];
-  const wsData = [];
-  wsData.push([...headers.map(h=> DIM_LABELS[h]||h), ...data.columns]);
+  const wsData = [ [...headers.map(h=> DIM_LABELS[h]||h), ...data.columns] ];
   data.rows.forEach(row=>{
-    const r=[];
-    if(dim==='detail'){ headers.forEach(h=> r.push(row[h]||'')); }
-    else{ r.push(row[dimOrder[0]]??''); }
-    data.columns.forEach(c=> r.push(row[c]??0));
-    wsData.push(r);
+    const r=[]; if(dim==='detail'){ headers.forEach(h=> r.push(row[h]||'')); } else { r.push(row[dimOrder[0]]??''); }
+    data.columns.forEach(c=> r.push(row[c]??0)); wsData.push(r);
   });
   if(window.XLSX){
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, type.slice(0,31));
-    XLSX.writeFile(wb, `${REPORT_NAMES[type]||type}.xlsx`);
+    const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, type.slice(0,31)); XLSX.writeFile(wb, `${REPORT_NAMES[type]||type}.xlsx`);
   }
 }
 window.ioDownloadExcel = downloadExcel;
 
 function downloadMerged(gIdx){
   const groupTypes = reportGroups[gIdx];
-  if(!groupTypes || groupTypes.length===0) return;
+  if(!groupTypes || !groupTypes.length) return;
   const merged = mergeTypesData(groupTypes);
   if(!merged.rows.length) return;
   const dim = getDimParam();
   const isDetail = dim==='detail' && dimOrder.length>=2;
-  let headers;
-  if(isDetail){
-    headers = [...dimOrder.map(d=> DIM_LABELS[d]||d), 'Type'];
-  }else{
-    headers = [DIM_LABELS[dim]||dim, 'Type'];
-  }
-  const wsData = [];
-  wsData.push([...headers, ...merged.columns]);
-  const typeOrder = {}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
-  const sorted = [...merged.rows].sort((a,b)=>{
-    if(isDetail){
-      for(const d of dimOrder){
-        const av=a[d]||'', bv=b[d]||'';
-        if(av<bv) return -1; if(av>bv) return 1;
-      }
-    }else{
-      const av=a[dim]||'', bv=b[dim]||'';
-      if(av<bv) return -1; if(av>bv) return 1;
-    }
-    return (typeOrder[a._REPORT_KEY]??99) - (typeOrder[b._REPORT_KEY]??99);
+  const headers = isDetail ? [...dimOrder.map(d=> DIM_LABELS[d]||d), 'Type'] : [DIM_LABELS[dim]||dim, 'Type'];
+  const wsData = [ [...headers, ...merged.columns] ];
+  const typeOrder={}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
+  const sorted=[...merged.rows].sort((a,b)=>{
+    if(isDetail){ for(const d of dimOrder){ const av=a[d]||'', bv=b[d]||''; if(av<bv) return -1; if(av>bv) return 1; } }
+    else { const av=a[dim]||'', bv=b[dim]||''; if(av<bv) return -1; if(av>bv) return 1; }
+    return (typeOrder[a._REPORT_KEY]??99)-(typeOrder[b._REPORT_KEY]??99);
   });
   sorted.forEach(row=>{
-    const r=[];
-    if(isDetail){
-      dimOrder.forEach(d=> r.push(row[d]||''));
-    }else{
-      r.push(row[dim]??'');
-    }
-    r.push(row._REPORT_TYPE||'');
-    merged.columns.forEach(c=> r.push(row[c]??0));
-    wsData.push(r);
+    const r=[]; if(isDetail){ dimOrder.forEach(d=> r.push(row[d]||'')); } else { r.push(row[dim]??''); }
+    r.push(row._REPORT_TYPE||''); merged.columns.forEach(c=> r.push(row[c]??0)); wsData.push(r);
   });
   if(window.XLSX){
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const name = groupTypes.map(t=> REPORT_NAMES[t]).join('_').slice(0,31);
-    XLSX.utils.book_append_sheet(wb, ws, name);
-    XLSX.writeFile(wb, `${name}.xlsx`);
+    const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, groupTypes.map(t=> REPORT_NAMES[t]).join('_').slice(0,31)); XLSX.writeFile(wb, `${groupTypes.map(t=> REPORT_NAMES[t]).join('_')}.xlsx`);
   }
 }
 window.ioDownloadMerged = downloadMerged;
 
 function downloadAll(){
   if(!allData) return;
-  if(!window.XLSX){ alert('XLSX library not loaded'); return; }
+  if(!window.XLSX){ alert('XLSX not loaded'); return; }
   const wb = XLSX.utils.book_new();
-  const typeOrder = {}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
+  const typeOrder={}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
   reportGroups.forEach((groupTypes,gIdx)=>{
     const merged = mergeTypesData(groupTypes);
     if(!merged.rows.length) return;
     const dim = getDimParam();
     const isDetail = dim==='detail' && dimOrder.length>=2;
-    let headers = isDetail ? [...dimOrder.map(d=> DIM_LABELS[d]||d), 'Type'] : [DIM_LABELS[dim]||dim, 'Type'];
-    const wsData = [];
-    wsData.push([...headers, ...merged.columns]);
-    const sorted = [...merged.rows].sort((a,b)=>{
-      if(isDetail){
-        for(const d of dimOrder){ const av=a[d]||'', bv=b[d]||''; if(av<bv) return -1; if(av>bv) return 1; }
-      }else{ const av=a[dim]||'', bv=b[dim]||''; if(av<bv) return -1; if(av>bv) return 1; }
+    const headers = isDetail ? [...dimOrder.map(d=> DIM_LABELS[d]||d), 'Type'] : [DIM_LABELS[dim]||dim, 'Type'];
+    const wsData = [ [...headers, ...merged.columns] ];
+    const sorted=[...merged.rows].sort((a,b)=>{
+      if(isDetail){ for(const d of dimOrder){ const av=a[d]||'', bv=b[d]||''; if(av<bv) return -1; if(av>bv) return 1; } }
+      else { const av=a[dim]||'', bv=b[dim]||''; if(av<bv) return -1; if(av>bv) return 1; }
       return (typeOrder[a._REPORT_KEY]??99)-(typeOrder[b._REPORT_KEY]??99);
     });
     sorted.forEach(row=>{
-      const r=[];
-      if(isDetail){ dimOrder.forEach(d=> r.push(row[d]||'')); } else { r.push(row[dim]??''); }
-      r.push(row._REPORT_TYPE||'');
-      merged.columns.forEach(c=> r.push(row[c]??0));
-      wsData.push(r);
+      const r=[]; if(isDetail){ dimOrder.forEach(d=> r.push(row[d]||'')); } else { r.push(row[dim]??''); }
+      r.push(row._REPORT_TYPE||''); merged.columns.forEach(c=> r.push(row[c]??0)); wsData.push(r);
     });
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const name = groupTypes.map(t=> REPORT_NAMES[t]).join('+').slice(0,31) || `Group${gIdx+1}`;
-    XLSX.utils.book_append_sheet(wb, ws, name);
+    XLSX.utils.book_append_sheet(wb, ws, groupTypes.map(t=> REPORT_NAMES[t]).join('+').slice(0,31) || `Group${gIdx+1}`);
   });
   XLSX.writeFile(wb, `IO_Report_${currentGroup}_${COL_DIM}.xlsx`);
 }
 window.ioDownloadAll = downloadAll;
 
-// Init
 document.addEventListener('DOMContentLoaded', ()=>{
   const active = document.querySelector('.nav-item.active');
   if(active && active.dataset.module==='io-report'){ render(); }
 });
 document.addEventListener('module-change', (e)=>{ if(e.detail.module==='io-report'){ render(); } });
-
 })();
