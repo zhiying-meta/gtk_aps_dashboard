@@ -30,62 +30,62 @@ wb.remove(wb.active)
 add_sheet(wb, "sku_master",
     headers=["SKU","Usage","Style","Color","GB_PN","FR_PN","LT_PN","RT_PN","Pallet_Qty"],
     schema_fields=[
-        ("SKU","String","物料编码","SK-1001879-01"),
-        ("Usage","String","用途：MP/Dummy/Demo","MP"),
-        ("Style","String","眼镜款式","Rectangle M"),
-        ("Color","String","颜色（大写）","BLACK"),
-        ("GB_PN","String","GB维度物料编码","GB-Rec M-BLACK"),
-        ("FR_PN","String","Frame物料编码","FR-Rec M-BLACK"),
-        ("LT_PN","String","Left Temple物料编码","LT-Rec M-BLACK"),
-        ("RT_PN","String","Right Temple物料编码","RT-Rec M-BLACK"),
-        ("Pallet_Qty","Integer","托盘数量（默认864）","864"),
+        ("SKU","String","Part Number","SK-1001879-01"),
+        ("Usage","String","Usage: MP/Dummy/Demo","MP"),
+        ("Style","String","Frame Style","Rectangle M"),
+        ("Color","String","Color (UPPERCASE)","BLACK"),
+        ("GB_PN","String","GB-level Part Number","GB-Rec M-BLACK"),
+        ("FR_PN","String","Frame Part Number","FR-Rec M-BLACK"),
+        ("LT_PN","String","Left Temple Part Number","LT-Rec M-BLACK"),
+        ("RT_PN","String","Right Temple Part Number","RT-Rec M-BLACK"),
+        ("Pallet_Qty","Integer","Pallet Quantity (default: 864)","864"),
     ],
-    schema_note="SKU主数据表，必填。每个SKU一行，Pallet_Qty不填则默认864。")
+    schema_note="SKU master table (required). One row per SKU. Default Pallet_Qty: 864.")
 
 add_sheet(wb, "plan_output_gated",
     headers=["PN","2026-04-16","2026-04-17","2026-04-18","..."],
     schema_fields=[
-        ("PN","String","物料编码（SKU或GB/FR/LT/RT PN）","SK-1001879-01"),
-        ("2026-04-16","Integer","日级OUTPUT产出量","0"),
-        ("...","...","后续列为每天一列，格式yyyy-MM-dd","..."),
+        ("PN","String","Part Number (SKU or GB/FR/LT/RT PN)","SK-1001879-01"),
+        ("2026-04-16","Integer","Daily OUTPUT quantity","0"),
+        ("...","...","Subsequent columns: one per day, format yyyy-MM-dd","..."),
     ],
-    schema_note="Gated版本日级排产产出。第一列PN，后续列为日期(yyyy-MM-dd)，值为当日产出量。日期列数不限。")
+    schema_note="Gated daily production output. First column: PN, subsequent columns: dates (yyyy-MM-dd), values: daily output. Unlimited date columns.")
 
 add_sheet(wb, "plan_output_ungated",
     headers=["PN","2026-04-16","2026-04-17","2026-04-18","..."],
     schema_fields=[
-        ("PN","String","物料编码（SKU或GB/FR/LT/RT PN）","SK-1001879-01"),
-        ("2026-04-16","Integer","日级OUTPUT产出量","0"),
-        ("...","...","后续列为每天一列","..."),
+        ("PN","String","Part Number (SKU or GB/FR/LT/RT PN)","SK-1001879-01"),
+        ("2026-04-16","Integer","Daily OUTPUT quantity","0"),
+        ("...","...","Subsequent columns: one per day","..."),
     ],
-    schema_note="Ungated版本日级排产产出。格式同plan_output_gated。")
+    schema_note="Ungated daily production output. Same format as plan_output_gated.")
 
 add_sheet(wb, "forecast",
     headers=["SKU","2026-04-04","2026-04-11","2026-04-18","..."],
     schema_fields=[
-        ("SKU","String","物料编码（仅SKU级）","SK-1001879-01"),
-        ("2026-04-04","Integer","Forecast周值（周六截止）","0"),
-        ("...","...","后续列为每周六日期","..."),
+        ("SKU","String","Part Number (SKU level only)","SK-1001879-01"),
+        ("2026-04-04","Integer","Weekly Forecast (week ending Saturday)","0"),
+        ("...","...","Subsequent columns: Saturday dates","..."),
     ],
-    schema_note="周级Forecast数据。列头为周六日期，值为该周Forecast量。")
+    schema_note="Weekly Forecast data. Column headers: Saturday dates, values: weekly forecast quantity.")
 
 add_sheet(wb, "ctb_sku_cum",
     headers=["SKU","2026-02-04","2026-02-05","2026-02-06","..."],
     schema_fields=[
-        ("SKU","String","物料编码（SKU级）","SK-1001879-01"),
-        ("2026-02-04","Integer","日级CTB累计值","0"),
-        ("...","...","后续列为每天一列","..."),
+        ("SKU","String","Part Number (SKU level)","SK-1001879-01"),
+        ("2026-02-04","Integer","Daily CTB cumulative value","0"),
+        ("...","...","Subsequent columns: one per day","..."),
     ],
-    schema_note="SKU级CTB累计值。日级数据，值为截止该日的CTB累计量（非日增量）。")
+    schema_note="SKU-level CTB cumulative. Daily data, values are cumulative CTB up to that date (not daily increment).")
 
 add_sheet(wb, "ctb_gb_cum",
     headers=["PN","2026-02-04","2026-02-05","2026-02-06","..."],
     schema_fields=[
-        ("PN","String","GB物料编码","GB-Rec M-BLACK"),
-        ("2026-02-04","Integer","日级GB CTB累计值","0"),
-        ("...","...","后续列为每天一列","..."),
+        ("PN","String","GB Part Number","GB-Rec M-BLACK"),
+        ("2026-02-04","Integer","Daily GB CTB cumulative value","0"),
+        ("...","...","Subsequent columns: one per day","..."),
     ],
-    schema_note="GB级CTB累计值。可选，如无GB级CTB数据可不填。")
+    schema_note="GB-level CTB cumulative. Optional. Leave empty if no GB-level CTB data.")
 
 template_path = os.path.join(TEMPLATE_DIR, "input_template.xlsx")
 wb.save(template_path)
