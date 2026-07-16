@@ -82,10 +82,19 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   form.append('gb_cut', document.getElementById('cfg-gb').value);
 
   document.getElementById('loading').style.display = 'flex';
+  const warnEl = document.getElementById('upload-warnings');
+  if (warnEl) { warnEl.style.display = 'none'; warnEl.innerHTML = ''; }
   try {
     const resp = await fetch('/api/process', { method:'POST', body: form });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
+
+    if (data.warnings && data.warnings.length > 0 && warnEl) {
+      const isWarn = data.warnings.some(w => w.toLowerCase().includes('missing'));
+      warnEl.className = 'warnings ' + (isWarn ? 'warn' : 'success');
+      warnEl.innerHTML = data.warnings.map(w => '<div>' + esc(w) + '</div>').join('');
+      warnEl.style.display = 'block';
+    }
 
     allRows = data.rows; allWeeks = data.weeks; weekLabels = data.week_labels;
     document.getElementById('report-section').style.display = 'block';
@@ -143,10 +152,10 @@ function setupDropdowns() {
     style: { items:extractUnique('Style', activeDim) },
     color: { items:extractUnique('Color', activeDim) },
     type: { items:extractUnique('Version-Type', activeDim) },
-    detail: { items:extractUnique('Version-Detail', activeDim).filter(Boolean) },
+    detail: { items: extractUnique('Version-Detail', activeDim, true), map: {'':'ExF / CTB'} },
   })) setupDropdown(name, opts.items, opts.map);
 }
-function extractUnique(f, dim) { const s=new Set(); for(const r of allRows){ if(dim && r._dim!==dim) continue; const v=r[f]; if(v!=null&&v!=='') s.add(v); } return [...s].sort(); }
+function extractUnique(f, dim, keepEmpty) { const s=new Set(); for(const r of allRows){ if(dim && r._dim!==dim) continue; const v=r[f]; if(v!=null&&(keepEmpty||v!=='')) s.add(v); } return [...s].sort(); }
 
 function setupDropdown(name, vals, labelMap) {
   const btn=document.getElementById(name+'-btn'), menu=document.getElementById(name+'-menu'), cnt=document.getElementById(name+'-count');
@@ -450,16 +459,60 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
     dt.items.add(new File([blob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
     inp.files = dt.files;
     inp.closest('.upload-card').classList.add('has-file');
-    // Auto-generate
-    document.getElementById('btn-generate').click();
   } catch(e) {
     console.log('Auto-load demo failed:', e.message);
   }
 })();
 
+const DEFAULT_PIVOT_FIELDS = ['Usage', 'Style', 'Color'];
+
+function getPivotDownloadRows() {
+  const activePivotFields = pivotFields.length > 0 ? pivotFields : DEFAULT_PIVOT_FIELDS;
+  const allData = getFilteredRows(false);
+  const groups = {};
+  for (const r of allData) {
+    const grpKey = activePivotFields.map(f => r[f] || '(blank)').concat(
+      ['_dim', ...PIVOT_KEEP].map(k => r[k] != null ? String(r[k]) : '')
+    ).join('||');
+    if (!groups[grpKey]) {
+      const g = { fields: {}, weeks: {}, children: [] };
+      for (const f of activePivotFields) g.fields[f] = r[f] || '(blank)';
+      for (const k of ['_dim', ...PIVOT_KEEP]) g.fields[k] = r[k] != null ? r[k] : '';
+      groups[grpKey] = g;
+    }
+    groups[grpKey].children.push(r);
+    for (const w of allWeeks) {
+      const v = r[w];
+      if (v != null && v !== '' && !isNaN(Number(v))) {
+        groups[grpKey].weeks[w] = (groups[grpKey].weeks[w] || 0) + Number(v);
+      }
+    }
+  }
+
+  const result = [];
+  for (const gk of Object.keys(groups).sort()) {
+    const g = groups[gk];
+    const pals = [...new Set(g.children.map(c => c.Pallet_Qty != null && c.Pallet_Qty !== '' ? String(c.Pallet_Qty) : '').filter(Boolean))];
+    const row = {
+      _dim: g.fields._dim || g.children[0]._dim,
+      PN: `${g.children.length} SKUs`,
+      Usage: g.fields.Usage || '',
+      Style: g.fields.Style || '',
+      Color: g.fields.Color || '',
+      'Version-Type': g.fields['Version-Type'] || '',
+      'Version-Detail': g.fields['Version-Detail'] || '',
+      'Cut Day': g.fields['Cut Day'] || '',
+      Pallet_Qty: pals.length ? pals.join('/') : '',
+    };
+    for (const w of allWeeks) row[w] = g.weeks[w] || null;
+    result.push(row);
+  }
+  return result;
+}
+
 // ===== Download Excel =====
 document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
-  const allData=getFilteredRows(false);
+  const allData = getPivotDownloadRows();
   if(allData.length===0)return;
   const btn=document.getElementById('btn-dl-excel');
   btn.textContent='⏳ Generating...';btn.disabled=true;

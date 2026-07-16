@@ -6,7 +6,22 @@ cd /d "%~dp0"
 echo [1/3] Checking Python...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Python not found. Please install Python 3.10+ from https://www.python.org/downloads/
+    echo Python not found. Attempting auto-install via winget...
+    where winget >nul 2>&1
+    if %errorlevel% equ 0 (
+        winget install -e --id Python.Python.3.13 --accept-source-agreements
+        if %errorlevel% equ 0 (
+            echo Python installed successfully. Please restart this script.
+        ) else (
+            echo Auto-install failed.
+        )
+    ) else (
+        echo winget not available.
+    )
+    echo.
+    echo Please install Python 3.10+ manually from:
+    echo   https://www.python.org/downloads/
+    echo Make sure to check "Add Python to PATH" during installation.
     pause
     exit /b
 )
