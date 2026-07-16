@@ -16,7 +16,6 @@ Thumbs.db
 *.swp
 
 # Temp
-app/uploads/
 uploads/
 *.log
 
@@ -27,15 +26,5 @@ data-ref-xlsx/
 # Office temp files
 ~$*
 
-# IDE
-.idea/
-
-# Static cache (old location)
-app/static/report_data.json
-app/static/meta.json
-
-# Design documents
-/*设计.xlsx
-
-
+# Misc
 opencode.json
