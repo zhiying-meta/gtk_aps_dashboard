@@ -55,14 +55,13 @@ function buildUploadSectionHTML(isCompact){
           ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar">▼ Collapse</button>' : ''}
         </div>
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:10px;font-size:11px;color:#475569">
-        <div style="font-weight:600;margin-bottom:4px">💡 One-Click Upload Supported:</div>
-        <div>• <strong>3 files at once</strong>: select Master + Schedule + Balance together &nbsp;|&nbsp; • <strong>Zip</strong>: zip containing 3 xlsx &nbsp;|&nbsp; • <strong>Combined xlsx</strong>: 1 workbook with 3 sheets (Item Master / Schedule Result / BOH Balance)</div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:11px;color:#475569">
+        💡 Accepts: 3 xlsx files, a .zip, or a single combined xlsx with 3 sheets
       </div>
       <div id="${isCompact ? 'uploadBarContent' : 'uploadFullContent'}">
         <div class="upload-card" id="card_combined_${isCompact?'compact':'full'}" style="border:2px dashed #8b5cf6;background:#faf5ff;margin-bottom:10px">
-          <div class="upload-label">⚡ One-Click Upload — 3 files / Zip / Combined <span style="font-size:10px;background:#8b5cf6;color:#fff;padding:1px 6px;border-radius:8px">Recommended</span></div>
-          <div class="upload-hint">Select up to 3 files at once, or a .zip, or a single combined .xlsx with 3 sheets</div>
+          <div class="upload-label">⚡ Quick Upload <span style="font-size:10px;background:#8b5cf6;color:#fff;padding:1px 6px;border-radius:8px">Recommended</span></div>
+          <div class="upload-hint">Select files, zip, or combined xlsx</div>
           <input type="file" class="file-input" id="input_combined_${isCompact?'compact':'full'}" accept=".xlsx,.zip" multiple>
           <div class="fname" id="fname_combined_${isCompact?'compact':'full'}" style="font-size:11px;color:#6d28d9;margin-top:6px;min-height:16px"></div>
         </div>
@@ -82,9 +81,9 @@ function attachUploadLogic(isCompact){
   function markHasFile(cardId, has){ document.getElementById(cardId)?.classList.toggle('has-file', !!has); }
   function classifyByName(name){
     const low = (name||'').toLowerCase();
-    if (low.includes('master') || low.includes('料号')) return 'master';
-    if (low.includes('sched') || low.includes('排产')) return 'schedule';
-    if (low.includes('bal') || low.includes('结存') || low.includes('boh')) return 'balance';
+    if (low.includes('master')) return 'master';
+    if (low.includes('sched')) return 'schedule';
+    if (low.includes('bal') || low.includes('boh')) return 'balance';
     return null;
   }
   function updateBtn(){
@@ -249,15 +248,14 @@ function renderReportsPage(){
         <div class="panel" style="flex:1;min-width:260px"><div class="panel-label">Filters</div><div class="filter-row" style="margin-top:6px"><div class="filter-group"><label>Line</label><div class="filter-input-wrap" id="fiw_lineCode"><input type="text" class="filter-input" id="fi_lineCode" placeholder="All"><span class="filter-arrow">▾</span><div class="filter-dropdown" id="fd_lineCode"></div></div></div><div class="filter-group"><label>PN</label><div class="filter-input-wrap" id="fiw_itemNo"><input type="text" class="filter-input" id="fi_itemNo" placeholder="All"><span class="filter-arrow">▾</span><div class="filter-dropdown" id="fd_itemNo"></div></div></div><div class="filter-group"><label>Style</label><div class="filter-input-wrap" id="fiw_style"><input type="text" class="filter-input" id="fi_style" placeholder="All"><span class="filter-arrow">▾</span><div class="filter-dropdown" id="fd_style"></div></div></div><div class="filter-group" style="justify-content:flex-end"><button id="ioRefreshBtn" class="btn btn-outline btn-sm" style="margin-top:14px">Refresh</button></div></div></div>
       </div></div>
 
-      <div class="merge-info" style="margin-top:12px;padding:10px 12px;background:#f0f9ff;border:1px solid #bfdbfe;border-radius:8px;font-size:11px;color:#334155"><div style="font-weight:600;margin-bottom:4px">💡 左侧方框管理：每框1标签起步，拖动标签拼到另一框合并，多组合并共存，行维度优先相邻，Type列区分</div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span>Groups: <strong id="mergeGroupCount">9</strong></span><button id="addEmptyGroupBtn" class="btn btn-sm btn-outline">➕ Add Group</button></div></div>
+      <div class="merge-info" style="margin-top:12px;padding:6px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#475569;display:flex;gap:12px;align-items:center"><span>Groups: <strong id="mergeGroupCount">9</strong></span><span style="color:#94a3b8">|</span><span style="color:#64748b">Drag report labels between boxes to merge; same dim adjacent</span><button id="addEmptyGroupBtn" class="btn btn-sm btn-outline" style="margin-left:auto">➕ Add Group</button></div>
 
       <div style="display:flex;gap:12px;margin-top:12px;align-items:flex-start">
         <div style="flex:0 0 220px;max-width:220px;position:sticky;top:70px">
           <div class="io-left-manager" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px">
             <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;margin-bottom:8px;display:flex;justify-content:space-between"><span>📦 Group Boxes</span><span style="font-size:10px;color:#94a3b8">${REPORTS.length} types</span></div>
             <div id="leftGroupBoxes" style="display:flex;flex-direction:column;gap:8px"></div>
-            <div id="newMergedDrop" class="group-box empty" style="margin-top:10px;border:2px dashed #8b5cf6;background:#faf5ff;padding:12px;text-align:center;font-size:11px;color:#6d28d9;border-radius:8px;cursor:copy">➕ 拖入多个标签<br>创建新合并组</div>
-            <div style="margin-top:10px;font-size:10px;color:#94a3b8;line-height:1.4">• 拖动标签拼到另一框合并<br>• 点击方框跳转右侧<br>• 同Line/PN相邻，Type区分</div>
+            <div id="newMergedDrop" class="group-box empty" style="margin-top:10px;border:2px dashed #8b5cf6;background:#faf5ff;padding:12px;text-align:center;font-size:11px;color:#6d28d9;border-radius:8px;cursor:copy">➕ Drop to create merged group</div>
           </div>
         </div>
         <div style="flex:1;min-width:0"><div id="ioReportContent"></div></div>
@@ -351,8 +349,7 @@ window.ioOnWellChipDragStart=onWellChipDragStart;
 function getDimParam(){ if(dimOrder.length===0) return ''; if(dimOrder.length===1) return dimOrder[0]; return 'detail'; }
 async function refreshMeta(){
   try{
-    const groupParam=currentGroup==='FG'?'成品':'GB';
-    const resp=await fetch(`/api/io/meta?group=${encodeURIComponent(groupParam)}&col_dim=${COL_DIM}`);
+    const resp=await fetch(`/api/io/meta?group=${encodeURIComponent(currentGroup)}&col_dim=${COL_DIM}`);
     const meta=await resp.json(); if(meta.error) throw new Error(meta.error);
     const map={lineCode:'line_codes',itemNo:'items',style:'styles'};
     for(const [fk,mk] of Object.entries(map)){
@@ -366,8 +363,7 @@ async function loadAllReports(){
   const content=document.getElementById('ioReportContent');
   if(!dim){ allData=null; if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">Please drag row dimensions</div>'; renderLeftGroupBoxes(); return; }
   if(content) content.innerHTML='<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading...</div>';
-  const groupParam=currentGroup==='FG'?'成品':'GB';
-  const params=new URLSearchParams({group:groupParam, dim, col_dim:COL_DIM, line_code:filterVals.lineCode, item_no:filterVals.itemNo, style:filterVals.style});
+  const params=new URLSearchParams({group:currentGroup, dim, col_dim:COL_DIM, line_code:filterVals.lineCode, item_no:filterVals.itemNo, style:filterVals.style});
   try{
     const resp=await fetch(`/api/io/reports?${params}`);
     const data=await resp.json(); if(data.error) throw new Error(data.error);
@@ -497,7 +493,7 @@ function renderAllReports(){
       }
     }
     const badges=groupTypes.map(t=>`<span class="type-badge type-${t}">${esc(REPORT_NAMES[t])}</span>`).join(' ');
-    html+=`<div class="report-section merge-group ${isMerged?'merged':''}" id="io_group_${gIdx}" data-group-idx="${gIdx}"><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid ${isMerged?'#8b5cf6':'#3b82f6'};padding-bottom:6px;margin-bottom:8px"><div><h6 style="margin:0;font-size:13px;font-weight:700">${esc(titles)}</h6><div style="font-size:11px;color:#64748b">${totalRows} rows × ${totalCols} cols ${isMerged?'<span style="color:#8b5cf6">(Merged, 同维度相邻)</span>':''} — ${badges}</div></div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-outline" onclick="window.${isMerged?'ioDownloadMerged':'ioDownloadExcel'}(${isMerged?gIdx:`'${groupTypes[0]}'`})">📥 Excel</button></div></div>${tableHTML}</div>`;
+    html+=`<div class="report-section merge-group ${isMerged?'merged':''}" id="io_group_${gIdx}" data-group-idx="${gIdx}"><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid ${isMerged?'#8b5cf6':'#3b82f6'};padding-bottom:6px;margin-bottom:8px"><div><h6 style="margin:0;font-size:13px;font-weight:700">${esc(titles)}</h6><div style="font-size:11px;color:#64748b">${totalRows} rows × ${totalCols} cols ${isMerged?'<span style="color:#8b5cf6">(Merged, same dim adjacent)</span>':''} — ${badges}</div></div><div style="display:flex;gap:6px"><button class="btn btn-sm btn-outline" onclick="window.${isMerged?'ioDownloadMerged':'ioDownloadExcel'}(${isMerged?gIdx:`'${groupTypes[0]}'`})">📥 Excel</button></div></div>${tableHTML}</div>`;
   });
   content.innerHTML=html||'<div style="text-align:center;padding:40px;color:#94a3b8">No tables</div>';
 }
@@ -546,7 +542,7 @@ function buildMergedFlatTable(data, dim, gIdx){
   const start=page*PAGE_SIZE, end=Math.min(start+PAGE_SIZE, totalRows);
   const pageRows=sorted.slice(start,end);
 
-  let html=`<div class="stat-row"><strong>${totalRows}</strong> merged rows &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong> — 同一 ${esc(dimLabel)} 相邻 ${totalRows>PAGE_SIZE?`— showing ${start+1}-${end}`:''} ${totalRows>PAGE_SIZE?`<button class="btn btn-sm btn-outline" onclick="ioChangePage('${pageKey}', -1)">◀</button><button class="btn btn-sm btn-outline" onclick="ioChangePage('${pageKey}', 1)">▶</button>`:''}</div>`;
+  let html=`<div class="stat-row"><strong>${totalRows}</strong> merged rows &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong> — same ${esc(dimLabel)} adjacent ${totalRows>PAGE_SIZE?`— showing ${start+1}-${end}`:''} ${totalRows>PAGE_SIZE?`<button class="btn btn-sm btn-outline" onclick="ioChangePage('${pageKey}', -1)">◀</button><button class="btn btn-sm btn-outline" onclick="ioChangePage('${pageKey}', 1)">▶</button>`:''}</div>`;
   html+='<div class="table-wrapper"><table><thead><tr>';
   html+=`<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
   html+=`<th class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:16">Type</th>`;
@@ -582,7 +578,7 @@ function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
   function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
   const grandTotal=sumRows(rows);
 
-  let h=`<div class="stat-row"><strong>${rows.length}</strong> detail rows — 点击展开，懒加载子级</div><div class="table-wrapper"><table><thead><tr>`;
+  let h=`<div class="stat-row"><strong>${rows.length}</strong> detail rows — click to expand, lazy load children</div><div class="table-wrapper"><table><thead><tr>`;
   dimOrder.forEach((d,i)=>{ const left=i*frozenW; h+=`<th class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:16">${esc(DIM_LABELS[d]||d)} <span class="expand-btn" onclick="window.ioExpandAll('${tableId}')">⊞</span></th>`; });
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
@@ -648,7 +644,7 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
   }
   const tree=treeCache[tableId];
   function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
-  let h=`<div class="stat-row"><strong>${rows.length}</strong> merged — 维度优先，同 ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} 相邻，懒加载</div><div class="table-wrapper"><table><thead><tr>`;
+  let h=`<div class="stat-row"><strong>${rows.length}</strong> merged — dim first, same ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} adjacent, lazy load</div><div class="table-wrapper"><table><thead><tr>`;
   effDims.forEach((d,i)=>{ const left=lefts[i]; const w=i===nDims-1? typeW : frozenW; const label=d==='_REPORT_TYPE'?'Type':(DIM_LABELS[d]||d); h+=`<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)}</th>`; });
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });

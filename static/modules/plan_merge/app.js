@@ -52,7 +52,7 @@ function updateFileNameDisplay(input) {
   if (input.files && input.files.length > 0) {
     const name = input.files[0].name;
     const sizeKB = (input.files[0].size / 1024).toFixed(1);
-    const txt = `📄 ${name} (${sizeKB} KB) — 待生成`;
+    const txt = `📄 ${name} (${sizeKB} KB) — pending`;
     if (fnEl) { fnEl.textContent = txt; fnEl.className = 'file-name has-file'; }
     if (mainFnEl && fnEl !== mainFnEl) { mainFnEl.textContent = txt; mainFnEl.className = 'file-name has-file'; }
     if (card) card.classList.add('has-file');
@@ -155,8 +155,8 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     const loadedFileName = fileInput.files[0] ? fileInput.files[0].name : 'file';
     const timeStr = new Date().toLocaleTimeString();
     const usedOffset = data.config ? data.config.etd_packout_offset : document.getElementById('cfg-etd-packout-offset')?.value;
-    const successMsg = `✅ 加载成功: ${loadedFileName} — ${allRows.length} rows | ETD offset=${usedOffset}d`;
-    const fileMsg = `✅ 已加载成功: ${loadedFileName} (${allRows.length} rows) — ${timeStr} | ETD offset=${usedOffset}d`;
+    const successMsg = `✅ Loaded: ${loadedFileName} — ${allRows.length} rows | ETD offset=${usedOffset}d`;
+    const fileMsg = `✅ Loaded: ${loadedFileName} (${allRows.length} rows) — ${timeStr} | ETD offset=${usedOffset}d`;
     document.getElementById('upload-status').textContent = successMsg;
     const fnMain = document.getElementById('file-name-main');
     if (fnMain) {
@@ -209,7 +209,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     status.textContent = `❌ ${e.message}`;
     const fnMain = document.getElementById('file-name-main');
     if (fnMain) {
-      fnMain.textContent = `❌ 加载失败: ${e.message}`;
+      fnMain.textContent = `❌ Load failed: ${e.message}`;
       fnMain.className = 'file-name error';
     }
   } finally {
@@ -586,7 +586,7 @@ function escAttr(s){
     // Show demo filename
     const fnEl = document.getElementById('file-name-main');
     if (fnEl) {
-      fnEl.textContent = `📄 input_demo.xlsx (${(blob.size/1024).toFixed(1)} KB) — Demo已加载，待生成`;
+      fnEl.textContent = `📄 input_demo.xlsx (${(blob.size/1024).toFixed(1)} KB) — Demo loaded, pending`;
       fnEl.className = 'file-name has-file';
     }
   } catch(e) {
