@@ -1,5 +1,37 @@
 """Plan merge module: shared helper functions"""
 
+from datetime import datetime
+
+_DATE_FORMATS = [
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%Y.%m.%d",
+    "%Y年%m月%d日",
+    "%Y年%m月%d",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y%m%d",
+]
+
+def normalize_date_str(value):
+    """Convert datetime or date-like string to 'YYYY-MM-DD' (or return as-is)."""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if not isinstance(value, str):
+        return str(value).strip() if value is not None else ""
+    s = value.strip()
+    if not s:
+        return ""
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return s
+
+
 def read_sheet(ws, key_col=None):
     """Read a worksheet → {PN: {date_str: value}}"""
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
@@ -14,7 +46,7 @@ def read_sheet(ws, key_col=None):
         for ci, h in enumerate(headers):
             if ci == ki: continue
             v = ws.cell(r, ci + 1).value
-            h_str = str(h).strip() if h else ""
+            h_str = normalize_date_str(h)
             if h_str and v is not None and isinstance(v, (int, float)):
                 vals[h_str] = float(v)
         if vals:

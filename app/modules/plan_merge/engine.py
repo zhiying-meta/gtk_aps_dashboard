@@ -7,9 +7,32 @@ from collections import defaultdict
 
 from app.modules.plan_merge.config import DEFAULT_PALLET_QTY
 
+_DATE_FORMATS = [
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%Y.%m.%d",
+    "%Y年%m月%d日",
+    "%Y年%m月%d",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y%m%d",
+]
+
+def _to_dt(s):
+    """Parse date string with multiple format support."""
+    s = str(s).strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"unrecognized date: {s}")
+
 
 def _to_saturday_label(ds):
-    try: dt = datetime.strptime(ds, "%Y-%m-%d")
+    try: dt = _to_dt(ds)
     except: return ds
     dow = dt.weekday()
     sat = dt + timedelta(days=5 - dow)
@@ -25,14 +48,14 @@ def aggregate_cumulative(daily, cut_day):
         return {}
 
     def date_to_week_label(ds):
-        dt = datetime.strptime(ds, "%Y-%m-%d")
+        dt = _to_dt(ds)
         cd = dt.weekday()
         diff = (td - cd) % 7
         week_end = dt + timedelta(days=diff)
         return _to_saturday_label(week_end.strftime("%Y-%m-%d"))
 
-    first_dt = datetime.strptime(date_list[0], "%Y-%m-%d")
-    last_dt = datetime.strptime(date_list[-1], "%Y-%m-%d")
+    first_dt = _to_dt(date_list[0])
+    last_dt = _to_dt(date_list[-1])
     first_wl = date_to_week_label(date_list[0])
     last_wl = date_to_week_label(date_list[-1])
 
@@ -42,8 +65,8 @@ def aggregate_cumulative(daily, cut_day):
         weeks[wl].append(ds)
 
     all_weeks = []
-    cur = datetime.strptime(first_wl, "%Y-%m-%d")
-    end = datetime.strptime(last_wl, "%Y-%m-%d")
+    cur = _to_dt(first_wl)
+    end = _to_dt(last_wl)
     while cur <= end:
         all_weeks.append(cur.strftime("%Y-%m-%d"))
         cur += timedelta(days=7)
@@ -65,7 +88,7 @@ def extract_weekly_cum(daily, cut_day):
     date_list = sorted(daily.keys())
     weeks = defaultdict(list)
     for ds in date_list:
-        try: dt = datetime.strptime(ds, "%Y-%m-%d")
+        try: dt = _to_dt(ds)
         except: continue
         cd = dt.weekday()
         diff = (td - cd) % 7
@@ -134,6 +157,25 @@ def process_uploaded_data(file_map, config):
         if sku in ctb_sku:
             w = extract_weekly_cum(ctb_sku[sku], cfg["etd_cut"])
             all_weeks.update(w.keys())
+
+    # Expand week range to cover earliest raw date across ALL input sheets
+    all_raw_dates = set()
+    for d in [plan_gated, plan_ungated, plan_fcst, ctb_sku]:
+        for v in d.values():
+            all_raw_dates.update(v.keys())
+    for v in ctb_gb.values():
+        all_raw_dates.update(v.keys())
+    if all_raw_dates:
+        earliest_sat = _to_saturday_label(min(all_raw_dates))
+        if not all_weeks or earliest_sat < min(all_weeks):
+            end = _to_dt(min(all_weeks)) if all_weeks else _to_dt(earliest_sat)
+            cur = _to_dt(earliest_sat)
+            extra = []
+            while cur < end:
+                extra.append(cur.strftime("%Y-%m-%d"))
+                cur += timedelta(days=7)
+            all_weeks = set(extra) | all_weeks
+
     all_weeks = sorted(all_weeks)
 
     def fill(vals): return {w: vals.get(w, None) for w in all_weeks}
@@ -215,7 +257,7 @@ def process_uploaded_data(file_map, config):
     wl = {}
     for w in all_weeks:
         try:
-            dt = datetime.strptime(w, "%Y-%m-%d")
+            dt = _to_dt(w)
             wk = (dt.day - 1) // 7 + 1
             wl[w] = f"{dt.strftime('%b')} Wk{wk} ({dt.strftime('%b %d')})"
         except:
@@ -276,7 +318,6 @@ def generate_excel(data):
     """Generate formatted xlsx from report data — split into FG and GB sheets"""
     import openpyxl as xl
     from openpyxl.styles import Font as F, PatternFill as PF, Border as B, Side as S, Alignment as A
-    from datetime import datetime as dt2
 
     rows, weeks = data["rows"], data["weeks"]
     fg_rows = [r for r in rows if r.get("_dim") == "FG"]
@@ -299,7 +340,7 @@ def generate_excel(data):
     wlabels = []
     for w in weeks:
         try:
-            d = dt2.strptime(w, "%Y-%m-%d")
+            d = _to_dt(w)
             wk = (d.day - 1) // 7 + 1
             wlabels.append(f"{d.strftime('%b')} Wk{wk} ({d.strftime('%b %d')})")
         except:
