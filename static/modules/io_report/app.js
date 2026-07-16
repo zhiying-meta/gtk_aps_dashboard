@@ -852,37 +852,37 @@ function buildMergedFlatTable(data, dim){
   const dimLabel = DIM_LABELS[dim] || dim;
   const typeW = 130;
   const frozenW = 120;
-  const dividerLeft = typeW+frozenW;
+  const dividerLeft = frozenW + typeW; // dim first, then Type
 
-  let html = `<div class="stat-row"><strong>${rows.length}</strong> rows (merged) &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong></div>`;
+  let html = `<div class="stat-row"><strong>${rows.length}</strong> rows (merged) &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: <strong>${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</strong> — 同一 ${esc(dimLabel)} 的不同 Type 相邻显示</div>`;
   html += '<div class="table-wrapper"><table><thead><tr>';
-  html += `<th class="frozen" style="left:0;min-width:${typeW}px;z-index:16">Type</th>`;
-  html += `<th class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
+  html += `<th class="frozen" style="left:0;min-width:${frozenW}px;z-index:16">${esc(dimLabel)}</th>`;
+  html += `<th class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:16">Type</th>`;
   html += `<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{
     const p=c.split('_');
     html += `<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`;
   });
   html += '</tr></thead><tbody>';
-  // sort by Type then dim
+  // sort by dim first, then Type (REPORTS order) — 同一 dimension 的不同 Type 相邻
+  const typeOrder = {};
+  REPORTS.forEach((t,i)=> typeOrder[t]=i);
   const sorted = [...rows].sort((a,b)=>{
-    if(a._REPORT_KEY < b._REPORT_KEY) return -1;
-    if(a._REPORT_KEY > b._REPORT_KEY) return 1;
     const av = a[dim]||'', bv = b[dim]||'';
-    return av < bv ? -1 : av > bv ? 1 : 0;
+    if(av < bv) return -1;
+    if(av > bv) return 1;
+    const ao = typeOrder[a._REPORT_KEY] ?? 99, bo = typeOrder[b._REPORT_KEY] ?? 99;
+    return ao - bo;
   });
-  let prevType=null, prevVal=null;
+  let prevVal=null;
   sorted.forEach((r)=>{
-    const curType=r._REPORT_KEY;
     const curVal=r[dim];
-    const isNewType = prevType!==null && prevType!==curType;
-    const isNewVal = !isNewType && prevVal!==null && prevVal!==curVal;
-    const isNewGroup = isNewType || isNewVal;
-    prevType=curType; prevVal=curVal;
-    const rowCls = `row-${curType} ${isNewGroup ? 'row-new-group' : ''}`;
+    const isNewGroup = prevVal!==null && prevVal!==curVal;
+    prevVal=curVal;
+    const rowCls = `row-${r._REPORT_KEY} ${isNewGroup ? 'row-new-group' : ''}`;
     html += `<tr class="${rowCls}">`;
-    html += `<td class="frozen" style="left:0;min-width:${typeW}px;z-index:5"><span class="type-badge type-${curType}">${esc(r._REPORT_TYPE||'')}</span></td>`;
-    html += `<td class="frozen" style="left:${typeW}px;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
+    html += `<td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td>`;
+    html += `<td class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${r._REPORT_KEY}">${esc(r._REPORT_TYPE||'')}</span></td>`;
     html += `<td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
     columns.forEach(c=>{
       const v=r[c];
@@ -984,17 +984,16 @@ function buildHierarchicalTable(data, dimOrder, reportKey){
 
 function buildMergedHierarchicalTable(data, dimOrder){
   const { columns, rows } = data;
-  // effective dims: Type + dimOrder
-  const effDims = ['_REPORT_TYPE', ...dimOrder];
+  // New requirement: row dimension first, Type last — 同一 Line/PN 的不同 Type 相邻
+  const effDims = [...dimOrder, '_REPORT_TYPE'];
   const nDims = effDims.length;
   const frozenW = 120;
   const typeW = 130;
-  // compute left offsets: first is Type 130, rest 120
   const lefts = [];
   let curL = 0;
   effDims.forEach((_, i)=>{
     lefts.push(curL);
-    curL += (i===0? typeW : frozenW);
+    curL += (i===nDims-1? typeW : frozenW);
   });
   const divLeft = curL;
 
@@ -1003,9 +1002,9 @@ function buildMergedHierarchicalTable(data, dimOrder){
     const dim = effDims[depth];
     const groups = {};
     items.forEach(r=>{ const k = r[dim]||'(blank)'; if(!groups[k]) groups[k]=[]; groups[k].push(r); });
-    // sort: for Type, use REPORTS order
     const keys = Object.keys(groups);
-    if(depth===0){
+    if(dim==='_REPORT_TYPE'){
+      // Type 按 REPORTS 顺序
       keys.sort((a,b)=>{
         const ia = REPORTS.findIndex(t=> REPORT_NAMES[t]===a);
         const ib = REPORTS.findIndex(t=> REPORT_NAMES[t]===b);
@@ -1022,12 +1021,12 @@ function buildMergedHierarchicalTable(data, dimOrder){
   }
   const grandTotal = sumRows(rows);
 
-  let h = `<div class="stat-row"><strong>${rows.length}</strong> detail rows merged &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: ${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')}</div>`;
+  let h = `<div class="stat-row"><strong>${rows.length}</strong> detail rows merged &nbsp; <strong>${columns.length}</strong> cols &nbsp; Types: ${[...new Set(rows.map(r=>r._REPORT_TYPE))].join(', ')} — 按行维度优先，同一 ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} 的不同 Type 相邻</div>`;
   h += '<div class="table-wrapper"><table><thead><tr>';
   effDims.forEach((d,i)=>{
     const btn = i < nDims-1 ? `<span class="expand-btn" onclick="window.ioExpandLevel(event,${i})" title="Expand/Collapse all">⊞</span>` : '';
     const left = lefts[i];
-    const w = i===0? typeW : frozenW;
+    const w = i===nDims-1? typeW : frozenW;
     const label = d==='_REPORT_TYPE' ? 'Type' : (DIM_LABELS[d]||d);
     h += `<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)} ${btn}</th>`;
   });
@@ -1044,16 +1043,17 @@ function buildMergedHierarchicalTable(data, dimOrder){
     nodes.forEach((node, idx)=>{
       path[depth]=idx;
       const pid = uidBase+'_'+path.slice(0,depth+1).join('_');
+      const isTypeDepth = effDims[depth]==='_REPORT_TYPE';
       const rk = node.repKey || node.allRows[0]?._REPORT_KEY || '';
       if(depth===nDims-1){
+        // leaf: Type row
         const agg = sumRows(node.allRows);
         h += `<tr class="agg-row row-new-group row-${rk}">`;
         for(let d=0; d<nDims; d++){
           const left = lefts[d];
           const val = d<depth ? '' : node.key;
-          if(d===0){
-            const badge = `<span class="type-badge type-${rk}">${esc(val)}</span>`;
-            h += `<td class="frozen" style="left:${left}px;min-width:${typeW}px;z-index:5">${badge}</td>`;
+          if(effDims[d]==='_REPORT_TYPE'){
+            h += `<td class="frozen" style="left:${left}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${rk}">${esc(val)}</span></td>`;
           }else{
             h += `<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(val)}</td>`;
           }
@@ -1064,14 +1064,16 @@ function buildMergedHierarchicalTable(data, dimOrder){
       }else{
         const aggregated = node.items.flatMap(n=> n.allRows || []);
         const agg = sumRows(aggregated);
-        const repKey = aggregated[0]?._REPORT_KEY || rk || '';
-        h += `<tr class="hierarchy-row agg-row row-new-group row-${repKey}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
+        const repKey = isTypeDepth ? rk : (aggregated[0]?._REPORT_KEY || rk || '');
+        // For non-type depths, row color from first child if needed
+        const rowCls = isTypeDepth ? `row-${rk}` : `row-${repKey}`;
+        h += `<tr class="hierarchy-row agg-row row-new-group ${rowCls}" id="${pid}" data-depth="${depth}" onclick="window.ioToggleDetail('${pid}')">`;
         for(let d=0; d<nDims; d++){
           const left = lefts[d];
-          const w = d===0? typeW : frozenW;
+          const w = d===nDims-1? typeW : frozenW;
           if(d===depth){
-            if(d===0){
-              h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span><span class="type-badge type-${repKey}">${esc(node.key)}</span></td>`;
+            if(effDims[d]==='_REPORT_TYPE'){
+              h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span><span class="type-badge type-${rk}">${esc(node.key)}</span></td>`;
             }else{
               h += `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`;
             }
@@ -1095,7 +1097,7 @@ function buildMergedHierarchicalTable(data, dimOrder){
   h += '<tr class="total-row">';
   for(let d=0; d<nDims; d++){
     const left = lefts[d];
-    const w = d===0? typeW : frozenW;
+    const w = d===nDims-1? typeW : frozenW;
     h += d===0 ? `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><strong>Total</strong></td>` : `<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
   }
   h += `<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
@@ -1175,25 +1177,33 @@ function downloadMerged(gIdx){
   const isDetail = dim==='detail' && dimOrder.length>=2;
   let headers;
   if(isDetail){
-    headers = ['Type', ...dimOrder.map(d=> DIM_LABELS[d]||d)];
+    headers = [...dimOrder.map(d=> DIM_LABELS[d]||d), 'Type'];
   }else{
-    headers = ['Type', DIM_LABELS[dim]||dim];
+    headers = [DIM_LABELS[dim]||dim, 'Type'];
   }
   const wsData = [];
   wsData.push([...headers, ...merged.columns]);
+  const typeOrder = {}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
   const sorted = [...merged.rows].sort((a,b)=>{
-    if(a._REPORT_KEY < b._REPORT_KEY) return -1;
-    if(a._REPORT_KEY > b._REPORT_KEY) return 1;
-    return 0;
+    if(isDetail){
+      for(const d of dimOrder){
+        const av=a[d]||'', bv=b[d]||'';
+        if(av<bv) return -1; if(av>bv) return 1;
+      }
+    }else{
+      const av=a[dim]||'', bv=b[dim]||'';
+      if(av<bv) return -1; if(av>bv) return 1;
+    }
+    return (typeOrder[a._REPORT_KEY]??99) - (typeOrder[b._REPORT_KEY]??99);
   });
   sorted.forEach(row=>{
     const r=[];
-    r.push(row._REPORT_TYPE||'');
     if(isDetail){
       dimOrder.forEach(d=> r.push(row[d]||''));
     }else{
       r.push(row[dim]??'');
     }
+    r.push(row._REPORT_TYPE||'');
     merged.columns.forEach(c=> r.push(row[c]??0));
     wsData.push(r);
   });
@@ -1211,17 +1221,25 @@ function downloadAll(){
   if(!allData) return;
   if(!window.XLSX){ alert('XLSX library not loaded'); return; }
   const wb = XLSX.utils.book_new();
+  const typeOrder = {}; REPORTS.forEach((t,i)=> typeOrder[t]=i);
   reportGroups.forEach((groupTypes,gIdx)=>{
     const merged = mergeTypesData(groupTypes);
     if(!merged.rows.length) return;
     const dim = getDimParam();
     const isDetail = dim==='detail' && dimOrder.length>=2;
-    let headers = isDetail ? ['Type', ...dimOrder.map(d=> DIM_LABELS[d]||d)] : ['Type', DIM_LABELS[dim]||dim];
+    let headers = isDetail ? [...dimOrder.map(d=> DIM_LABELS[d]||d), 'Type'] : [DIM_LABELS[dim]||dim, 'Type'];
     const wsData = [];
     wsData.push([...headers, ...merged.columns]);
-    merged.rows.forEach(row=>{
-      const r=[row._REPORT_TYPE||''];
+    const sorted = [...merged.rows].sort((a,b)=>{
+      if(isDetail){
+        for(const d of dimOrder){ const av=a[d]||'', bv=b[d]||''; if(av<bv) return -1; if(av>bv) return 1; }
+      }else{ const av=a[dim]||'', bv=b[dim]||''; if(av<bv) return -1; if(av>bv) return 1; }
+      return (typeOrder[a._REPORT_KEY]??99)-(typeOrder[b._REPORT_KEY]??99);
+    });
+    sorted.forEach(row=>{
+      const r=[];
       if(isDetail){ dimOrder.forEach(d=> r.push(row[d]||'')); } else { r.push(row[dim]??''); }
+      r.push(row._REPORT_TYPE||'');
       merged.columns.forEach(c=> r.push(row[c]??0));
       wsData.push(r);
     });
