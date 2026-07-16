@@ -56,17 +56,35 @@ def process():
     work_dir = os.path.join(config.UPLOAD_FOLDER, upload_id)
     os.makedirs(work_dir, exist_ok=True)
     try:
+        # collect xlsx file (support both feat/io-report and main logic)
         xlsx_path = None
         for f in request.files.values():
             if f.filename and f.filename.lower().endswith(".xlsx"):
                 xlsx_path = os.path.join(work_dir, f.filename)
                 f.save(xlsx_path)
                 break
+        # fallback: save any file if no xlsx filter matched (compat with main)
+        if not xlsx_path:
+            for key in request.files:
+                ff = request.files[key]
+                if ff.filename:
+                    maybe = os.path.join(work_dir, ff.filename)
+                    ff.save(maybe)
+                    if maybe.lower().endswith(".xlsx"):
+                        xlsx_path = maybe
+                        break
+                    # if still no xlsx, keep first file as xlsx_path for error handling
+                    if not xlsx_path:
+                        xlsx_path = maybe
 
         if not xlsx_path:
             return jsonify({"error": "No xlsx file uploaded"}), 400
 
-        cfg = {k: v for k in ("exf_cut", "etd_cut", "output_cut", "gb_cut") if (v := request.form.get(k))}
+        cfg = {}
+        for cfg_key in ["exf_cut", "etd_cut", "output_cut", "gb_cut", "etd_packout_offset"]:
+            val = request.form.get(cfg_key)
+            if val:
+                cfg[cfg_key] = val
 
         result = process_uploaded_data({"main": xlsx_path}, cfg)
         return jsonify(result)

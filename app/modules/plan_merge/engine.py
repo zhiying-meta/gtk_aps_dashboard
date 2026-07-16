@@ -81,6 +81,38 @@ def aggregate_cumulative(daily, cut_day):
     return result
 
 
+def aggregate_etd_from_packout(daily, etd_cut, offset_days):
+    """
+    ETD cumulative uses Packout cumulative from offset_days before.
+
+    Requirement: if n=2, ETD on date D should use Packout cum on D-n.
+    Physically: Packout daily at D becomes ETD at D+n.
+    Implementation: shift daily output forward by offset_days, then aggregate.
+
+    e.g. Packout 100 on 2024-01-08 with offset 2 → ETD daily 100 on 2024-01-10.
+    Thus ETD_cum[2024-01-10] includes that 100 via P_cum[2024-01-08].
+    """
+    if not daily:
+        return {}
+    try:
+        off = int(offset_days)
+    except Exception:
+        off = 0
+    if off <= 0:
+        return aggregate_cumulative(daily, etd_cut)
+
+    shifted = {}
+    for ds, qty in daily.items():
+        try:
+            dt = _to_dt(ds)
+        except Exception:
+            continue
+        new_dt = dt + timedelta(days=off)
+        new_ds = new_dt.strftime("%Y-%m-%d")
+        shifted[new_ds] = shifted.get(new_ds, 0.0) + float(qty)
+    return aggregate_cumulative(shifted, etd_cut)
+
+
 def extract_weekly_cum(daily, cut_day):
     """For already-cumulative data (CTB): take the value at each week end."""
     dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
@@ -106,12 +138,22 @@ def extract_weekly_cum(daily, cut_day):
 
 def process_uploaded_data(file_map, config):
     from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
+    from app.modules.plan_merge.config import DEFAULT_ETD_PACKOUT_OFFSET
+
+    def _parse_offset(v, fallback):
+        try:
+            if v is None or v == "":
+                return fallback
+            return max(0, int(v))
+        except Exception:
+            return fallback
 
     cfg = {
         "exf_cut": config.get("exf_cut", "Saturday"),
         "etd_cut": config.get("etd_cut", "Saturday"),
         "output_cut": config.get("output_cut", "Wednesday"),
         "gb_cut": config.get("gb_cut", "Tuesday"),
+        "etd_packout_offset": _parse_offset(config.get("etd_packout_offset"), DEFAULT_ETD_PACKOUT_OFFSET),
     }
 
     fp = file_map.get("main") or file_map.get("sku") or next(iter(file_map.values()), None)
@@ -139,15 +181,24 @@ def process_uploaded_data(file_map, config):
     all_skus = sorted(s for s in all_pns if s in sku_attrs)
 
     agg = {}
-    for label, data, cut in [("GATED_ETD", plan_gated, cfg["etd_cut"]),
-                              ("UNGATED_ETD", plan_ungated, cfg["etd_cut"]),
-                              ("GATED_PACK", plan_gated, cfg["output_cut"]),
+    # Packout weekly cum (no offset)
+    for label, data, cut in [("GATED_PACK", plan_gated, cfg["output_cut"]),
                               ("UNGATED_PACK", plan_ungated, cfg["output_cut"]),
                               ("FCST", plan_fcst, cfg["exf_cut"])]:
         agg[label] = {}
         for sku in all_skus:
             daily = data.get(sku, {})
             agg[label][sku] = aggregate_cumulative(daily, cut)
+
+    # ETD uses Packout cum with offset: ETD(D) = Packout_cum(D - offset)
+    # Implemented by shifting daily forward by offset then aggregating to ETD cut
+    offset_n = cfg.get("etd_packout_offset", 2)
+    for label, data, cut in [("GATED_ETD", plan_gated, cfg["etd_cut"]),
+                              ("UNGATED_ETD", plan_ungated, cfg["etd_cut"])]:
+        agg[label] = {}
+        for sku in all_skus:
+            daily = data.get(sku, {})
+            agg[label][sku] = aggregate_etd_from_packout(daily, cut, offset_n)
 
     all_weeks = set()
     for a in agg.values():
