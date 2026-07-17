@@ -736,19 +736,18 @@ function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
       }else{
         const agg=sumAll(node);
         const hasChildren=node.items && node.items.length>0;
-        const typeBadge = `<span class="type-badge type-${reportKey}" style="margin-left:4px;font-size:10px">${esc(REPORT_NAMES[reportKey]||reportKey)}</span>`;
         out+=`<tr class="hierarchy-row agg-row row-new-group row-${reportKey}" id="${pid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
         for(let d=0; d<nDims; d++){
           const left=d*frozenW;
           if(d===depth){
-            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)} ${typeBadge}</td>`;
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
           }else if(d===depth+1){
-            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5;color:#64748b"><div style="display:flex;flex-direction:column;gap:2px"><span>${hasChildren? node.items.length+' items':''}</span>${typeBadge}</div></td>`;
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5;color:#64748b">${hasChildren? node.items.length+' items':''}</td>`;
           }else{
             out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
           }
         }
-        out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5;background:#475569"></td>`;
         columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
         out+=`</tr>`;
         if(isExpanded && hasChildren){
@@ -888,110 +887,82 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
         // If this node aggregates multiple types and we are before TYPE level, split into per-type rows (like plan_merge)
         const shouldSplitPerType = typesInNode.length>1 && depth < nDims-1 && effDims[nDims-1]==='_REPORT_TYPE';
         if(shouldSplitPerType){
-          // render one row per type, each with its own color and aggregation
+          // render one row per type, each with its own color - Type only in Type column per user request
           typesInNode.forEach(t=>{
             const agg=sumForType(node, t);
             const hasData=Object.values(agg).some(v=>v!==0);
             if(!hasData) return;
             const typePid=`${pid}_${t}`;
-            const typePathStr=`${pathStr}|${t}`;
-            // we use a slightly different path for per-type rows to keep toggle working - toggle will expand to filtered children
             out+=`<tr class="hierarchy-row agg-row row-new-group row-${t}" id="${typePid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" data-type="${t}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
             for(let d=0; d<nDims; d++){
               const left=lefts[d];
               const w=d===nDims-1? typeW : frozenW;
               if(d===depth){
-                out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)} <span class="type-badge type-${t}" style="margin-left:4px">${esc(REPORT_NAMES[t]||t)}</span></td>`;
+                out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
               }else if(d===depth+1){
-                // show count for this type only
                 const filtered=filterNodeByType(node, t);
-                const cnt=filtered ? (function countItems(n){ let c=0; function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length>0) walk(nn.items); else c+=1; }); } walk([filtered]); return c; })(filtered) : 0;
-                out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b"><div style="display:flex;flex-direction:column;gap:2px"><span>${cnt} items</span><span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></div></td>`;
+                const cnt=filtered ? (function countItems(n){ let c=0; function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length>0) walk(ns); else c+=1; }); } walk([filtered]); return c; })(filtered) : 0;
+                out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b">${cnt} items</td>`;
               }else if(effDims[d]==='_REPORT_TYPE'){
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></td>`;
               }else{
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
               }
             }
-            out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+            out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5;background:#475569"></td>`;
             columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
             out+=`</tr>`;
           });
-          // when expanded, render children grouped by type? For simplicity, render children only once (they will be per-type filtered inside)
+          // when expanded, render PN level with same SKU's daily+ cum together for comparison
           if(isExpanded && hasChildren){
-            // For each type, render its filtered children
-            typesInNode.forEach(t=>{
-              const filtered=filterNodeByType(node, t);
-              if(filtered && filtered.items){
-                // create a temporary sub-render for this type's children
-                // we need to render with type context
-                const subNodes=filtered.items;
-                // use same depth+1 path but with type suffix to avoid id collision
-                // we call a helper to render subNodes at next depth
-                function renderFilteredSub(nodesToRender, d, p){
-                  let subOut='';
-                  nodesToRender.forEach((n, i)=>{
-                    const cp=[...p, i];
-                    const ps=cp.join(',');
-                    const isExp=expandedSet.has(ps);
-                    const hasCh=n.items && n.items.length>0;
-                    const rk2=n.repKey||n.allRows[0]?._REPORT_KEY||t;
-                    if(d===nDims-1){
-                      const ag=sumRows(n.allRows);
-                      subOut+=`<tr class="agg-row row-new-group row-${rk2}"><td class="frozen" style="left:${lefts[d]}px;min-width:${(effDims[d]==='_REPORT_TYPE'?typeW:frozenW)}px;z-index:5">${esc(n.key)}</td>`;
-                      for(let dd=d+1; dd<nDims; dd++){
-                        const left=lefts[dd];
-                        const w=dd===nDims-1? typeW : frozenW;
-                        subOut+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
-                      }
-                      subOut+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-                      columns.forEach(c=>{ subOut+=`<td class="num">${Number(ag[c]).toLocaleString()}</td>`; });
-                      subOut+=`</tr>`;
-                    }else{
-                      const ag=sumForType(n, t);
-                      subOut+=`<tr class="hierarchy-row agg-row row-new-group row-${t}" onclick="window.ioToggleHier('${tableId}','${ps}')"><td class="frozen" style="left:${lefts[d]}px;min-width:${frozenW}px;z-index:5"><span class="toggle">${isExp?'▼':'▶'}</span> ${esc(n.key)} <span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></td>`;
-                      for(let dd=d+1; dd<nDims; dd++){
-                        const left=lefts[dd];
-                        const w=dd===nDims-1? typeW : frozenW;
-                        if(dd===d+1){
-                          subOut+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5">${n.items? n.items.length+' items':''}</td>`;
-                        }else if(effDims[dd]==='_REPORT_TYPE'){
-                          subOut+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></td>`;
-                        }else{
-                          subOut+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
-                        }
-                      }
-                      subOut+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-                      columns.forEach(c=>{ subOut+=`<td class="num">${Number(ag[c]).toLocaleString()}</td>`; });
-                      subOut+=`</tr>`;
-                      if(isExp && hasCh){
-                        subOut+=renderFilteredSub(n.items, d+1, cp);
-                      }
-                    }
-                  });
-                  return subOut;
+            // For each PN under this LINE, show its types together (e.g., SKU1 daily + SKU1 cum adjacent)
+            node.items.forEach((pnNode, pnIdx)=>{
+              const pnTypes=collectTypesInNode(pnNode).sort((a,b)=> REPORTS.indexOf(a)-REPORTS.indexOf(b));
+              pnTypes.forEach(t=>{
+                const agg=sumForType(pnNode, t);
+                const hasData=Object.values(agg).some(v=>v!==0);
+                if(!hasData) return;
+                out+=`<tr class="agg-row row-new-group row-${t}">`;
+                for(let d=0; d<nDims; d++){
+                  const left=lefts[d];
+                  const w=d===nDims-1? typeW : frozenW;
+                  if(d===0){
+                    out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#94a3b8">${esc(node.key)}</td>`;
+                  }else if(d===1){
+                    out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span style="padding-left:12px">${esc(pnNode.key)}</span></td>`;
+                  }else if(effDims[d]==='_REPORT_TYPE'){
+                    out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></td>`;
+                  }else{
+                    out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
+                  }
                 }
-                out+=renderFilteredSub(filtered.items, depth+1, curPath);
-              }
+                out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5;background:#475569"></td>`;
+                columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+                out+=`</tr>`;
+              });
             });
           }
         }else{
           const agg=sumAll(node);
           const hasChildren=node.items && node.items.length>0;
-          const typeBadges = typesInNode.map(t=>`<span class="type-badge type-${t}" style="margin-right:2px;font-size:10px">${esc(REPORT_NAMES[t]||t)}</span>`).join('');
+          // Type only in Type column per user request
           out+=`<tr class="hierarchy-row agg-row row-new-group ${typesInNode.length===1? 'row-'+typesInNode[0]:''}" id="${pid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
           for(let d=0; d<nDims; d++){
             const left=lefts[d];
             const w=d===nDims-1? typeW : frozenW;
             if(d===depth){
-              out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)} ${typesInNode.length===1? `<span class="type-badge type-${typesInNode[0]}">${esc(REPORT_NAMES[typesInNode[0]]||typesInNode[0])}</span>`:''}</td>`;
+              out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
             }else if(d===depth+1){
-              out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b"><div style="display:flex;flex-direction:column;gap:2px"><span>${hasChildren? node.items.length+' items':''}</span><span style="display:flex;flex-wrap:wrap;gap:2px">${typeBadges}</span></div></td>`;
+              out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b">${hasChildren? node.items.length+' items':''}</td>`;
+            }else if(effDims[d]==='_REPORT_TYPE'){
+              // show all types badges in Type column when collapsed
+              const badges = typesInNode.map(t=>`<span class="type-badge type-${t}" style="margin-right:2px;font-size:10px">${esc(REPORT_NAMES[t]||t)}</span>`).join('');
+              out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span style="display:flex;flex-wrap:wrap;gap:2px">${badges}</span></td>`;
             }else{
               out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
             }
           }
-          out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+          out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5;background:#475569"></td>`;
           columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
           out+=`</tr>`;
           if(isExpanded && hasChildren){
