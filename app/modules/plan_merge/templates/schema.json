@@ -4,173 +4,173 @@
       [
         "SKU",
         "String",
-        "物料编码",
+        "Part Number",
         "SK-1001879-01"
       ],
       [
         "Usage",
         "String",
-        "用途：MP/Dummy/Demo",
+        "Usage: MP/Dummy/Demo",
         "MP"
       ],
       [
         "Style",
         "String",
-        "眼镜款式",
+        "Frame Style",
         "Rectangle M"
       ],
       [
         "Color",
         "String",
-        "颜色（大写）",
+        "Color (UPPERCASE)",
         "BLACK"
       ],
       [
         "GB_PN",
         "String",
-        "GB维度物料编码",
+        "GB-level Part Number",
         "GB-Rec M-BLACK"
       ],
       [
         "FR_PN",
         "String",
-        "Frame物料编码",
+        "Frame Part Number",
         "FR-Rec M-BLACK"
       ],
       [
         "LT_PN",
         "String",
-        "Left Temple物料编码",
+        "Left Temple Part Number",
         "LT-Rec M-BLACK"
       ],
       [
         "RT_PN",
         "String",
-        "Right Temple物料编码",
+        "Right Temple Part Number",
         "RT-Rec M-BLACK"
       ],
       [
         "Pallet_Qty",
         "Integer",
-        "托盘数量（默认864）",
+        "Pallet Quantity (default: 864)",
         "864"
       ]
     ],
-    "note": "SKU主数据表，必填。每个SKU一行，Pallet_Qty不填则默认864。"
+    "note": "SKU master table (required). One row per SKU. Default Pallet_Qty: 864."
   },
   "plan_output_gated": {
     "fields": [
       [
         "PN",
         "String",
-        "物料编码（SKU或GB/FR/LT/RT PN）",
+        "Part Number (SKU or GB/FR/LT/RT PN)",
         "SK-1001879-01"
       ],
       [
         "2026-04-16",
         "Integer",
-        "日级OUTPUT产出量",
+        "Daily OUTPUT quantity",
         "0"
       ],
       [
         "...",
         "...",
-        "后续列为每天一列，格式yyyy-MM-dd",
+        "Subsequent columns: one per day, format yyyy-MM-dd",
         "..."
       ]
     ],
-    "note": "Gated版本日级排产产出。第一列PN，后续列为日期(yyyy-MM-dd)，值为当日产出量。日期列数不限。"
+    "note": "Gated daily production output. First column: PN, subsequent columns: dates (yyyy-MM-dd), values: daily output. Unlimited date columns."
   },
   "plan_output_ungated": {
     "fields": [
       [
         "PN",
         "String",
-        "物料编码（SKU或GB/FR/LT/RT PN）",
+        "Part Number (SKU or GB/FR/LT/RT PN)",
         "SK-1001879-01"
       ],
       [
         "2026-04-16",
         "Integer",
-        "日级OUTPUT产出量",
+        "Daily OUTPUT quantity",
         "0"
       ],
       [
         "...",
         "...",
-        "后续列为每天一列",
+        "Subsequent columns: one per day",
         "..."
       ]
     ],
-    "note": "Ungated版本日级排产产出。格式同plan_output_gated。"
+    "note": "Ungated daily production output. Same format as plan_output_gated."
   },
   "forecast": {
     "fields": [
       [
         "SKU",
         "String",
-        "物料编码（仅SKU级）",
+        "Part Number (SKU level only)",
         "SK-1001879-01"
       ],
       [
         "2026-04-04",
         "Integer",
-        "Forecast周值（周六截止）",
+        "Weekly Forecast (week ending Saturday)",
         "0"
       ],
       [
         "...",
         "...",
-        "后续列为每周六日期",
+        "Subsequent columns: Saturday dates",
         "..."
       ]
     ],
-    "note": "周级Forecast数据。列头为周六日期，值为该周Forecast量。"
+    "note": "Weekly Forecast data. Column headers: Saturday dates, values: weekly forecast quantity."
   },
   "ctb_sku_cum": {
     "fields": [
       [
         "SKU",
         "String",
-        "物料编码（SKU级）",
+        "Part Number (SKU level)",
         "SK-1001879-01"
       ],
       [
         "2026-02-04",
         "Integer",
-        "日级CTB累计值",
+        "Daily CTB cumulative value",
         "0"
       ],
       [
         "...",
         "...",
-        "后续列为每天一列",
+        "Subsequent columns: one per day",
         "..."
       ]
     ],
-    "note": "SKU级CTB累计值。日级数据，值为截止该日的CTB累计量（非日增量）。"
+    "note": "SKU-level CTB cumulative. Daily data, values are cumulative CTB up to that date (not daily increment)."
   },
   "ctb_gb_cum": {
     "fields": [
       [
         "PN",
         "String",
-        "GB物料编码",
+        "GB Part Number",
         "GB-Rec M-BLACK"
       ],
       [
         "2026-02-04",
         "Integer",
-        "日级GB CTB累计值",
+        "Daily GB CTB cumulative value",
         "0"
       ],
       [
         "...",
         "...",
-        "后续列为每天一列",
+        "Subsequent columns: one per day",
         "..."
       ]
     ],
-    "note": "GB级CTB累计值。可选，如无GB级CTB数据可不填。"
+    "note": "GB-level CTB cumulative. Optional. Leave empty if no GB-level CTB data."
   }
 }
