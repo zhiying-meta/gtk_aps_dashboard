@@ -34,7 +34,20 @@ def _json_error(msg, code=500):
 @io_bp.route("/api/io/status", methods=["GET"])
 def api_status():
     loaded = _ensure_cache()
-    return jsonify({"loaded": loaded, "ok": loaded})
+    try:
+        cache = get_cache(DEFAULT_DATA_DIR)
+        return jsonify(
+            {
+                "loaded": loaded,
+                "ok": loaded,
+                "fg": len(cache.fg_items) if loaded else 0,
+                "gb": len(cache.gb_items) if loaded else 0,
+                "fg_sched": len(cache.sched_fg) if loaded else 0,
+                "gb_sched": len(cache.sched_gb) if loaded else 0,
+            }
+        )
+    except Exception:
+        return jsonify({"loaded": loaded, "ok": loaded, "fg": 0, "gb": 0})
 
 
 # ---------- meta ----------

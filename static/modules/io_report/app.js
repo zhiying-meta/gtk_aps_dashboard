@@ -31,12 +31,69 @@ const treeCache = {}; // tableId -> tree root
 
 function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 function getRoot(){ return document.getElementById('io-report-section'); }
+function getStaticDBIO(){ try { return window.STATIC_DB || null; } catch(e){ return null; } }
+function isPlanMergeStatic(){ const db=getStaticDBIO(); return !!(db && db.versions && db.versions.length>0); }
+let _lastStatus = null;
 async function checkStatus(){
-  try{ const r = await fetch('/api/io/status'); const j = await r.json(); return !!j.loaded; }catch{ return false; }
+  try{
+    const r = await fetch('/api/io/status');
+    const j = await r.json();
+    _lastStatus = j;
+    // persist last status to localStorage for instant UI on reload
+    try{ localStorage.setItem('io_report_status', JSON.stringify({ ...j, time: new Date().toISOString() })); }catch{}
+    return !!j.loaded;
+  }catch{ return false; }
+}
+async function getFullStatus(){
+  try{
+    if(_lastStatus) return _lastStatus;
+    const r = await fetch('/api/io/status');
+    const j = await r.json();
+    _lastStatus = j;
+    return j;
+  }catch{ return { loaded:false }; }
+}
+function saveIOLoadStatus(info){
+  try{ localStorage.setItem('io_report_last_load', JSON.stringify(info)); }catch{}
+}
+function loadIOLoadStatus(){
+  try{
+    const s = localStorage.getItem('io_report_last_load');
+    if(s) return JSON.parse(s);
+  }catch{}
+  return null;
+}
+function getStatusBadgeHTML(){
+  const info = loadIOLoadStatus();
+  const st = _lastStatus;
+  if(st && st.loaded){
+    const fg = st.fg||0, gb = st.gb||0;
+    const time = info && info.time ? new Date(info.time).toLocaleString() : '';
+    return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">✅ Ready: ${fg} FG / ${gb} GB ${time? '· '+esc(time):''}</span>`;
+  }else if(info){
+    return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">✅ Last: ${esc(info.fg||0)} FG / ${esc(info.gb||0)} GB · ${esc(info.timeStr||'') || 'ready'}</span>`;
+  }else{
+    return `<span style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:2px 8px;border-radius:12px;font-size:11px">No data loaded</span>`;
+  }
 }
 async function render(){
   ioRoot = getRoot();
   if(!ioRoot) return;
+  // If in static offline mode (plan_merge), show notice for IO report
+  if (isPlanMergeStatic()) {
+    const db = getStaticDBIO();
+    if (!db.io) {
+      ioRoot.innerHTML = `
+        <div class="section" style="text-align:center;padding:32px;background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border:1px solid #bfdbfe">
+          <div style="font-size:18px;font-weight:700;color:#1e40af">📦 Offline Static Mode</div>
+          <div style="font-size:13px;color:#475569;margin-top:8px">当前离线包仅包含 Gated/Ungated/CTB (Multi-Version) 数据</div>
+          <div style="font-size:12px;color:#64748b;margin-top:4px">I/O Report 需要后端服务，若需离线 I/O，请在导出时额外指定 I/O 的 3 个文件</div>
+          <div style="margin-top:12px;font-size:11px;color:#94a3b8">Plan Merge 的离线多版本对比功能正常可用，请切换到左侧 Gated/Ungated/CTB 查看</div>
+        </div>
+      `;
+      return;
+    }
+  }
   const loaded = await checkStatus();
   if(loaded) renderReportsPage();
   else renderUploadPage();
@@ -44,9 +101,13 @@ async function render(){
 
 function buildUploadSectionHTML(isCompact){
   const title = isCompact ? '📁 Upload I/O Data' : '📁 Upload I/O Data';
+  const statusBadge = getStatusBadgeHTML();
   return `<div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
       <div class="section-header">
-        <span class="section-title">${title}</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="section-title">${title}</span>
+          <span id="ioStatusBadge_${isCompact?'compact':'full'}">${statusBadge}</span>
+        </div>
         <div class="section-actions">
           <a href="/api/io/templates/input_template.xlsx" class="btn btn-sm btn-outline">📄 Combined Template</a>
           <a href="/api/io/templates/template" class="btn btn-sm btn-outline">📦 3 Templates (zip)</a>
@@ -55,8 +116,9 @@ function buildUploadSectionHTML(isCompact){
           ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar">▼ Collapse</button>' : ''}
         </div>
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:11px;color:#475569">
-        💡 Accepts: 3 xlsx files, a .zip, or a single combined xlsx with 3 sheets
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:11px;color:#475569;display:flex;justify-content:space-between;align-items:center">
+        <span>💡 Accepts: 3 xlsx files, a .zip, or a single combined xlsx with 3 sheets</span>
+        <span id="ioPersistentMsg_${isCompact?'compact':'full'}" style="font-size:11px;color:#059669;font-weight:600"></span>
       </div>
       <div id="${isCompact ? 'uploadBarContent' : 'uploadFullContent'}">
         <div class="upload-card" id="card_combined_${isCompact?'compact':'full'}" style="border:2px dashed #8b5cf6;background:#faf5ff;margin-bottom:10px">
@@ -228,7 +290,24 @@ function attachUploadLogic(isCompact){
     try{
       const resp=await fetch('/api/io/upload',{method:'POST',body:form});
       const result=await resp.json();
-      if(result.ok){ if(prog) prog.innerHTML=`<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB — Success, keeping status</span>`; setTimeout(()=>renderReportsPage(),800); }
+      if(result.ok){
+        const now = new Date();
+        const info = { fg: result.fg||0, gb: result.gb||0, time: now.toISOString(), timeStr: now.toLocaleString() };
+        saveIOLoadStatus(info);
+        try{ _lastStatus = { loaded:true, ok:true, fg: result.fg, gb: result.gb }; }catch{}
+        if(prog) prog.innerHTML=`<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB — Ready, entering reports...</span>`;
+        // update persistent badges immediately
+        const badgeCompact = document.getElementById('ioStatusBadge_compact');
+        const badgeFull = document.getElementById('ioStatusBadge_full');
+        const msgCompact = document.getElementById('ioPersistentMsg_compact');
+        const msgFull = document.getElementById('ioPersistentMsg_full');
+        const htmlBadge = getStatusBadgeHTML();
+        if(badgeCompact) badgeCompact.innerHTML = htmlBadge;
+        if(badgeFull) badgeFull.innerHTML = htmlBadge;
+        if(msgCompact) msgCompact.textContent = `✅ Loaded ${info.fg} FG / ${info.gb} GB at ${info.timeStr} — Ready to use`;
+        if(msgFull) msgFull.textContent = `✅ Loaded ${info.fg} FG / ${info.gb} GB at ${info.timeStr} — Ready to use`;
+        setTimeout(()=>{ renderReportsPage(); }, 900);
+      }
       else{ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${result.error||JSON.stringify(result)}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
     }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
   });
@@ -238,9 +317,19 @@ function attachUploadLogic(isCompact){
 function renderUploadPage(){ ioRoot.innerHTML=buildUploadSectionHTML(false); attachUploadLogic(false); }
 
 function renderReportsPage(){
+  const _badge = getStatusBadgeHTML();
+  const _info = loadIOLoadStatus();
+  const _persistText = _lastStatus && _lastStatus.loaded ? `✅ Ready: ${_lastStatus.fg||0} FG / ${_lastStatus.gb||0} GB — You can drag dimensions and view reports` : (_info ? `✅ Last loaded: ${_info.fg||0} FG / ${_info.gb||0} GB at ${_info.timeStr||''} — Ready` : '✅ Data loaded — Ready to use');
   ioRoot.innerHTML = buildUploadSectionHTML(true) + `
     <div class="section" id="io-main-section">
-      <div class="section-header"><span class="section-title">📈 I/O Report</span><div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button></div></div>
+      <div class="section-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="section-title">📈 I/O Report</span>
+          <span id="ioMainStatusBadge">${_badge}</span>
+          <span id="ioMainPersistent" style="font-size:11px;color:#059669;font-weight:500">${_persistText}</span>
+        </div>
+        <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button></div>
+      </div>
       <div class="dim-tabs" id="io-group-tabs"><button class="dim-tab active" data-group="FG">FG (SKU)</button><button class="dim-tab" data-group="GB">GB</button></div>
       <div class="toolbar" id="io-toolbar"><div class="panels-row">
         <div class="panel" style="flex:1;min-width:220px"><div class="panel-label">Row Dimensions (drag to order)</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="dim-chip available" draggable="true" data-dim="LINE_CODE">Line</span><span class="dim-chip available" draggable="true" data-dim="ITEM_NO">PN</span><span class="dim-chip available" draggable="true" data-dim="STYLE">Style</span><div id="ioDimWell" class="dim-well"><span class="placeholder">Drop dimensions here</span></div></div></div>
@@ -287,9 +376,27 @@ function initReportsPage(){
   initSearchableSelect('lineCode'); initSearchableSelect('itemNo'); initSearchableSelect('style');
   dimOrder = []; allData = null; renderDimWell(); initDimDragDrop();
   refreshMeta().then(()=> loadAllReports());
+  // persistent status: refresh badge from API and show ready message
+  (async()=>{
+    try{
+      const st = await getFullStatus();
+      const badge = document.getElementById('ioMainStatusBadge');
+      const persist = document.getElementById('ioMainPersistent');
+      const upBadge = document.getElementById('ioStatusBadge_compact');
+      const upMsg = document.getElementById('ioPersistentMsg_compact');
+      if(badge) badge.innerHTML = getStatusBadgeHTML();
+      if(upBadge) upBadge.innerHTML = getStatusBadgeHTML();
+      if(persist && st && st.loaded){
+        persist.textContent = `✅ Ready: ${st.fg||0} FG / ${st.gb||0} GB — Drag dimensions (Line/PN/Style) to start`;
+      }
+      if(upMsg && st && st.loaded){
+        upMsg.textContent = `✅ Data ready: ${st.fg||0} FG / ${st.gb||0} GB — You can now use the reports below. This status persists.`;
+      }
+    }catch{}
+  })();
   document.getElementById('ioRefreshBtn')?.addEventListener('click', loadAllReports);
   document.getElementById('io-dl-all')?.addEventListener('click', downloadAll);
-  document.getElementById('io-reset-groups')?.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); pendingNewGroup=[]; Object.keys(treeCache).forEach(k=>delete treeCache[k]); renderAllReports(); });
+  document.getElementById('io-reset-groups')?.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); pendingNewGroup=[]; Object.keys(treeCache).forEach(k=>delete treeCache[k]); if(window._ioExpanded) window._ioExpanded={}; renderAllReports(); });
   document.getElementById('addEmptyGroupBtn')?.addEventListener('click', ()=>{ reportGroups.push([]); renderAllReports(); });
 }
 
@@ -560,11 +667,15 @@ function buildMergedFlatTable(data, dim, gIdx){
   return html;
 }
 
+function ensureExpandedMap(){ if(!window._ioExpanded) window._ioExpanded={}; }
+function getExpandedSet(tableId){ ensureExpandedMap(); if(!window._ioExpanded[tableId]) window._ioExpanded[tableId]=new Set(); return window._ioExpanded[tableId]; }
+
 function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
   const {columns, rows}=data;
-  const nDims=dimOrder.length; const frozenW=120; const divLeft=nDims*frozenW;
+  const nDims=dimOrder.length;
+  const frozenW=120;
+  const divLeft=nDims*frozenW;
   const tableId=`hier_${gIdx}_${reportKey}_${dimOrder.join('_')}`;
-  // build tree only once and cache
   if(!treeCache[tableId]){
     function groupRows(items, depth){
       if(depth>=nDims) return items.map(r=> ({key:null, items:[], allRows:[r]}));
@@ -575,49 +686,65 @@ function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
     treeCache[tableId]=groupRows(rows,0);
   }
   const tree=treeCache[tableId];
+  const expandedSet=getExpandedSet(tableId);
   function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
-  const grandTotal=sumRows(rows);
-
-  let h=`<div class="stat-row"><strong>${rows.length}</strong> detail rows — click to expand, lazy load children</div><div class="table-wrapper"><table><thead><tr>`;
-  dimOrder.forEach((d,i)=>{ const left=i*frozenW; h+=`<th class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:16">${esc(DIM_LABELS[d]||d)} <span class="expand-btn" onclick="window.ioExpandAll('${tableId}')">⊞</span></th>`; });
+  function sumAll(node){
+    const s={}; columns.forEach(c=>s[c]=0);
+    function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length){ walk(nn.items); } else { nn.allRows.forEach(r=>{ columns.forEach(c=> s[c]+=(Number(r[c])||0)); }); } }); }
+    walk([node]); return s;
+  }
+  let h=`<div class="stat-row"><strong>${rows.length}</strong> detail rows — click to expand, persistent state</div><div class="table-wrapper"><table><thead><tr>`;
+  dimOrder.forEach((d,i)=>{ const left=i*frozenW; h+=`<th class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:16">${esc(DIM_LABELS[d]||d)} <span class="expand-btn" onclick="event.stopPropagation(); window.ioExpandAll('${tableId}')">⊞</span></th>`; });
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
-  h+=`</tr></thead><tbody id="tbody_${tableId}">`;
+  h+=`</tr></thead><tbody>`;
 
-  function renderLevel(nodes, depth, path){
+  function renderNodes(nodes, depth, path){
     let out='';
     nodes.forEach((node, idx)=>{
       const curPath=[...path, idx];
+      const pathStr=curPath.join(',');
       const pid=`${tableId}_${curPath.join('_')}`;
+      const isExpanded=expandedSet.has(pathStr);
       if(depth===nDims-1){
-        const agg=sumRows(node.allRows); const rk=node.allRows[0]?._REPORT_KEY||reportKey||'';
-        out+=`<tr class="agg-row row-new-group row-${rk}" data-path="${curPath.join(',')}">`;
-        for(let d=0; d<nDims; d++){ const left=d*frozenW; out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(d<depth?'':node.key)}</td>`; }
-        out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
-        out+='</tr>';
-      }else{
-        const agg=sumRows(node.allRows.flatMap(n=> n.allRows||node.allRows)); // quick approx, will recompute on expand
-        // Actually compute sum of all leafs under this node
-        function sumAll(n){ let s={}; columns.forEach(c=>s[c]=0); function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length){ walk(nn.items); } else { nn.allRows.forEach(r=>{ columns.forEach(c=> s[c]+=(Number(r[c])||0)); }); } }); } walk([node]); return s; }
-        const agg2=sumAll(node);
-        out+=`<tr class="hierarchy-row agg-row row-new-group row-${reportKey}" id="${pid}" data-table="${tableId}" data-path="${curPath.join(',')}" data-depth="${depth}" onclick="window.ioToggleLazy('${tableId}','${curPath.join(',')}',${depth})">`;
+        const agg=sumRows(node.allRows);
+        const rk=node.allRows[0]?._REPORT_KEY||reportKey||'';
+        out+=`<tr class="agg-row row-new-group row-${rk}">`;
         for(let d=0; d<nDims; d++){
           const left=d*frozenW;
-          if(d===depth) out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`;
-          else if(d===depth+1) out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${node.items.length} items</td>`;
-          else out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
+          const val=d<depth ? '' : esc(node.key);
+          const indent = d===depth && depth>0 ? `padding-left:${8+depth*12}px` : '';
+          out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5;${indent}">${val}</td>`;
         }
         out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ out+=`<td class="num">${Number(agg2[c]).toLocaleString()}</td>`; });
-        out+=`</tr><tr id="childrow_${pid}" style="display:none"><td colspan="${nDims+1+columns.length}" style="padding:0"><div id="children_${pid}"></div></td></tr>`;
+        columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        out+=`</tr>`;
+      }else{
+        const agg=sumAll(node);
+        const hasChildren=node.items && node.items.length>0;
+        out+=`<tr class="hierarchy-row agg-row row-new-group row-${reportKey}" id="${pid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
+        for(let d=0; d<nDims; d++){
+          const left=d*frozenW;
+          if(d===depth){
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
+          }else if(d===depth+1){
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5;color:#64748b">${hasChildren? node.items.length+' items':''}</td>`;
+          }else{
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
+          }
+        }
+        out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+        columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        out+=`</tr>`;
+        if(isExpanded && hasChildren){
+          out+=renderNodes(node.items, depth+1, curPath);
+        }
       }
     });
     return out;
   }
-  h+=renderLevel(tree,0,[]);
-  h+=`</tbody></table></div><div style="text-align:center;margin-top:6px"><button class="btn btn-sm btn-outline" onclick="window.ioExpandAll('${tableId}')">⊞ Expand All (lazy)</button></div>`;
-  // store columns for lazy
+  h+=renderNodes(tree,0,[]);
+  h+=`</tbody></table></div><div style="text-align:center;margin-top:6px"><button class="btn btn-sm btn-outline" onclick="window.ioExpandAll('${tableId}')">⊞ Expand All</button><button class="btn btn-sm btn-outline" onclick="window.ioCollapseAll('${tableId}')">⊟ Collapse All</button></div>`;
   if(!window._ioTableMeta) window._ioTableMeta={};
   window._ioTableMeta[tableId]={columns, dimOrder, frozenW, divLeft, reportKey};
   return h;
@@ -643,193 +770,110 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
     treeCache[tableId]=groupRows(rows,0);
   }
   const tree=treeCache[tableId];
+  const expandedSet=getExpandedSet(tableId);
   function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
-  let h=`<div class="stat-row"><strong>${rows.length}</strong> merged — dim first, same ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} adjacent, lazy load</div><div class="table-wrapper"><table><thead><tr>`;
+  function sumAll(node){
+    const s={}; columns.forEach(c=>s[c]=0);
+    function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length){ walk(nn.items); } else { nn.allRows.forEach(r=>{ columns.forEach(c=> s[c]+=(Number(r[c])||0)); }); } }); }
+    walk([node]); return s;
+  }
+  let h=`<div class="stat-row"><strong>${rows.length}</strong> merged rows — dim first, same ${dimOrder.map(d=>DIM_LABELS[d]||d).join('/')} adjacent, aligned expand</div><div class="table-wrapper"><table><thead><tr>`;
   effDims.forEach((d,i)=>{ const left=lefts[i]; const w=i===nDims-1? typeW : frozenW; const label=d==='_REPORT_TYPE'?'Type':(DIM_LABELS[d]||d); h+=`<th class="frozen" style="left:${left}px;min-width:${w}px;z-index:16">${esc(label)}</th>`; });
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
-  h+=`</tr></thead><tbody id="tbody_${tableId}">`;
-
-  function renderLevel(nodes, depth, path){
+  h+=`</tr></thead><tbody>`;
+  function renderNodes(nodes, depth, path){
     let out='';
     nodes.forEach((node, idx)=>{
       const curPath=[...path, idx];
+      const pathStr=curPath.join(',');
       const pid=`${tableId}_${curPath.join('_')}`;
-      const isTypeDepth=effDims[depth]==='_REPORT_TYPE';
+      const isExpanded=expandedSet.has(pathStr);
       const rk=node.repKey||node.allRows[0]?._REPORT_KEY||'';
       if(depth===nDims-1){
         const agg=sumRows(node.allRows);
         out+=`<tr class="agg-row row-new-group row-${rk}">`;
-        for(let d=0; d<nDims; d++){ const left=lefts[d]; const val=d<depth?'':node.key; if(effDims[d]==='_REPORT_TYPE') out+=`<td class="frozen" style="left:${left}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${rk}">${esc(val)}</span></td>`; else out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5">${esc(val)}</td>`; }
+        for(let d=0; d<nDims; d++){
+          const left=lefts[d];
+          const w=d===nDims-1? typeW : frozenW;
+          const val=d<depth ? '' : esc(node.key);
+          if(effDims[d]==='_REPORT_TYPE') out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="type-badge type-${rk}">${val}</span></td>`;
+          else out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5">${val}</td>`;
+        }
         out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; }); out+='</tr>';
+        columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        out+=`</tr>`;
       }else{
-        function sumAll(n){ let s={}; columns.forEach(c=>s[c]=0); function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length){ walk(nn.items); } else { nn.allRows.forEach(r=>{ columns.forEach(c=> s[c]+=(Number(r[c])||0)); }); } }); } walk([node]); return s; }
-        const agg2=sumAll(node);
-        out+=`<tr class="hierarchy-row agg-row row-new-group" id="${pid}" data-table="${tableId}" data-path="${curPath.join(',')}" data-depth="${depth}" onclick="window.ioToggleLazy('${tableId}','${curPath.join(',')}',${depth})">`;
+        const agg=sumAll(node);
+        const hasChildren=node.items && node.items.length>0;
+        out+=`<tr class="hierarchy-row agg-row row-new-group" id="${pid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
         for(let d=0; d<nDims; d++){
           const left=lefts[d];
           const w=d===nDims-1? typeW : frozenW;
           if(d===depth){
-            if(effDims[d]==='_REPORT_TYPE') out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span><span class="type-badge type-${rk}">${esc(node.key)}</span></td>`;
-            else out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle" id="tog_${pid}">▶</span>${esc(node.key)}</td>`;
-          }else if(d===depth+1) out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5">${node.items.length} items</td>`;
-          else out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
+            if(effDims[d]==='_REPORT_TYPE') out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> <span class="type-badge type-${rk}">${esc(node.key)}</span></td>`;
+            else out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
+          }else if(d===depth+1){
+            out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b">${hasChildren? node.items.length+' items':''}</td>`;
+          }else{
+            out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
+          }
         }
         out+=`<td class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
-        columns.forEach(c=>{ out+=`<td class="num">${Number(agg2[c]).toLocaleString()}</td>`; });
-        out+=`</tr><tr id="childrow_${pid}" style="display:none"><td colspan="${nDims+1+columns.length}" style="padding:0"><div id="children_${pid}"></div></td></tr>`;
+        columns.forEach(c=>{ out+=`<td class="num">${Number(agg[c]).toLocaleString()}</td>`; });
+        out+=`</tr>`;
+        if(isExpanded && hasChildren){
+          out+=renderNodes(node.items, depth+1, curPath);
+        }
       }
     });
     return out;
   }
-  h+=renderLevel(tree,0,[]);
-  h+='</tbody></table></div>';
+  h+=renderNodes(tree,0,[]);
+  h+=`</tbody></table></div><div style="text-align:center;margin-top:6px"><button class="btn btn-sm btn-outline" onclick="window.ioExpandAll('${tableId}')">⊞ Expand All</button><button class="btn btn-sm btn-outline" onclick="window.ioCollapseAll('${tableId}')">⊟ Collapse All</button></div>`;
   if(!window._ioTableMeta) window._ioTableMeta={};
   window._ioTableMeta[tableId]={columns, dimOrder, effDims, lefts, divLeft, frozenW, typeW, isMerged:true};
   return h;
 }
 
-// lazy toggle
-window.ioToggleLazy = function(tableId, pathStr, depth){
+// fixed toggle - flat rendering with persistent expanded state, no nested tables
+window.ioToggleHier = function(tableId, pathStr){
   try{
-  const path = pathStr.split(',').map(x=> { const n=parseInt(x); return isNaN(n)?0:n; });
-  const pid=`${tableId}_${path.join('_')}`;
-  const tog=document.getElementById(`tog_${pid}`);
-  let childRow=document.getElementById(`childrow_${pid}`);
-  let childrenDiv=document.getElementById(`children_${pid}`);
-  if(!childRow) childRow=document.querySelector(`[id="childrow_${CSS.escape(pid)}"]`);
-  if(!childrenDiv) childrenDiv=document.querySelector(`[id="children_${CSS.escape(pid)}"]`);
-  if(!childRow||!childrenDiv){
-    console.warn('ioToggleLazy: childRow/childrenDiv not found', pid, tableId, pathStr);
-    return;
-  }
-  const isOpen = childRow.dataset.open==='1' || childRow.style.display==='' || (childRow.style.display!=='none' && getComputedStyle(childRow).display!=='none' && childrenDiv.dataset.rendered==='1');
-  if(isOpen){
-    childRow.style.display='none';
-    childRow.dataset.open='0';
-    if(tog) tog.textContent='▶';
-    return;
-  }
-  // find node
-  let nodeList=treeCache[tableId];
-  if(!nodeList){
-    console.warn('ioToggleLazy: treeCache miss for', tableId);
-    return;
-  }
-  let node=null;
-  for(let i=0;i<path.length;i++){
-    if(!nodeList) break;
-    node=nodeList[path[i]];
-    if(!node) break;
-    if(i<path.length-1) nodeList=node.items;
-  }
-  if(!node){
-    console.warn('ioToggleLazy: node not found', pathStr, tableId);
-    return;
-  }
-  if(!node.items||node.items.length===0){
-    // leaf – nothing to expand, but toggle state
-    childRow.style.display='';
-    childRow.dataset.open='1';
-    if(tog) tog.textContent='▼';
-    return;
-  }
-  // if already rendered, just show
-  if(childrenDiv.dataset.rendered==='1'){
-    childRow.style.display='';
-    childRow.dataset.open='1';
-    if(tog) tog.textContent='▼';
-    return;
-  }
-  // render one level deeper
-  const meta=window._ioTableMeta[tableId];
-  if(!meta) return;
-  const {columns, dimOrder, effDims, lefts, divLeft, frozenW, typeW} = meta;
-  const isMerged = !!meta.isMerged;
-  const nextDepth=depth+1;
-  let html='';
-  if(isMerged){
-    const nDims=effDims.length;
-    function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
-    function sumAll(n){ let s={}; columns.forEach(c=>s[c]=0); function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length){ walk(nn.items); } else { nn.allRows.forEach(r=>{ columns.forEach(c=> s[c]+=(Number(r[c])||0)); }); } }); } walk([n]); return s; }
-    node.items.forEach((child, idx)=>{
-      const childPath=[...path, idx];
-      const childPid=`${tableId}_${childPath.join('_')}`;
-      const rk=child.repKey||child.allRows[0]?._REPORT_KEY||'';
-      const isLeaf = nextDepth===nDims-1;
-      if(isLeaf){
-        const agg=sumRows(child.allRows);
-        html+=`<table style="width:100%;border-collapse:collapse"><tr class="agg-row row-${rk}">`;
-        for(let d=0; d<nDims; d++){
-          const left=0; // inside nested, no sticky needed
-          const val=d<nextDepth?'':child.key;
-          if(effDims[d]==='_REPORT_TYPE') html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;min-width:${typeW}px"><span class="type-badge type-${rk}">${esc(val)}</span></td>`;
-          else html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;min-width:${frozenW}px">${esc(val)}</td>`;
-        }
-        columns.forEach(c=>{ html+=`<td class="num" style="padding:4px 8px;border-bottom:1px solid #e2e8f0">${Number(agg[c]).toLocaleString()}</td>`; });
-        html+='</tr></table>';
-      }else{
-        const agg=sumAll(child);
-        html+=`<table style="width:100%;border-collapse:collapse"><tr class="hierarchy-row agg-row" id="${childPid}" data-table="${tableId}" data-path="${childPath.join(',')}" data-depth="${nextDepth}" onclick="window.ioToggleLazy('${tableId}','${childPath.join(',')}',${nextDepth})" style="cursor:pointer">`;
-        for(let d=0; d<nDims; d++){
-          if(d===nextDepth) html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;min-width:${d===nDims-1?typeW:frozenW}px"><span class="toggle" id="tog_${childPid}">▶</span>${esc(child.key)}</td>`;
-          else if(d===nextDepth+1) html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0">${child.items.length} items</td>`;
-          else html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0"></td>`;
-        }
-        columns.forEach(c=>{ html+=`<td class="num" style="padding:4px 8px;border-bottom:1px solid #e2e8f0">${Number(agg[c]).toLocaleString()}</td>`; });
-        html+=`</tr></table><div id="childrow_${childPid}" style="display:none"><div id="children_${childPid}"></div></div>`;
-      }
-    });
-  }else{
-    // flat hierarchical
-    const nDims=dimOrder.length;
-    function sumRows(arr){ const s={}; columns.forEach(c=>s[c]=0); arr.forEach(r=> columns.forEach(c=> s[c]+=(Number(r[c])||0))); return s; }
-    function sumAll(n){ let s={}; columns.forEach(c=>s[c]=0); function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length){ walk(nn.items); } else { nn.allRows.forEach(r=>{ columns.forEach(c=> s[c]+=(Number(r[c])||0)); }); } }); } walk([n]); return s; }
-    node.items.forEach((child, idx)=>{
-      const childPath=[...path, idx];
-      const childPid=`${tableId}_${childPath.join('_')}`;
-      const isLeaf = nextDepth===nDims-1;
-      if(isLeaf){
-        const agg=sumRows(child.allRows);
-        html+=`<table style="width:100%;border-collapse:collapse"><tr class="agg-row row-new-group">`;
-        for(let d=0; d<nDims; d++){ const val=d<nextDepth?'':child.key; html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;min-width:${frozenW}px">${esc(val)}</td>`; }
-        columns.forEach(c=>{ html+=`<td class="num" style="padding:4px 8px;border-bottom:1px solid #e2e8f0">${Number(agg[c]).toLocaleString()}</td>`; });
-        html+='</tr></table>';
-      }else{
-        const agg=sumAll(child);
-        html+=`<table style="width:100%;border-collapse:collapse"><tr class="hierarchy-row agg-row" id="${childPid}" data-table="${tableId}" data-path="${childPath.join(',')}" data-depth="${nextDepth}" onclick="window.ioToggleLazy('${tableId}','${childPath.join(',')}',${nextDepth})" style="cursor:pointer">`;
-        for(let d=0; d<nDims; d++){
-          if(d===nextDepth) html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0;min-width:${frozenW}px"><span class="toggle" id="tog_${childPid}">▶</span>${esc(child.key)}</td>`;
-          else if(d===nextDepth+1) html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0">${child.items.length} items</td>`;
-          else html+=`<td style="padding:4px 8px;border-bottom:1px solid #e2e8f0"></td>`;
-        }
-        columns.forEach(c=>{ html+=`<td class="num" style="padding:4px 8px;border-bottom:1px solid #e2e8f0">${Number(agg[c]).toLocaleString()}</td>`; });
-        html+=`</tr></table><div id="childrow_${childPid}" style="display:none"><div id="children_${childPid}"></div></div>`;
-      }
-    });
-  }
-  childrenDiv.innerHTML=html;
-  childrenDiv.dataset.rendered='1';
-  childRow.style.display='';
-  childRow.dataset.open='1';
-  if(tog) tog.textContent='▼';
-  }catch(e){
-    console.error('ioToggleLazy error', e, tableId, pathStr);
-  }
+    const set = getExpandedSet(tableId);
+    if(set.has(pathStr)) set.delete(pathStr);
+    else set.add(pathStr);
+    // re-render all reports to reflect new expanded state (preserves alignment)
+    renderAllReports();
+    // keep scroll position near toggled table
+    const el=document.getElementById(`io_group_${tableId.split('_')[1]||0}`);
+    // optional: scrollIntoView not needed to avoid jump
+  }catch(e){ console.error('ioToggleHier error', e); }
 };
-
+window.ioToggleLazy = window.ioToggleHier; // backward compat
 window.ioExpandAll = function(tableId){
-  const tree=treeCache[tableId]; if(!tree) return;
-  // expand all by triggering toggle for each top level
-  tree.forEach((_, idx)=>{
-    const path=`${idx}`;
-    const pid=`${tableId}_${path}`;
-    const childRow=document.getElementById(`childrow_${pid}`);
-    if(childRow && childRow.style.display==='none'){
-      window.ioToggleLazy(tableId, path, 0);
+  try{
+    const tree=treeCache[tableId];
+    if(!tree) return;
+    const set=getExpandedSet(tableId);
+    function collectPaths(nodes, prefix){
+      nodes.forEach((n, idx)=>{
+        const p = prefix ? `${prefix},${idx}` : `${idx}`;
+        if(n.items && n.items.length>0){
+          set.add(p);
+          collectPaths(n.items, p);
+        }
+      });
     }
-  });
+    collectPaths(tree, '');
+    renderAllReports();
+  }catch(e){ console.error('ioExpandAll error', e); }
+};
+window.ioCollapseAll = function(tableId){
+  try{
+    const set=getExpandedSet(tableId);
+    set.clear();
+    renderAllReports();
+  }catch(e){ console.error('ioCollapseAll error', e); }
 };
 
 window._ioPages = window._ioPages || {};
