@@ -374,7 +374,21 @@ function initReportsPage(){
     });
   });
   initSearchableSelect('lineCode'); initSearchableSelect('itemNo'); initSearchableSelect('style');
-  dimOrder = []; allData = null; renderDimWell(); initDimDragDrop();
+  // preserve dimOrder and other state from localStorage if available, don't wipe on re-render
+  try{
+    const savedDim = localStorage.getItem('io_dimOrder');
+    if(savedDim){
+      const parsed = JSON.parse(savedDim);
+      if(Array.isArray(parsed) && parsed.length>0 && (!dimOrder || dimOrder.length===0)){
+        dimOrder = parsed;
+      }
+    }
+  }catch{}
+  // keep existing allData if present; otherwise will be fetched
+  if(!dimOrder) dimOrder = [];
+  // don't reset allData to null here - keep previous data to preserve display across switches
+  // allData = null; // removed to preserve
+  renderDimWell(); initDimDragDrop();
   refreshMeta().then(()=> loadAllReports());
   // persistent status: refresh badge from API and show ready message
   (async()=>{
