@@ -334,6 +334,29 @@ def api_upload():
             existing = [f for f in os.listdir(tmp_dir) if not f.startswith("_raw_") and not f.startswith("_upload_")]
             return _json_error(f"missing files {missing}, got {existing}. Hint: upload 3 separate files, or a zip containing them, or a single combined xlsx with 3 sheets (Item Master/Schedule Result/BOH Balance).", 400)
 
+        # validate data before overwriting real data dir
+        try:
+            from app.modules.io_report.engine import load_data as _load_tmp
+
+            tmp_cache = _load_tmp(tmp_dir)
+            total_items = len(tmp_cache.fg_items) + len(tmp_cache.gb_items)
+            total_sched = len(tmp_cache.sched_fg) + len(tmp_cache.sched_gb)
+            if total_items == 0:
+                return _json_error(
+                    f"validation failed: 0 FG/GB items found. Check 料号主表.xlsx has PRODUCT_CATEGORY=成品/GB and ITEM_NO column.",
+                    400,
+                )
+            if total_sched == 0:
+                return _json_error(
+                    f"validation failed: 0 schedule rows. Check 排产结果表.xlsx has LINE_CODE, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, PLAN_DATE, PLAN_VALUE and SKU exists in master.",
+                    400,
+                )
+        except Exception as ve:
+            import traceback
+
+            traceback.print_exc()
+            return _json_error(f"validation failed: {ve}", 400)
+
         os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
         for fn in TARGET_MAP.values():
             shutil.copyfile(os.path.join(tmp_dir, fn), os.path.join(DEFAULT_DATA_DIR, fn))
@@ -404,9 +427,36 @@ def _zip_io(empty=True):
     sched_header = ["LINE_CODE", "SHIFT_NAME", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE"]
     bal_header = ["PLAN_DATE", "SHIFT_NAME", "ITEM_CODE", "BALANCE_QTY"]
 
-    sample_master = [["FG001", "成品", "Style-A"], ["GB001", "GB", "Style-A"]] if not empty else []
-    sample_sched = [["Line01", "白班", "INPUT", "FG001", "2024-06-01", 100]] if not empty else []
-    sample_bal = [["2024-06-01", "白班", "FG001", 500]] if not empty else []
+    if empty:
+        sample_master = []
+        sample_sched = []
+        sample_bal = []
+    else:
+        sample_master = [
+            ["FG001", "成品", "Style-A"],
+            ["FG002", "成品", "Style-B"],
+            ["GB001", "GB", "Style-A"],
+            ["GB002", "GB", "Style-B"],
+        ]
+        sample_sched = [
+            ["Line01", "白班", "INPUT", "FG001", "2024-06-01", 100],
+            ["Line01", "白班", "OUTPUT", "FG001", "2024-06-01", 90],
+            ["Line01", "白班", "CHECKIN", "FG001", "2024-06-01", 95],
+            ["Line01", "白班", "CHECKOUT", "FG001", "2024-06-01", 85],
+            ["Line02", "夜班", "INPUT", "FG002", "2024-06-01", 120],
+            ["Line02", "夜班", "OUTPUT", "FG002", "2024-06-01", 110],
+            ["Line02", "夜班", "CHECKIN", "FG002", "2024-06-01", 115],
+            ["Line02", "夜班", "CHECKOUT", "FG002", "2024-06-01", 105],
+            ["Line01", "白班", "INPUT", "GB001", "2024-06-01", 200],
+            ["Line01", "白班", "OUTPUT", "GB001", "2024-06-01", 190],
+            ["Line01", "白班", "CHECKIN", "GB001", "2024-06-01", 195],
+            ["Line01", "白班", "CHECKOUT", "GB001", "2024-06-01", 185],
+        ]
+        sample_bal = [
+            ["2024-06-01", "白班", "FG001", 500],
+            ["2024-06-01", "白班", "FG002", 600],
+            ["2024-06-01", "白班", "GB001", 1000],
+        ]
 
     zb = io.BytesIO()
     with zipfile.ZipFile(zb, "w", zipfile.ZIP_DEFLATED) as zf:
