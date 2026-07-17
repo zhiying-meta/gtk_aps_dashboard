@@ -3,7 +3,7 @@
  */
 (() => {
 const DIM_LABELS = { ITEM_NO: 'PN', LINE_CODE: 'Line', STYLE: 'Style' };
-const REPORTS = ['daily_input','daily_output','daily_checkin','daily_checkout','cum_input','cum_output','cum_checkin','cum_checkout','balance'];
+const REPORTS = ['daily_input','daily_output','cum_input','cum_output','daily_checkin','daily_checkout','cum_checkin','cum_checkout','balance'];
 const REPORT_NAMES = {
   daily_input: 'Daily Input',
   daily_output: 'Daily Output',
@@ -722,13 +722,14 @@ function buildHierarchicalTable(data, dimOrder, reportKey, gIdx){
       }else{
         const agg=sumAll(node);
         const hasChildren=node.items && node.items.length>0;
+        const typeBadge = `<span class="type-badge type-${reportKey}" style="margin-left:4px;font-size:10px">${esc(REPORT_NAMES[reportKey]||reportKey)}</span>`;
         out+=`<tr class="hierarchy-row agg-row row-new-group row-${reportKey}" id="${pid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
         for(let d=0; d<nDims; d++){
           const left=d*frozenW;
           if(d===depth){
-            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)} ${typeBadge}</td>`;
           }else if(d===depth+1){
-            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5;color:#64748b">${hasChildren? node.items.length+' items':''}</td>`;
+            out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5;color:#64748b"><div style="display:flex;flex-direction:column;gap:2px"><span>${hasChildren? node.items.length+' items':''}</span>${typeBadge}</div></td>`;
           }else{
             out+=`<td class="frozen" style="left:${left}px;min-width:${frozenW}px;z-index:5"></td>`;
           }
@@ -782,6 +783,24 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
   h+=`<th class="frozen divider-col" style="left:${divLeft}px;min-width:5px;width:5px;z-index:16"></th>`;
   columns.forEach(c=>{ const p=c.split('_'); h+=`<th style="min-width:80px">${esc(p[0])}${p[1]?`<br><small>${esc(p[1])}</small>`:''}</th>`; });
   h+=`</tr></thead><tbody>`;
+  function collectTypesInNode(n){
+    const set=new Set();
+    function walk(ns){
+      ns.forEach(nn=>{
+        if(nn.items && nn.items.length>0){
+          walk(nn.items);
+        }else{
+          (nn.allRows||[]).forEach(r=>{
+            const k=r._REPORT_KEY || nn.repKey;
+            if(k) set.add(k);
+          });
+          if(nn.repKey) set.add(nn.repKey);
+        }
+      });
+    }
+    walk([n]);
+    return Array.from(set);
+  }
   function renderNodes(nodes, depth, path){
     let out='';
     nodes.forEach((node, idx)=>{
@@ -806,6 +825,8 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
       }else{
         const agg=sumAll(node);
         const hasChildren=node.items && node.items.length>0;
+        const typesInNode = collectTypesInNode(node);
+        const typeBadges = typesInNode.map(t=>`<span class="type-badge type-${t}" style="margin-right:2px;font-size:10px">${esc(REPORT_NAMES[t]||t)}</span>`).join('');
         out+=`<tr class="hierarchy-row agg-row row-new-group" id="${pid}" data-table="${tableId}" data-path="${pathStr}" data-depth="${depth}" onclick="window.ioToggleHier('${tableId}','${pathStr}')">`;
         for(let d=0; d<nDims; d++){
           const left=lefts[d];
@@ -814,7 +835,7 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
             if(effDims[d]==='_REPORT_TYPE') out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> <span class="type-badge type-${rk}">${esc(node.key)}</span></td>`;
             else out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
           }else if(d===depth+1){
-            out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b">${hasChildren? node.items.length+' items':''}</td>`;
+            out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b"><div style="display:flex;flex-direction:column;gap:2px"><span>${hasChildren? node.items.length+' items':''}</span><span style="display:flex;flex-wrap:wrap;gap:2px">${typeBadges}</span></div></td>`;
           }else{
             out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"></td>`;
           }
@@ -927,6 +948,75 @@ function downloadAll(){
 }
 window.ioDownloadAll=downloadAll;
 
-document.addEventListener('DOMContentLoaded', ()=>{ const active=document.querySelector('.nav-item.active'); if(active&&active.dataset.module==='io-report'){ render(); } });
-document.addEventListener('module-change', (e)=>{ if(e.detail.module==='io-report'){ render(); } });
+function saveIOStateToStorage(){
+  try{
+    localStorage.setItem('io_dimOrder', JSON.stringify(dimOrder||[]));
+    localStorage.setItem('io_filterVals', JSON.stringify(filterVals||{}));
+    localStorage.setItem('io_currentGroup', currentGroup||'FG');
+    localStorage.setItem('io_colDim', COL_DIM||'day');
+    localStorage.setItem('io_reportGroups', JSON.stringify(reportGroups||[]));
+    localStorage.setItem('io_pendingNewGroup', JSON.stringify(pendingNewGroup||[]));
+    if(allData){
+      localStorage.setItem('io_hasData', '1');
+    }
+  }catch{}
+}
+function loadIOStateFromStorage(){
+  try{
+    const d = localStorage.getItem('io_dimOrder');
+    if(d) dimOrder = JSON.parse(d);
+    const f = localStorage.getItem('io_filterVals');
+    if(f) Object.assign(filterVals, JSON.parse(f));
+    const g = localStorage.getItem('io_currentGroup');
+    if(g) currentGroup = g;
+    const c = localStorage.getItem('io_colDim');
+    if(c) COL_DIM = c;
+    const rg = localStorage.getItem('io_reportGroups');
+    if(rg){
+      const parsed = JSON.parse(rg);
+      if(Array.isArray(parsed) && parsed.length>0) reportGroups = parsed;
+    }
+    const pg = localStorage.getItem('io_pendingNewGroup');
+    if(pg) pendingNewGroup = JSON.parse(pg);
+  }catch{}
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  loadIOStateFromStorage();
+  const active=document.querySelector('.nav-item.active');
+  if(active&&active.dataset.module==='io-report'){ render(); }
+});
+document.addEventListener('module-change', (e)=>{
+  if(e.detail.module==='io-report'){
+    // if we already have rendered content and data, keep it - don't reset
+    const existingContent = document.getElementById('ioReportContent');
+    if(existingContent && existingContent.innerHTML && allData && Object.keys(allData).length>0){
+      // just ensure status badge updated and return
+      getFullStatus().then(()=>{
+        const badge=document.getElementById('ioMainStatusBadge');
+        if(badge) badge.innerHTML=getStatusBadgeHTML();
+      });
+      // re-attach drag-drop that may have been lost? keep simple
+      return;
+    }
+    loadIOStateFromStorage();
+    render();
+  } else {
+    // when switching away from io-report, save state
+    saveIOStateToStorage();
+  }
+});
+// also save state on relevant changes
+try{
+  const _origRenderDimWell = renderDimWell;
+  renderDimWell = function(){ _origRenderDimWell(); saveIOStateToStorage(); };
+}catch{}
+try{
+  const _origLoadAllReports = loadAllReports;
+  loadAllReports = async function(){ const r = await _origLoadAllReports(); saveIOStateToStorage(); return r; };
+}catch{}
+try{
+  const _origRenderAllReports = renderAllReports;
+  renderAllReports = function(){ const r=_origRenderAllReports(); saveIOStateToStorage(); return r; };
+}catch{}
 })();
