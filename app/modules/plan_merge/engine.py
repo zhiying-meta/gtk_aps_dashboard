@@ -289,7 +289,7 @@ def process_uploaded_data(file_map, config):
                        ("Gated","Packout"), ("Gated","Packout vs ExF"),
                        ("CTB","")]:
             if vt == "CTB":
-                sc_key = sc
+                sc_key = gb
                 if sc_key and sc_key in ctb_gb:
                     vals = {w: round(ctb_gb[sc_key].get(w,0),0) for w in all_weeks if ctb_gb[sc_key].get(w)}
                 else:
