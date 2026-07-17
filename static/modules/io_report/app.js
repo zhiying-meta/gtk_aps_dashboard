@@ -640,7 +640,7 @@ function buildFlatTable(data, dim, reportKey, gIdx){
   pageRows.forEach((r)=>{
     const isNew=prevVal!==null&&prevVal!==r[dim]; prevVal=r[dim];
     const rk=r._REPORT_KEY||reportKey||'';
-    html+=`<tr class="row-${rk} ${isNew?'row-new-group':''}"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td><td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+    html+=`<tr class="row-${rk} ${isNew?'row-new-group':''}"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500">${esc(String(r[dim]??''))}</td><td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
     columns.forEach(c=>{ const v=r[c]; html+=`<td class="num ${v>0?'num-pos':v===0?'num-zero':''}">${v!=null?Number(v).toLocaleString():''}</td>`; });
     html+='</tr>';
   });
@@ -673,7 +673,7 @@ function buildMergedFlatTable(data, dim, gIdx){
   let prevVal=null;
   pageRows.forEach((r)=>{
     const isNew=prevVal!==null&&prevVal!==r[dim]; prevVal=r[dim];
-    html+=`<tr class="row-${r._REPORT_KEY} ${isNew?'row-new-group':''}"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500;background:inherit">${esc(String(r[dim]??''))}</td><td class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${r._REPORT_KEY}">${esc(r._REPORT_TYPE||'')}</span></td><td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
+    html+=`<tr class="row-${r._REPORT_KEY} ${isNew?'row-new-group':''}"><td class="frozen" style="left:0;min-width:${frozenW}px;z-index:5;font-weight:500">${esc(String(r[dim]??''))}</td><td class="frozen" style="left:${frozenW}px;min-width:${typeW}px;z-index:5"><span class="type-badge type-${r._REPORT_KEY}">${esc(r._REPORT_TYPE||'')}</span></td><td class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px;width:5px;z-index:5"></td>`;
     columns.forEach(c=>{ const v=r[c]; html+=`<td class="num">${v!=null?Number(v).toLocaleString():''}</td>`; });
     html+='</tr>';
   });
@@ -901,7 +901,7 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
               }else if(d===depth+1){
                 const filtered=filterNodeByType(node, t);
-                const cnt=filtered ? (function countItems(n){ let c=0; function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length>0) walk(ns); else c+=1; }); } walk([filtered]); return c; })(filtered) : 0;
+                const cnt=filtered ? (function countItems(n){ let c=0; function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length>0) walk(nn.items); else c+=1; }); } walk([filtered]); return c; })(filtered) : 0;
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b">${cnt} items</td>`;
               }else if(effDims[d]==='_REPORT_TYPE'){
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></td>`;
