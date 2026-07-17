@@ -28,6 +28,7 @@ let pendingNewGroup = [];
 let draggedReport = null;
 const PAGE_SIZE = 200;
 const treeCache = {}; // tableId -> tree root
+let _ioClientCache = null; // client-side cache for offline
 
 function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 function getRoot(){ return document.getElementById('io-report-section'); }
@@ -35,16 +36,22 @@ function getStaticDBIO(){ try { return window.STATIC_DB || null; } catch(e){ ret
 function isPlanMergeStatic(){ const db=getStaticDBIO(); return !!(db && db.versions && db.versions.length>0); }
 let _lastStatus = null;
 async function checkStatus(){
+  if (_ioClientCache){
+    _lastStatus = {loaded:true, fg: _ioClientCache.fgItems.length, gb: _ioClientCache.gbItems.length, client:true};
+    return true;
+  }
   try{
     const r = await fetch('/api/io/status');
     const j = await r.json();
     _lastStatus = j;
-    // persist last status to localStorage for instant UI on reload
     try{ localStorage.setItem('io_report_status', JSON.stringify({ ...j, time: new Date().toISOString() })); }catch{}
     return !!j.loaded;
   }catch{ return false; }
 }
 async function getFullStatus(){
+  if (_ioClientCache){
+    return {loaded:true, fg: _ioClientCache.fgItems.length, gb: _ioClientCache.gbItems.length, client:true};
+  }
   try{
     if(_lastStatus) return _lastStatus;
     const r = await fetch('/api/io/status');
@@ -79,18 +86,43 @@ function getStatusBadgeHTML(){
 async function render(){
   ioRoot = getRoot();
   if(!ioRoot) return;
-  // If in static offline mode (plan_merge), show notice for IO report
+  // Client cache takes priority - true offline
+  if (_ioClientCache){
+    renderReportsPage();
+    return;
+  }
+  // If in static offline mode, still allow IO upload via client engine
   if (isPlanMergeStatic()) {
     const db = getStaticDBIO();
     if (!db.io) {
+      // Show upload page with client engine ability, not just notice
+      // We still have offline plan_merge, but IO can be loaded via client engine
+      const loaded = await checkStatus();
+      if(loaded) { renderReportsPage(); return; }
+      // Show upload page with extra banner explaining IO offline via client engine
       ioRoot.innerHTML = `
-        <div class="section" style="text-align:center;padding:32px;background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border:1px solid #bfdbfe">
-          <div style="font-size:18px;font-weight:700;color:#1e40af">📦 Offline Static Mode</div>
-          <div style="font-size:13px;color:#475569;margin-top:8px">当前离线包仅包含 Gated/Ungated/CTB (Multi-Version) 数据</div>
-          <div style="font-size:12px;color:#64748b;margin-top:4px">I/O Report 需要后端服务，若需离线 I/O，请在导出时额外指定 I/O 的 3 个文件</div>
-          <div style="margin-top:12px;font-size:11px;color:#94a3b8">Plan Merge 的离线多版本对比功能正常可用，请切换到左侧 Gated/Ungated/CTB 查看</div>
+        <div class="section" style="background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border:1px solid #bfdbfe;padding:12px 16px">
+          <div style="font-size:13px;font-weight:700;color:#1e40af">📦 Offline Mode - I/O Report 可用 (客户端引擎)</div>
+          <div style="font-size:11px;color:#475569;margin-top:2px">当前离线包已包含 Gated/Ungated/CTB 数据，I/O Report 可通过下方上传 3 个文件或 combined 文件，在浏览器内直接计算，无需服务器</div>
         </div>
-      `;
+      ` + (await (async()=>{
+        // We need to build upload section HTML manually? Use existing builder
+        // For simplicity, call renderUploadPage after injecting banner
+        return '';
+      })());
+      // Now render upload page normally (it will be appended below)
+      renderUploadPage();
+      // Prepend banner again after upload page rendered to top
+      setTimeout(()=>{
+        const upSec = document.getElementById('io-upload-section') || document.getElementById('io-upload-bar');
+        if (upSec && upSec.parentNode){
+          const banner = document.createElement('div');
+          banner.className='section';
+          banner.style.cssText='background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border:1px solid #bfdbfe;padding:12px 16px;margin-bottom:12px';
+          banner.innerHTML=`<div style="font-size:13px;font-weight:700;color:#1e40af">📦 Offline Mode - I/O Report 可用 (客户端引擎)</div><div style="font-size:11px;color:#475569;margin-top:2px">已内置浏览器版 I/O 引擎，上传 3 文件或 combined xlsx 即可生成 9 张报表，支持 Shift/Day/Week/Month、Line/ITEM/STYLE 维度、合并、下载 Excel</div>`;
+          upSec.parentNode.insertBefore(banner, upSec);
+        }
+      }, 200);
       return;
     }
   }
@@ -469,6 +501,18 @@ function onWellChipDragStart(e,dim){ e.dataTransfer.setData('text/plain',dim); e
 window.ioOnWellChipDragStart=onWellChipDragStart;
 function getDimParam(){ if(dimOrder.length===0) return ''; if(dimOrder.length===1) return dimOrder[0]; return 'detail'; }
 async function refreshMeta(){
+  // Client offline path
+  if (_ioClientCache && window.IOReportEngine){
+    try{
+      const meta = window.IOReportEngine.getMeta(_ioClientCache, currentGroup, COL_DIM);
+      const map={lineCode:'line_codes',itemNo:'items',style:'styles'};
+      for(const [fk,mk] of Object.entries(map)){
+        const cur=filterVals[fk]; const opts=meta[mk]||[]; populateFilter(fk, opts);
+        if(cur && !opts.includes(cur)){ filterVals[fk]=''; const inp=document.getElementById('fi_'+fk); if(inp) inp.value=''; }
+      }
+      return;
+    }catch(e){ console.error('client refreshMeta failed', e); }
+  }
   try{
     const resp=await fetch(`/api/io/meta?group=${encodeURIComponent(currentGroup)}&col_dim=${COL_DIM}`);
     const meta=await resp.json(); if(meta.error) throw new Error(meta.error);
@@ -484,6 +528,21 @@ async function loadAllReports(){
   const content=document.getElementById('ioReportContent');
   if(!dim){ allData=null; if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">Please drag row dimensions</div>'; renderLeftGroupBoxes(); return; }
   if(content) content.innerHTML='<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading...</div>';
+  // Client offline
+  if (_ioClientCache && window.IOReportEngine){
+    try{
+      const result = window.IOReportEngine.buildReportsForGroup(_ioClientCache, dim, COL_DIM, currentGroup, filterVals.lineCode, filterVals.itemNo, filterVals.style);
+      const data = result[0];
+      allData=data;
+      Object.keys(treeCache).forEach(k=>delete treeCache[k]);
+      renderAllReports();
+      return;
+    }catch(e){
+      console.error('client loadAllReports failed', e);
+      if(content) content.innerHTML=`<div style="text-align:center;padding:24px;color:#dc2626">❌ ${esc(e.message)}</div>`;
+      return;
+    }
+  }
   const params=new URLSearchParams({group:currentGroup, dim, col_dim:COL_DIM, line_code:filterVals.lineCode, item_no:filterVals.itemNo, style:filterVals.style});
   try{
     const resp=await fetch(`/api/io/reports?${params}`);
