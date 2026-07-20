@@ -1039,8 +1039,7 @@ function handleV2VRowChart(tableName, groupValues) {
             legend: {position: 'top'}
           },
           scales: {
-            x: {display: true, title: {display: true, text: 'Date'}},
-                ticks: {maxTicksLimit: 20}},
+            x: {display: true, title: {display: true, text: 'Date'}, ticks: {maxTicksLimit: 20}},
             y: {display: true, title: {display: true, text: 'Value'}}
           }
         }
