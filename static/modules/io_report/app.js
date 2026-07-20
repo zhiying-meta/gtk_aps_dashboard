@@ -368,7 +368,6 @@ function renderReportsPage(){
         <button class="dim-tab" data-group="FR">FR</button>
         <button class="dim-tab" data-group="LT">LT</button>
         <button class="dim-tab" data-group="RT">RT</button>
-        <button class="dim-tab" data-group="RAW">RAW</button>
       </div>
       <div class="toolbar" id="io-toolbar"><div class="panels-row">
         <div class="panel" style="flex:1;min-width:220px"><div class="panel-label">Row Dimensions (drag to order)</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="dim-chip available" draggable="true" data-dim="LINE_CODE">Line</span><span class="dim-chip available" draggable="true" data-dim="ITEM_NO">PN</span><span class="dim-chip available" draggable="true" data-dim="STYLE">Style</span><div id="ioDimWell" class="dim-well"><span class="placeholder">Drop dimensions here</span></div></div></div>
@@ -396,11 +395,21 @@ function renderReportsPage(){
 }
 
 function initReportsPage(){
+  // RAW tab cancelled per requirement (no data)
+  if (currentGroup==='RAW') currentGroup='FG';
+  try{
+    const savedGroup = localStorage.getItem('io_currentGroup');
+    if (savedGroup==='RAW'){
+      localStorage.setItem('io_currentGroup','FG');
+      currentGroup='FG';
+    }
+  }catch{}
   document.querySelectorAll('#io-group-tabs .dim-tab').forEach(tab=>{
     tab.addEventListener('click', ()=>{
       document.querySelectorAll('#io-group-tabs .dim-tab').forEach(t=> t.classList.remove('active'));
       tab.classList.add('active');
       currentGroup = tab.dataset.group;
+      if (currentGroup==='RAW') currentGroup='FG'; // safety
       refreshMeta().then(()=> loadAllReports());
     });
   });
