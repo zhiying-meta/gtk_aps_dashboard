@@ -1,6 +1,14 @@
-# Production Plan Review
+# Production Plan Review + V2V Comparison
 
 Upload production plan data → Configure Cut Day → Auto-generate comparison report (ExF / Ungated / Gated / CTB)
+
+**NEW: V2V (Version to Version) Module** - Compare two APS snapshot versions (BOM, FCST, I_O, Supply, Switch, Item, Line, Calendar, Plan Config, Plan Output, Balance) with drill-down Week→Day→Shift, free dimension grouping, and chart visualization.
+
+- **V2V Docs**: 
+  - `docs/V2V_REQUIREMENTS_AND_PLAN.md` - Full requirements + 12 table structures
+  - `docs/V2V_CONFIRMED_SPEC.md` - Confirmed spec after 8 Q&A
+  - `docs/V2V_PHASE3_REFINED_SPEC.md` - Phase3 refined design (query-driven, not big Excel)
+  - `docs/V2V_REQUIREMENTS_AND_PLAN.md` - Original + answers inline
 
 ## Requirements
 
@@ -145,28 +153,124 @@ gtk-result-table/
 ├── app/
 │   ├── __init__.py              # Flask factory
 │   ├── config.py                # PORT, UPLOAD_FOLDER = project_root/uploads
-│   └── modules/plan_merge/      # Plan merge blueprint
-│       ├── __init__.py
-│       ├── routes.py            # API endpoints
-│       ├── engine.py            # Data processing + Excel + ETD offset logic
-│       ├── utils.py             # XLSX parsing helpers
-│       ├── config.py            # Default cut-day + offset values
-│       └── templates/           # Download templates + demo
+│   ├── modules/
+│   │   ├── plan_merge/          # Plan merge blueprint (original)
+│   │   │   ├── __init__.py
+│   │   │   ├── routes.py
+│   │   │   ├── engine.py
+│   │   │   ├── utils.py
+│   │   │   └── config.py
+│   │   └── v2v/                 # V2V Comparison blueprint (NEW)
+│   │       ├── __init__.py
+│   │       ├── routes.py        # /v2v/api/compare, /diff/<table>, /chart/<table>, /download
+│   │       ├── config.py        # 12 table defs
+│   │       ├── utils.py         # Folder scan + fuzzy match
+│   │       ├── diff_engine.py   # Fast summary + detailed diff + aggregated diff
+│   │       └── parsers/         # 12 parsers
+│   │           ├── bom_parser.py
+│   │           ├── fcst_parser.py
+│   │           ├── actual_parser.py      # I_O actual + coverage check
+│   │           ├── supply_parser.py      # multi-field + weekly
+│   │           ├── switch_parser.py      # Unnamed column fix
+│   │           ├── calendar_parser.py    # UPH/Yield/Efficiency + curve
+│   │           ├── item_parser.py
+│   │           ├── line_parser.py
+│   │           ├── plan_output_parser.py # Phase3: group_by + drill-down
+│   │           └── balance_parser.py     # Phase3: last balance + negative flag
 ├── static/
 │   ├── global/                  # Global HTML/CSS/JS
-│   │   ├── index.html           # SPA
+│   │   ├── index.html           # SPA with module switching (plan-merge + v2v)
 │   │   ├── style.css
-│   │   └── app.js
-│   └── modules/plan_merge/
-│       ├── app.js               # Main logic
-│       └── style.css
-├── uploads/                     # Temp upload dir (gitignored)
-├── requirements.txt            # flask, openpyxl, requests, waitress
-├── run.sh / run.bat             # 一键启动脚本（自动处理 python/pip 缺失）
-└── run.py                       # Entry point
+│   │   └── app.js               # Sidebar toggle + module router
+│   └── modules/
+│       ├── plan_merge/
+│       │   ├── app.js
+│       │   └── style.css
+│       └── v2v/                 # NEW
+│           ├── app.js           # Folder upload + summary cards + detail tabs + dimension builder + chart + download
+│           └── style.css
+├── docs/
+│   ├── V2V_REQUIREMENTS_AND_PLAN.md
+│   ├── V2V_CONFIRMED_SPEC.md
+│   └── V2V_PHASE3_REFINED_SPEC.md
+├── uploads/v2v/                 # V2V temp jobs (gitignored)
+├── v2v_data/                    # Optional: put version folders here for server-side selection
+├── Ivy-20260716-gated-v2/       # Sample data - 12 tables ~1M rows
+├── requirements.txt
+├── run.sh / run.bat
+└── run.py
 ```
 
-## Business Logic
+## V2V Module Usage (NEW)
+
+### Quick Start V2V
+
+1.  **Prepare two version folders** (same 12 files inside):
+    ```
+    Ivy-20260716-gated-v2/
+      ├── BOM快照.xlsx
+      ├── FCST主表.xlsx + FCST明细表.xlsx
+      ├── I_O实际值表.xlsx
+      ├── supply供应表.xlsx
+      ├── 切换矩阵快照表.xlsx
+      ├── 料号快照表.xlsx
+      ├── 线体快照表.xlsx
+      ├── 线体日历快照表.xlsx
+      ├── 计划设置表.xlsx
+      ├── 排产结果快照表_输出.xlsx
+      └── 结存表_输出.xlsx
+    ```
+
+2.  **Place folders** either:
+    - In project root (auto-scanned for `Ivy-*`)
+    - Or in `v2v_data/` folder
+    - Or upload via UI (folder picker `webkitdirectory`)
+
+3.  **Open http://localhost:8502 → Sidebar → 🔍 V2V Comparison**
+
+4.  **Compare**:
+    - Server mode: Select Version A/B from dropdown → Compare (0.7s fast summary)
+    - Upload mode: Choose two folders → Compare
+
+5.  **Explore**:
+    - **Summary Dashboard**: 12 cards show Added/Deleted/Modified per table
+    - **Detail Tabs**: Click tab to load detailed diff (on-demand, 5-15s for large tables)
+      - **BOM**: Parent+Child+Field diff
+      - **FCST**: SKU×Week diff
+      - **I_O**: Coverage + Inconsistent check (historical actual should not change)
+      - **Supply**: Multi-field (KITTING_VALUE/QTY_REM/QTY_REM2/TOTAL_LOSS_QTY) + Week/Day toggle + Cumulative chart
+      - **Switch**: LINE + BEFORE/AFTER PN + SWITCH_DURATION
+      - **Calendar**: LINE + PLAN_TYPE (UPH/工时/良率/效率/CHECKOUT) + UPH curve chart
+      - **Plan Output** (Phase3): Free Group by LINE_CODE/SKU/PLAN_ITEM + Granularity Week/Day/Shift + Only Diff + Threshold + Drill-down breadcrumbs + Chart
+      - **Balance** (Phase3): Group by ITEM_CODE + Last balance per week + Negative flag
+    - **Chart**: Click 📈 button in row to load dual-version curve (Chart.js)
+    - **Download**: 📥 Download Current View -> Excel of current aggregated view (not 200k rows)
+
+### V2V Business Logic
+
+| Table | Key | Compare Fields | Special |
+|-------|-----|----------------|---------|
+| BOM | PARENT_PN_CODE + ITEM_NO | UNIT_NUM, LOSS_RATE, PROCESS_LT | - |
+| FCST | PN_CODE + ACTUALFIRSTDAYOFWEEK (Saturday) | ACTUALWEEKVALUE | JOIN main(ID=MAIN_ID) |
+| I_O | LINE_CODE+SKU+PLAN_DATE+SHIFT+PLAN_ITEM | PLAN_VALUE | Coverage check + Inconsistent detection |
+| Supply | PN_CODE+KITTING_DATE | KITTING_VALUE, QTY_REM, QTY_REM2, TOTAL_LOSS_QTY | Week aggregation + cum curve |
+| Switch | LINE_CODE+BEFORE_PN+AFTER_PN | SWITCH_DURATION | Handles Unnamed column for BEFORE_PN |
+| Item | ITEM_NO | PRODUCT_STYLE, COLOR, TYPE | - |
+| Line | LINE_CODE | LINE_LEVEL, LINE_TYPE | - |
+| Calendar | LINE_CODE+PLAN_TYPE+PLAN_DATE+SHIFT+PLAN_ITEM | PLAN_VALUE | 5 types: UPH/工时/良率/效率/CHECKOUT |
+| Plan Config | ID | All 50 fields | Single row |
+| Plan Output | LINE_CODE+SKU+PLAN_DATE+SHIFT+PLAN_ITEM | PLAN_VALUE | Phase3: group_by free + Week->Day->Shift drill-down |
+| Balance | ITEM_CODE+PLAN_DATE+SHIFT | BALANCE_QTY, SHIFT_OUT_QTY, PRE_INPUT_QTY | Last per week + negative flag |
+
+### Phase3 Refined Design (Output Tables)
+
+- **Not big Excel**: Backend aggregates first (203k → 1847 groups for LINE×Week → only_diff filter → 13 rows)
+- **Query-driven**: `group_by=LINE_CODE,SKU&granularity=week&only_diff=true&threshold_abs=100`
+- **Progressive disclosure**: Breadcrumb `All Weeks > LINE=AL6-Frame Week=2026/07/12 > Day=2026/07/08`
+- **Free combination**: Dimension builder with checkboxes + quick buttons (按线体周汇总 / 按SKU周汇总)
+- **Download current view only**
+
+## Business Logic (Plan Merge - Original)
 
 | Module | Source | Algorithm |
 |--------|--------|-----------|

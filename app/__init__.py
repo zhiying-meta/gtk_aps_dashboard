@@ -19,6 +19,14 @@ def create_app():
     from app.modules.plan_merge import plan_merge_bp
     app.register_blueprint(plan_merge_bp)
 
+    # V2V Comparison module
+    try:
+        from app.modules.v2v import v2v_bp
+        app.register_blueprint(v2v_bp)
+        print("✅ V2V module registered")
+    except Exception as e:
+        print(f"⚠️ V2V module failed to load: {e}")
+
     # Optional io_report module if present (feat/io-report branch)
     try:
         from app.modules.io_report.routes import io_bp

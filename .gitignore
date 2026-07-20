@@ -40,3 +40,8 @@ app/static/meta.json
 
 # Local config
 opencode.json
+
+# V2V local test data - do not push large xlsx
+Ivy-*
+v2v_data/
+input_files/
