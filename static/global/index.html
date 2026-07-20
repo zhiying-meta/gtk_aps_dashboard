@@ -218,12 +218,12 @@
       <div class="v2v-section" id="v2v-upload-section">
         <div class="v2v-section-header">
           <span class="v2v-section-title">📁 1. Upload Versions (Folder to Folder)</span>
-          <span style="font-size:12px;color:#64748b">支持文件夹上传，文件夹名为版本名，需包含相同的12张xlsx</span>
+          <span style="font-size:12px;color:#64748b">Folder name will be used as version label, each folder must contain the same 12 xlsx files</span>
         </div>
 
         <!-- Server-side version selector -->
         <div class="v2v-section" style="margin:0 0 16px 0; padding:12px; background:#f8fafc">
-          <div style="font-weight:600;font-size:13px;margin-bottom:8px">🖥️ Server-side Versions (自动扫描项目根目录 Ivy-* 文件夹)</div>
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px">🖥️ Server-side Versions (Auto-scan Ivy-* folders in project root)</div>
           <div class="v2v-server-selector">
             <div class="config-item">
               <label style="font-size:12px">Version A (Server)</label>
@@ -242,26 +242,26 @@
         <div class="v2v-upload-grid">
           <div class="v2v-version-card" id="v2v-card-a" style="cursor:pointer">
             <div class="v2v-version-header">
-              <span class="v2v-version-label">Version A (文件夹上传)</span>
+              <span class="v2v-version-label">Version A (Folder Upload)</span>
               <span class="v2v-version-badge" id="v2v-badge-a">No files</span>
             </div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-a">点击选择文件夹，文件夹名将作为版本名（推荐用上方Server模式，更稳定）</div>
+            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-a">Click to select folder, folder name will be used as version label (Recommend Server mode above, more stable)</div>
             <input type="file" id="v2v-files-a" class="v2v-file-input" webkitdirectory directory multiple style="display:none">
-            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-a').click()" style="margin-bottom:8px">📁 选择文件夹 A</button>
+            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-a').click()" style="margin-bottom:8px">📁 Select Folder A</button>
             <div class="v2v-file-list" id="v2v-list-a" style="margin-top:8px">
-              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>需包含12个xlsx</small></div>
+              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>Must include 12 xlsx files</small></div>
             </div>
           </div>
           <div class="v2v-version-card" id="v2v-card-b" style="cursor:pointer">
             <div class="v2v-version-header">
-              <span class="v2v-version-label">Version B (文件夹上传)</span>
+              <span class="v2v-version-label">Version B (Folder Upload)</span>
               <span class="v2v-version-badge" id="v2v-badge-b">No files</span>
             </div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-b">点击选择文件夹，文件夹名将作为版本名</div>
+            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-b">Click to select folder, folder name will be used as version label</div>
             <input type="file" id="v2v-files-b" class="v2v-file-input" webkitdirectory directory multiple style="display:none">
-            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-b').click()" style="margin-bottom:8px">📁 选择文件夹 B</button>
+            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-b').click()" style="margin-bottom:8px">📁 Select Folder B</button>
             <div class="v2v-file-list" id="v2v-list-b" style="margin-top:8px">
-              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>需包含12个xlsx</small></div>
+              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>Must include 12 xlsx files</small></div>
             </div>
           </div>
         </div>
@@ -283,7 +283,7 @@
       <div class="v2v-section" id="v2v-summary-section" style="display:none">
         <div class="v2v-section-header">
           <span class="v2v-section-title">📊 2. Summary Dashboard</span>
-          <span style="font-size:12px;color:#64748b">点击卡片查看详情 | 黄色表示有差异</span>
+          <span style="font-size:12px;color:#64748b">Click card to see details | Yellow means diff</span>
         </div>
         <div class="v2v-summary-grid" id="v2v-summary-grid"></div>
       </div>
@@ -306,10 +306,10 @@
 
         <!-- Output Table Dimension Builder (Phase3 Refined) -->
         <div id="v2v-output-builder" class="v2v-section" style="margin:0 0 12px 0;padding:12px;background:#f8fafc;display:none">
-          <div style="font-weight:600;font-size:13px;margin-bottom:8px">🔧 Phase3: 自由组合维度 (按需聚合，小数据探索)</div>
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px">🔧 Dimension Builder (On-demand aggregation, small data exploration)</div>
           <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end">
             <div>
-              <div style="font-size:11px;color:#64748b;margin-bottom:4px">Group by (多选)</div>
+              <div style="font-size:11px;color:#64748b;margin-bottom:4px">Group by (Multi-select)</div>
               <div id="v2v-groupby-options" style="display:flex;gap:8px;flex-wrap:wrap">
                 <!-- Dynamic based on table -->
               </div>
@@ -332,11 +332,11 @@
             </div>
           </div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-            <span style="font-size:11px;color:#64748b">快捷:</span>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_week')">按线体周汇总</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('sku_week')">按SKU周汇总</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_sku_week')">按线体+SKU周汇总</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('item_week')">按物料周汇总 (Balance)</button>
+            <span style="font-size:11px;color:#64748b">Quick:</span>
+            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_week')">Line Weekly</button>
+            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('sku_week')">SKU Weekly</button>
+            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_sku_week')">Line+SKU Weekly</button>
+            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('item_week')">Item Weekly (Balance)</button>
           </div>
         </div>
 
@@ -355,7 +355,7 @@
           </div>
           <div class="v2v-toolbar-right" style="display:flex;gap:8px;align-items:center">
             <button id="v2v-btn-download" class="btn btn-sm" style="background:#0f172a;color:white">📥 Download Current View</button>
-            <span style="font-size:11px;color:#64748b">点击行联动Chart</span>
+            <span style="font-size:11px;color:#64748b">Click row to load Chart</span>
           </div>
         </div>
 

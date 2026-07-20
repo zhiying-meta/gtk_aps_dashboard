@@ -2,17 +2,17 @@
 // Handles folder upload, compare, summary cards, detail tabs with drill-down
 
 const V2V_TABLE_DEFS = {
-  bom: {icon: '📦', name: 'BOM快照', cat: 'input'},
+  bom: {icon: '📦', name: 'BOM Snapshot', cat: 'input'},
   fcst: {icon: '📊', name: 'FCST', cat: 'input'},
-  actual_io: {icon: '🏭', name: 'I_O实际值', cat: 'input'},
-  supply: {icon: '🚚', name: 'Supply供应', cat: 'input'},
-  switch: {icon: '🔀', name: '切换矩阵', cat: 'input'},
-  item: {icon: '🏷️', name: '料号快照', cat: 'input'},
-  line: {icon: '🧵', name: '线体快照', cat: 'input'},
-  calendar: {icon: '📅', name: '线体日历', cat: 'input'},
-  plan_config: {icon: '⚙️', name: '计划设置', cat: 'input'},
-  plan_output: {icon: '📋', name: '排产结果输出', cat: 'output'},
-  balance: {icon: '📦', name: '结存输出', cat: 'output'},
+  actual_io: {icon: '🏭', name: 'Actual I/O', cat: 'input'},
+  supply: {icon: '🚚', name: 'Supply', cat: 'input'},
+  switch: {icon: '🔀', name: 'Switch Matrix', cat: 'input'},
+  item: {icon: '🏷️', name: 'Item Master', cat: 'input'},
+  line: {icon: '🧵', name: 'Line Master', cat: 'input'},
+  calendar: {icon: '📅', name: 'Line Calendar', cat: 'input'},
+  plan_config: {icon: '⚙️', name: 'Plan Config', cat: 'input'},
+  plan_output: {icon: '📋', name: 'Plan Output', cat: 'output'},
+  balance: {icon: '📦', name: 'Balance', cat: 'output'},
 };
 
 let v2vState = {
@@ -76,7 +76,7 @@ function setupV2VUpload() {
         folderName = 'Folder-' + version + ` (${files.length} files)`;
       }
       console.log(`Folder name for ${version}:`, folderName);
-      if (nameEl) nameEl.textContent = `📁 ${folderName} - 点击可重新选择`;
+      if (nameEl) nameEl.textContent = `📁 ${folderName} - Click to reselect`;
 
       // Identify tables
       let identified = {};
@@ -142,7 +142,7 @@ function setupV2VUpload() {
 
       const statusEl = document.getElementById('v2v-status');
       if (statusEl) {
-        statusEl.innerHTML = `<div class="v2v-status info">✅ Version ${version} (${folderName}) loaded: ${xlsxCount} xlsx, ${Object.keys(identified).length} recognized. ${v2vState.versionA && v2vState.versionB ? 'Ready to compare!' : '请再选择另一个版本'}</div>`;
+        statusEl.innerHTML = `<div class="v2v-status info">✅ Version ${version} (${folderName}) loaded: ${xlsxCount} xlsx, ${Object.keys(identified).length} recognized. ${v2vState.versionA && v2vState.versionB ? 'Ready to compare!' : 'Please select the other version'}</div>`;
       }
 
       // Reset input value to allow re-selecting same folder
@@ -828,7 +828,7 @@ function renderV2VTableDetail(data, tableName) {
       html += `<td>${displayA}</td>`;
       html += `<td>${displayB}</td>`;
       html += `<td style="${(rec.diff||0)>0?'color:#16a34a':(rec.diff||0)<0?'color:#dc2626':''};font-weight:600">${rec.diff||0}</td>`;
-      html += `<td>${rec.diff_pct? rec.diff_pct.toFixed(1)+'%':''}${rec.is_negative? '<br><span style="color:#dc2626;font-weight:700">⚠️负库存</span>':''}</td>`;
+      html += `<td>${rec.diff_pct? rec.diff_pct.toFixed(1)+'%':''}${rec.is_negative? '<br><span style="color:#dc2626;font-weight:700">⚠️ Negative Stock</span>':''}</td>`;
       const drill = rec._drill || {};
       let drillBtn = '';
       if (drill.can_drill_day || drill.can_drill_shift) {
