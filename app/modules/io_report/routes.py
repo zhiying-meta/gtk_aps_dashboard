@@ -36,16 +36,24 @@ def api_status():
     loaded = _ensure_cache()
     try:
         cache = get_cache(DEFAULT_DATA_DIR)
-        return jsonify(
-            {
-                "loaded": loaded,
-                "ok": loaded,
-                "fg": len(cache.fg_items) if loaded else 0,
-                "gb": len(cache.gb_items) if loaded else 0,
-                "fg_sched": len(cache.sched_fg) if loaded else 0,
-                "gb_sched": len(cache.sched_gb) if loaded else 0,
-            }
-        )
+        base = {
+            "loaded": loaded,
+            "ok": loaded,
+            "fg": len(cache.fg_items) if loaded else 0,
+            "gb": len(cache.gb_items) if loaded else 0,
+            "fg_sched": len(cache.sched_fg) if loaded else 0,
+            "gb_sched": len(cache.sched_gb) if loaded else 0,
+        }
+        # extended cats
+        if loaded and getattr(cache, 'cats', None):
+            for cat in cache.cats:
+                safe = cat.replace('成品', 'FG')
+                base[f"count_{safe}"] = len(cache.items_by_cat.get(cat, []))
+                base[f"sched_{safe}"] = len(cache.sched_by_cat.get(cat, []))
+                base[f"bal_{safe}"] = len(cache.bal_by_cat.get(cat, []))
+            base["cats"] = cache.cats
+            base["items_by_cat"] = {k: len(v) for k, v in cache.items_by_cat.items()}
+        return jsonify(base)
     except Exception:
         return jsonify({"loaded": loaded, "ok": loaded, "fg": 0, "gb": 0})
 

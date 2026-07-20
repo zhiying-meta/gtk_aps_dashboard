@@ -362,7 +362,14 @@ function renderReportsPage(){
         </div>
         <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button></div>
       </div>
-      <div class="dim-tabs" id="io-group-tabs"><button class="dim-tab active" data-group="FG">FG (SKU)</button><button class="dim-tab" data-group="GB">GB</button></div>
+      <div class="dim-tabs" id="io-group-tabs">
+        <button class="dim-tab active" data-group="FG">FG (SKU)</button>
+        <button class="dim-tab" data-group="GB">GB</button>
+        <button class="dim-tab" data-group="FR">FR</button>
+        <button class="dim-tab" data-group="LT">LT</button>
+        <button class="dim-tab" data-group="RT">RT</button>
+        <button class="dim-tab" data-group="RAW">RAW</button>
+      </div>
       <div class="toolbar" id="io-toolbar"><div class="panels-row">
         <div class="panel" style="flex:1;min-width:220px"><div class="panel-label">Row Dimensions (drag to order)</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><span class="dim-chip available" draggable="true" data-dim="LINE_CODE">Line</span><span class="dim-chip available" draggable="true" data-dim="ITEM_NO">PN</span><span class="dim-chip available" draggable="true" data-dim="STYLE">Style</span><div id="ioDimWell" class="dim-well"><span class="placeholder">Drop dimensions here</span></div></div></div>
         <div class="panel" style="min-width:160px"><div class="panel-label">Column</div><div class="btn-group" id="ioColDimTabs" style="margin-top:6px"><button class="btn" data-coldim="shift">Shift</button><button class="btn active" data-coldim="day">Day</button><button class="btn" data-coldim="week">Week</button><button class="btn" data-coldim="month">Month</button></div></div>
@@ -629,11 +636,15 @@ function mergeTypesData(types){
 
 function renderLeftGroupBoxes(){
   const container=document.getElementById('leftGroupBoxes'); if(!container) return;
+  let groupsForLeft = reportGroups;
+  if (currentGroup==='RAW'){
+    groupsForLeft = [['balance']];
+  }
   let html='';
-  if(pendingNewGroup.length>0){
+  if(pendingNewGroup.length>0 && currentGroup!=='RAW'){
     html+=`<div class="group-box merged pending" style="border-color:#8b5cf6;background:#faf5ff;border:2px dashed #8b5cf6;border-radius:8px;padding:8px"><div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px">🆕 NEW (${pendingNewGroup.length})</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${pendingNewGroup.map(t=>`<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-pending="1" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])}<span class="remove" onclick="event.stopPropagation(); ioRemovePendingType('${t}')">×</span></span>`).join('')}</div><div style="display:flex;gap:4px"><button class="btn btn-sm" style="flex:1" onclick="ioConfirmPendingGroup()">✓ Confirm</button><button class="btn btn-sm btn-outline" style="flex:1" onclick="ioClearPendingGroup()">✕</button></div></div>`;
   }
-  reportGroups.forEach((groupTypes,gIdx)=>{
+  groupsForLeft.forEach((groupTypes,gIdx)=>{
     if(!groupTypes) groupTypes=[];
     const isEmpty=groupTypes.length===0; const isMerged=groupTypes.length>1;
     const border=isEmpty?'#cbd5e1':(isMerged?'#8b5cf6':'#3b82f6'); const bg=isEmpty?'#f8fafc':(isMerged?'#faf5ff':'#fff');
@@ -645,17 +656,27 @@ function renderLeftGroupBoxes(){
     }
   });
   container.innerHTML=html||'<div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px">No groups</div>';
-  const countEl=document.getElementById('mergeGroupCount'); if(countEl) countEl.textContent=String(reportGroups.filter(g=>g.length>0).length + (pendingNewGroup.length>0?1:0));
+  const countEl=document.getElementById('mergeGroupCount'); if(countEl) countEl.textContent=String(groupsForLeft.filter(g=>g.length>0).length + (pendingNewGroup.length>0 && currentGroup!=='RAW' ?1:0));
 }
 
 function renderAllReports(){
   const content=document.getElementById('ioReportContent');
   if(!content) return;
+  // RAW only needs BOH
+  let effectiveGroups = reportGroups;
+  if (currentGroup==='RAW'){
+    effectiveGroups = [['balance']];
+    // update left boxes to show only balance
+    // keep reportGroups global as is? use effective
+  }
   renderLeftGroupBoxes();
   if(!allData){ content.innerHTML='<div style="text-align:center;padding:24px;color:#94a3b8">No data</div>'; return; }
+  if(effectiveGroups.length===0) effectiveGroups= (currentGroup==='RAW' ? [['balance']] : REPORTS.map(r=>[r]));
   if(reportGroups.length===0) reportGroups=REPORTS.map(r=>[r]);
+  // for counting, use effectiveGroups when RAW
+  let groupsToRender = (currentGroup==='RAW') ? effectiveGroups : reportGroups;
   let html='';
-  reportGroups.forEach((groupTypes,gIdx)=>{
+  groupsToRender.forEach((groupTypes,gIdx)=>{
     if(!groupTypes||groupTypes.length===0) return;
     const isMerged=groupTypes.length>1;
     const titles=groupTypes.map(t=>REPORT_NAMES[t]).join(' + ');

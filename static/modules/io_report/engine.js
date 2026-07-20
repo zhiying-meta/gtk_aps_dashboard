@@ -68,6 +68,13 @@
     return XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
   }
 
+  function normalizeCat(cat){
+    if (cat==null) return 'RAW';
+    let s=String(cat).trim();
+    if (s==='') return 'RAW';
+    return s;
+  }
+
   function parseMaster(aoa){
     if (!aoa || aoa.length===0) throw new Error('Master sheet empty');
     let headers = (aoa[0]||[]).map(h=> h==null?'':String(h).trim());
@@ -75,17 +82,27 @@
     let catIdx = getColIndex(headers, 'PRODUCT_CATEGORY');
     let styleIdx = getColIndex(headers, 'PRODUCT_STYLE');
     if (itemIdx<0 || catIdx<0) throw new Error('Master missing ITEM_NO or PRODUCT_CATEGORY, headers='+headers.join(','));
-    let itemToCat={}, itemToStyle={}, fgItems=[], gbItems=[];
+    let itemToCat={}, itemToStyle={};
+    let itemsByCat={}, stylesByCat={};
+    let fgItems=[], gbItems=[];
     let styleFgSet=new Set(), styleGbSet=new Set();
     for(let r=1;r<aoa.length;r++){
       let row=aoa[r]; if(!row) continue;
-      let item=row[itemIdx], cat=row[catIdx];
-      if (!item || !cat) continue;
-      item=String(item).trim(); cat=String(cat).trim();
-      if (!item || !cat) continue;
+      let itemRaw=row[itemIdx];
+      if (itemRaw==null || String(itemRaw).trim()==='') continue;
+      let item=String(itemRaw).trim();
+      let catRaw=row[catIdx];
+      let cat=normalizeCat(catRaw);
+      let origCat = catRaw!=null ? String(catRaw).trim() : '';
+      // keep RAW for blank, but also preserve original for mapping
+      itemToCat[item]= origCat!=='' ? origCat : 'RAW';
       let style = styleIdx>=0 && row[styleIdx]!=null ? String(row[styleIdx]).trim() : '';
-      itemToCat[item]=cat;
       itemToStyle[item]=style;
+      if (!itemsByCat[cat]) itemsByCat[cat]=[];
+      itemsByCat[cat].push(item);
+      if (!stylesByCat[cat]) stylesByCat[cat]=new Set();
+      if (style) stylesByCat[cat].add(style);
+
       if (cat==='成品'){
         fgItems.push(item);
         if (style) styleFgSet.add(style);
@@ -94,17 +111,26 @@
         if (style) styleGbSet.add(style);
       }
     }
+    // dedup & sort
+    let sortedItemsByCat={};
+    let sortedStylesByCat={};
+    Object.keys(itemsByCat).forEach(cat=>{
+      sortedItemsByCat[cat]=Array.from(new Set(itemsByCat[cat])).sort();
+      sortedStylesByCat[cat]=Array.from(stylesByCat[cat]||[]).sort();
+    });
     return {
       itemToCat, itemToStyle,
       fgItems: Array.from(new Set(fgItems)).sort(),
       gbItems: Array.from(new Set(gbItems)).sort(),
       styleFg: Array.from(styleFgSet).sort(),
-      styleGb: Array.from(styleGbSet).sort()
+      styleGb: Array.from(styleGbSet).sort(),
+      itemsByCat: sortedItemsByCat,
+      stylesByCat: sortedStylesByCat
     };
   }
 
   function parseSchedule(aoa, itemToCat, itemToStyle){
-    if (!aoa || aoa.length===0) return {fg:[], gb:[], lineFg:new Set(), lineGb:new Set()};
+    if (!aoa || aoa.length===0) return {fg:[], gb:[], lineFg:new Set(), lineGb:new Set(), byCat:{}, linesByCat:{}};
     let headers=(aoa[0]||[]).map(h=> h==null?'':String(h).trim());
     let lineIdx=getColIndex(headers,'LINE_CODE');
     let shiftIdx=getColIndex(headers,'SHIFT_NAME');
@@ -114,14 +140,21 @@
     let valIdx=getColIndex(headers,'PLAN_VALUE');
     let fg=[], gb=[];
     let lineFg=new Set(), lineGb=new Set();
+    let byCat={}, linesByCat={};
     let fgSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='成品'));
     let gbSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='GB'));
+    let allItemsSet=new Set(Object.keys(itemToCat));
     for(let r=1;r<aoa.length;r++){
       let row=aoa[r]; if(!row) continue;
       if (row.length<=Math.max(lineIdx,shiftIdx,planItemIdx,skuIdx,dateIdx,valIdx)) continue;
       let skuRaw=row[skuIdx]; if(!skuRaw) continue;
       let sku=String(skuRaw).trim();
-      if (!fgSet.has(sku) && !gbSet.has(sku)) continue;
+      let cat = normalizeCat(itemToCat[sku]||'RAW');
+      // include all known items
+      if (!allItemsSet.has(sku)){
+        // treat unknown as RAW
+        cat='RAW';
+      }
       let val=0;
       try{ val=parseFloat(row[valIdx])||0; }catch(e){ val=0; }
       let pd=toDatetime(row[dateIdx]);
@@ -135,33 +168,46 @@
         PlanValue: val,
         Style: itemToStyle[sku]||''
       };
+      if (!byCat[cat]) byCat[cat]=[];
+      byCat[cat].push(sr);
+      if (!linesByCat[cat]) linesByCat[cat]=new Set();
+      if (sr.LineCode) linesByCat[cat].add(sr.LineCode);
+
       if (fgSet.has(sku)){
         fg.push(sr);
         if (sr.LineCode) lineFg.add(sr.LineCode);
-      }else{
+      }else if (gbSet.has(sku)){
         gb.push(sr);
         if (sr.LineCode) lineGb.add(sr.LineCode);
+      }else{
+        // for FR/LT/RT etc, still track in fg/gb? no, keep in byCat only
+        // but for backward compat, if not FG/GB, don't add to fg/gb
       }
     }
-    return {fg, gb, lineFg, lineGb};
+    return {fg, gb, lineFg, lineGb, byCat, linesByCat};
   }
 
   function parseBalance(aoa, itemToCat, itemToStyle){
-    if (!aoa || aoa.length===0) return {fg:[], gb:[]};
+    if (!aoa || aoa.length===0) return {fg:[], gb:[], byCat:{}};
     let headers=(aoa[0]||[]).map(h=> h==null?'':String(h).trim());
     let dateIdx=getColIndex(headers,'PLAN_DATE');
     let shiftIdx=getColIndex(headers,'SHIFT_NAME');
     let itemIdx=getColIndex(headers,'ITEM_CODE');
     let qtyIdx=getColIndex(headers,'BALANCE_QTY');
     let fg=[], gb=[];
+    let byCat={};
     let fgSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='成品'));
     let gbSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='GB'));
+    let allItemsSet=new Set(Object.keys(itemToCat));
     for(let r=1;r<aoa.length;r++){
       let row=aoa[r]; if(!row) continue;
       if (row.length<=Math.max(dateIdx,shiftIdx,itemIdx,qtyIdx)) continue;
       let itemRaw=row[itemIdx]; if(!itemRaw) continue;
       let item=String(itemRaw).trim();
-      if (!fgSet.has(item) && !gbSet.has(item)) continue;
+      let cat = normalizeCat(itemToCat[item]||'RAW');
+      if (!allItemsSet.has(item)){
+        cat='RAW';
+      }
       let qty=0;
       try{ qty=parseFloat(row[qtyIdx])||0; }catch(e){ qty=0; }
       let pd=toDatetime(row[dateIdx]);
@@ -173,9 +219,11 @@
         BalanceQty: qty,
         Style: itemToStyle[item]||''
       };
-      if (fgSet.has(item)) fg.push(br); else gb.push(br);
+      if (!byCat[cat]) byCat[cat]=[];
+      byCat[cat].push(br);
+      if (fgSet.has(item)) fg.push(br); else if (gbSet.has(item)) gb.push(br);
     }
-    return {fg, gb};
+    return {fg, gb, byCat};
   }
 
   function pad(n){ return n<10?'0'+n:''+n; }
@@ -455,29 +503,83 @@
     return buildSched(sched, dim, cols, plan, cum, colDim);
   }
 
-  function getMeta(cache, group, colDim){
-    let isFg = (group==='成品' || group==='FG');
+  function normalizeGroup(g){
+    if (!g) return '成品';
+    let s=String(g).trim();
+    let up=s.toUpperCase();
+    if (s==='成品' || up==='FG' || up==='FG (SKU)' || up==='SKU') return '成品';
+    if (up==='GB') return 'GB';
+    if (up==='FR') return 'FR';
+    if (up==='LT') return 'LT';
+    if (up==='RT') return 'RT';
+    if (up==='RAW' || up==='BLANK' || up==='原材料' || s==='') return 'RAW';
+    return s;
+  }
+
+  function getSchedBalForGroup(cache, group){
+    let norm = normalizeGroup(group);
+    if (cache.schedByCat && cache.schedByCat[norm]){
+      return [cache.schedByCat[norm]||[], cache.balByCat[norm]||[], norm];
+    }
+    // try case-insensitive
+    if (cache.cats){
+      for(let cat of cache.cats){
+        if (cat.toUpperCase()===norm.toUpperCase()){
+          return [cache.schedByCat[cat]||[], cache.balByCat[cat]||[], cat];
+        }
+      }
+    }
+    // fallback FG/GB
+    let isFg = (norm==='成品');
     let sched = isFg ? cache.schedFg : cache.schedGb;
     let bal = isFg ? cache.balFg : cache.balGb;
+    if (!sched && cache.schedByCat){
+      // try find by includes
+      sched = cache.schedByCat[norm]||cache.schedByCat['成品']||[];
+      bal = cache.balByCat[norm]||cache.balByCat['成品']||[];
+    }
+    return [sched||[], bal||[], norm];
+  }
+
+  function getMeta(cache, group, colDim){
+    let [sched, bal, norm] = getSchedBalForGroup(cache, group);
     let cols = getColDefs(sched, bal, colDim);
+    let isFg = (norm==='成品');
+    // build extended
+    let allMeta={};
+    if (cache.cats){
+      cache.cats.forEach(cat=>{
+        allMeta[cat]={
+          items: (cache.itemsByCat||{})[cat]||[],
+          lines: (cache.linesByCat||{})[cat]||[],
+          styles: (cache.stylesByCat||{})[cat]||[]
+        };
+      });
+    }
     return {
       date_shift_pairs: cols.map(c=>c.Label),
-      line_codes: isFg ? cache.lineFg : cache.lineGb,
-      items: isFg ? cache.fgItems : cache.gbItems,
-      styles: isFg ? cache.styleFg : cache.styleGb,
+      line_codes: (cache.linesByCat && cache.linesByCat[norm]) ? cache.linesByCat[norm] : (isFg ? cache.lineFg : cache.lineGb),
+      items: (cache.itemsByCat && cache.itemsByCat[norm]) ? cache.itemsByCat[norm] : (isFg ? cache.fgItems : cache.gbItems),
+      styles: (cache.stylesByCat && cache.stylesByCat[norm]) ? cache.stylesByCat[norm] : (isFg ? cache.styleFg : cache.styleGb),
       lines_fg: cache.lineFg,
       lines_gb: cache.lineGb,
       items_fg: cache.fgItems,
       items_gb: cache.gbItems,
       styles_fg: cache.styleFg,
-      styles_gb: cache.styleGb
+      styles_gb: cache.styleGb,
+      cats: cache.cats||[],
+      items_by_cat: cache.itemsByCat||{},
+      lines_by_cat: cache.linesByCat||{},
+      styles_by_cat: cache.stylesByCat||{},
+      current_group: norm,
+      all_meta: allMeta
     };
   }
 
   function buildReportsForGroup(cache, dim, colDim, group, lineCodeFilter, itemNoFilter, styleFilter){
-    let isFg = (group==='成品' || group==='FG');
-    let sched = (isFg ? cache.schedFg : cache.schedGb).slice();
-    let bal = (isFg ? cache.balFg : cache.balGb).slice();
+    let [schedRaw, balRaw, norm] = getSchedBalForGroup(cache, group);
+    let sched = (schedRaw||[]).slice();
+    let bal = (balRaw||[]).slice();
     if (lineCodeFilter){
       sched=sched.filter(s=> s.LineCode===lineCodeFilter);
     }
@@ -493,6 +595,7 @@
     if (!colDefs || colDefs.length===0) return [{}, []];
     let result={};
     for(let rtype of REPORTS){
+      // RAW only needs BOH, but still compute; frontend will handle
       let [colH, rows] = buildOneReport(sched, bal, rtype, dim, colDefs, colDim);
       result[rtype]={columns:colH, rows:rows};
     }
@@ -501,7 +604,6 @@
   }
 
   function loadFromWorkbooks(masterWb, schedWb, balWb){
-    // masterWb, schedWb, balWb are XLSX WorkBook objects
     let masterSheet = masterWb.Sheets[masterWb.SheetNames[0]];
     let masterAoa = sheetToAOA(masterSheet);
     let masterParsed = parseMaster(masterAoa);
@@ -513,6 +615,33 @@
     let balSheet = balWb.Sheets[balWb.SheetNames[0]];
     let balAoa = sheetToAOA(balSheet);
     let balParsed = parseBalance(balAoa, masterParsed.itemToCat, masterParsed.itemToStyle);
+
+    // build extended structures
+    let itemsByCat = masterParsed.itemsByCat || {};
+    let stylesByCat = masterParsed.stylesByCat || {};
+    let schedByCat = schedParsed.byCat || {};
+    let linesByCat = {};
+    Object.keys(schedParsed.linesByCat||{}).forEach(cat=>{
+      linesByCat[cat]=Array.from(schedParsed.linesByCat[cat]).sort();
+    });
+    let balByCat = balParsed.byCat || {};
+    let cats = Object.keys(itemsByCat).sort();
+    // ensure FG alias 成品
+    if (masterParsed.fgItems && !itemsByCat['成品']){
+      itemsByCat['成品']=masterParsed.fgItems;
+    }
+    if (!cats.includes('成品') && masterParsed.fgItems && masterParsed.fgItems.length>0){
+      cats.push('成品');
+    }
+    // ensure RAW exists
+    if (!itemsByCat['RAW']){
+      itemsByCat['RAW']=[];
+      stylesByCat['RAW']=[];
+      linesByCat['RAW']=[];
+      schedByCat['RAW']=[];
+      balByCat['RAW']=[];
+      if (!cats.includes('RAW')) cats.push('RAW');
+    }
 
     let cache = {
       itemToCat: masterParsed.itemToCat,
@@ -526,7 +655,13 @@
       lineFg: Array.from(schedParsed.lineFg).sort(),
       lineGb: Array.from(schedParsed.lineGb).sort(),
       styleFg: masterParsed.styleFg,
-      styleGb: masterParsed.styleGb
+      styleGb: masterParsed.styleGb,
+      itemsByCat: itemsByCat,
+      stylesByCat: stylesByCat,
+      schedByCat: schedByCat,
+      balByCat: balByCat,
+      linesByCat: linesByCat,
+      cats: cats.sort()
     };
     return cache;
   }

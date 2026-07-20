@@ -45,6 +45,13 @@ class DataCache:
     line_gb: List[str]
     style_fg: List[str]
     style_gb: List[str]
+    # extended categories
+    items_by_cat: dict = None
+    sched_by_cat: dict = None
+    bal_by_cat: dict = None
+    lines_by_cat: dict = None
+    styles_by_cat: dict = None
+    cats: List[str] = None
 
 
 def _to_datetime(v) -> Optional[datetime]:
@@ -417,19 +424,34 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     fg_items, gb_items = [], []
     style_fg_set, style_gb_set = set(), set()
 
+    # generic per-category containers
+    from collections import defaultdict
+    items_by_cat = defaultdict(list)
+    styles_by_cat = defaultdict(set)
+    all_items_set = set()
+
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or item_no_idx >= len(row) or prod_cat_idx >= len(row):
             continue
-        item, cat = row[item_no_idx], row[prod_cat_idx]
-        if not item or not cat:
+        item_raw, cat_raw = row[item_no_idx], row[prod_cat_idx]
+        if not item_raw:
             continue
-        item = str(item).strip()
-        cat = str(cat).strip()
-        if not item or not cat:
+        item = str(item_raw).strip()
+        if not item:
             continue
+        # cat may be blank -> RAW
+        cat = str(cat_raw).strip() if cat_raw is not None and str(cat_raw).strip() != "" else "RAW"
+        # keep original cat for item_to_cat (empty string for RAW if original blank, to preserve mapping)
+        orig_cat = str(cat_raw).strip() if cat_raw is not None else ""
+        item_to_cat[item] = orig_cat if orig_cat != "" else "RAW"
         style = str(row[style_idx]).strip() if style_idx >= 0 and style_idx < len(row) and row[style_idx] is not None else ""
-        item_to_cat[item] = cat
         item_to_style[item] = style
+
+        items_by_cat[cat].append(item)
+        if style:
+            styles_by_cat[cat].add(style)
+        all_items_set.add(item)
+
         if cat == "成品":
             fg_items.append(item)
             if style:
@@ -441,6 +463,10 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     wb.close()
 
     fg_set, gb_set = set(fg_items), set(gb_items)
+    # for generic filtering, include all known items
+    sched_by_cat = defaultdict(list)
+    bal_by_cat = defaultdict(list)
+    lines_by_cat = defaultdict(set)
 
     sched_path = _find_file(data_dir, "排产结果表.xlsx", ["排产结果表", "排产", "schedule"])
     if not sched_path or not os.path.exists(sched_path):
@@ -466,7 +492,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         if not sku_raw:
             continue
         sku = str(sku_raw).strip()
-        if sku not in fg_set and sku not in gb_set:
+        if sku not in all_items_set:
             continue
         try:
             val = float(row[plan_val_idx]) if row[plan_val_idx] not in (None, "") else 0.0
@@ -487,14 +513,28 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
             PlanValue=val,
             Style=item_to_style.get(sku, ""),
         )
+        # legacy FG/GB
         if sku in fg_set:
             sched_fg.append(sr)
             if sr.LineCode:
                 line_fg_set.add(sr.LineCode)
-        else:
+        elif sku in gb_set:
             sched_gb.append(sr)
             if sr.LineCode:
                 line_gb_set.add(sr.LineCode)
+
+        # generic
+        cat = item_to_cat.get(sku, "RAW")
+        if cat == "":
+            cat = "RAW"
+        # normalize FG alias
+        if cat == "成品":
+            cat_key = "成品"
+        else:
+            cat_key = cat
+        sched_by_cat[cat_key].append(sr)
+        if sr.LineCode:
+            lines_by_cat[cat_key].add(sr.LineCode)
     wb2.close()
 
     bal_path = _find_file(data_dir, "结存表.xlsx", ["结存表", "结存", "balance"])
@@ -517,7 +557,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         if not item_raw:
             continue
         item_code = str(item_raw).strip()
-        if item_code not in fg_set and item_code not in gb_set:
+        if item_code not in all_items_set:
             continue
         try:
             qty = float(row[bal_qty_idx]) if row[bal_qty_idx] not in (None, "") else 0.0
@@ -536,8 +576,49 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
             BalanceQty=qty,
             Style=item_to_style.get(item_code, ""),
         )
-        (bal_fg if item_code in fg_set else bal_gb).append(br)
+        if item_code in fg_set:
+            bal_fg.append(br)
+        elif item_code in gb_set:
+            bal_gb.append(br)
+
+        # generic
+        cat = item_to_cat.get(item_code, "RAW")
+        if cat == "":
+            cat = "RAW"
+        if cat == "成品":
+            cat_key = "成品"
+        else:
+            cat_key = cat
+        bal_by_cat[cat_key].append(br)
     wb3.close()
+
+    # finalize generic dicts
+    # ensure all cats have entries
+    for cat in list(items_by_cat.keys()):
+        items_by_cat[cat] = sorted(set(items_by_cat[cat]))
+        styles_by_cat[cat] = sorted(styles_by_cat.get(cat, set()))
+        if cat not in lines_by_cat:
+            lines_by_cat[cat] = set()
+        if cat not in sched_by_cat:
+            sched_by_cat[cat] = []
+        if cat not in bal_by_cat:
+            bal_by_cat[cat] = []
+
+    # also ensure RAW
+    if "RAW" not in items_by_cat:
+        items_by_cat["RAW"] = []
+        styles_by_cat["RAW"] = []
+        lines_by_cat["RAW"] = set()
+        sched_by_cat["RAW"] = []
+        bal_by_cat["RAW"] = []
+
+    # convert sets to sorted lists for lines
+    lines_by_cat_sorted = {k: sorted(v) for k, v in lines_by_cat.items()}
+    # for cat keys, unify 成品 alias
+    if "成品" not in items_by_cat and fg_items:
+        items_by_cat["成品"] = sorted(set(fg_items))
+    if "GB" not in items_by_cat and gb_items:
+        items_by_cat["GB"] = sorted(set(gb_items))
 
     return DataCache(
         item_to_cat=item_to_cat,
@@ -552,6 +633,12 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         line_gb=sorted(line_gb_set),
         style_fg=sorted(style_fg_set),
         style_gb=sorted(style_gb_set),
+        items_by_cat=dict(items_by_cat),
+        sched_by_cat=dict(sched_by_cat),
+        bal_by_cat=dict(bal_by_cat),
+        lines_by_cat=lines_by_cat_sorted,
+        styles_by_cat={k: sorted(v) for k, v in styles_by_cat.items()},
+        cats=sorted(items_by_cat.keys()),
     )
 
 
@@ -581,10 +668,50 @@ def reload_cache(data_dir: str = None) -> DataCache:
     return _global_cache
 
 
+def _normalize_group(group: str) -> str:
+    if not group:
+        return "成品"
+    g = str(group).strip()
+    upper = g.upper()
+    if g in ("成品", "FG", "FG (SKU)", "SKU"):
+        return "成品"
+    if upper == "GB":
+        return "GB"
+    if upper == "FR":
+        return "FR"
+    if upper == "LT":
+        return "LT"
+    if upper == "RT":
+        return "RT"
+    if upper in ("RAW", "BLANK", "原材料", ""):
+        return "RAW"
+    # fallback: if exactly matches a cat in cache, keep
+    return g
+
+
+def _get_sched_bal_for_group(cache: DataCache, group: str):
+    norm = _normalize_group(group)
+    # generic dict path
+    if cache.sched_by_cat and norm in cache.sched_by_cat:
+        sched = list(cache.sched_by_cat.get(norm, []))
+        bal = list(cache.bal_by_cat.get(norm, []))
+        return sched, bal, norm
+    # also try original FG/GB
+    if norm == "成品":
+        return list(cache.sched_fg), list(cache.bal_fg), norm
+    if norm == "GB":
+        return list(cache.sched_gb), list(cache.bal_gb), norm
+    # fallback: try case-insensitive search in cats
+    if cache.cats:
+        for cat in cache.cats:
+            if cat.upper() == norm.upper():
+                return list(cache.sched_by_cat.get(cat, [])), list(cache.bal_by_cat.get(cat, [])), cat
+    # default to FG
+    return list(cache.sched_fg), list(cache.bal_fg), "成品"
+
+
 def build_reports_for_group(cache: DataCache, dim: str, col_dim: str, group: str, line_code_filter: str = "", item_no_filter: str = "", style_filter: str = ""):
-    is_fg = group in ("成品", "FG")
-    sched = list(cache.sched_fg if is_fg else cache.sched_gb)
-    bal = list(cache.bal_fg if is_fg else cache.bal_gb)
+    sched, bal, _norm = _get_sched_bal_for_group(cache, group)
 
     if line_code_filter:
         sched = [s for s in sched if s.LineCode == line_code_filter]
@@ -600,7 +727,12 @@ def build_reports_for_group(cache: DataCache, dim: str, col_dim: str, group: str
         return {}, []
 
     result = {}
-    for rtype in ("daily_input", "daily_output", "daily_checkin", "daily_checkout", "cum_input", "cum_output", "cum_checkin", "cum_checkout", "balance"):
+    # For RAW, only BOH is meaningful, but still build all; frontend can filter
+    report_types = ("daily_input", "daily_output", "daily_checkin", "daily_checkout", "cum_input", "cum_output", "cum_checkin", "cum_checkout", "balance")
+    if _norm == "RAW":
+        # only balance needed, but we still compute balance; others will be empty if no sched
+        pass
+    for rtype in report_types:
         col_h, rows = build_one_report(sched, bal, rtype, dim, col_defs, col_dim)
         result[rtype] = {"columns": col_h, "rows": rows}
     result["pair_count"] = len(col_defs)
@@ -608,19 +740,38 @@ def build_reports_for_group(cache: DataCache, dim: str, col_dim: str, group: str
 
 
 def get_meta(cache: DataCache, group: str, col_dim: str):
-    is_fg = group in ("成品", "FG")
-    sched = cache.sched_fg if is_fg else cache.sched_gb
-    bal = cache.bal_fg if is_fg else cache.bal_gb
+    sched, bal, norm = _get_sched_bal_for_group(cache, group)
     cols = get_col_defs(sched, bal, col_dim)
+
+    # build generic meta for all cats
+    all_meta = {}
+    if cache.cats:
+        for cat in cache.cats:
+            s = cache.sched_by_cat.get(cat, [])
+            b = cache.bal_by_cat.get(cat, [])
+            # quick col defs not needed for meta lists, just return stored lists
+            all_meta[cat] = {
+                "items": cache.items_by_cat.get(cat, []),
+                "lines": cache.lines_by_cat.get(cat, []),
+                "styles": cache.styles_by_cat.get(cat, []),
+            }
+
     return {
         "date_shift_pairs": [c["Label"] for c in cols],
-        "line_codes": cache.line_fg if is_fg else cache.line_gb,
-        "items": cache.fg_items if is_fg else cache.gb_items,
-        "styles": cache.style_fg if is_fg else cache.style_gb,
+        "line_codes": cache.lines_by_cat.get(norm, []) if cache.lines_by_cat else (cache.line_fg if norm == "成品" else cache.line_gb),
+        "items": cache.items_by_cat.get(norm, []) if cache.items_by_cat else (cache.fg_items if norm == "成品" else cache.gb_items),
+        "styles": cache.styles_by_cat.get(norm, []) if cache.styles_by_cat else (cache.style_fg if norm == "成品" else cache.style_gb),
         "lines_fg": cache.line_fg,
         "lines_gb": cache.line_gb,
         "items_fg": cache.fg_items,
         "items_gb": cache.gb_items,
         "styles_fg": cache.style_fg,
         "styles_gb": cache.style_gb,
+        # extended
+        "cats": cache.cats or [],
+        "items_by_cat": cache.items_by_cat or {},
+        "lines_by_cat": cache.lines_by_cat or {},
+        "styles_by_cat": cache.styles_by_cat or {},
+        "current_group": norm,
+        "all_meta": all_meta,
     }
