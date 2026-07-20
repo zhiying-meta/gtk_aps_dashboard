@@ -41,88 +41,169 @@ function v2vInit() {
 }
 
 function setupV2VUpload() {
+  console.log('setupV2VUpload called');
   const inputA = document.getElementById('v2v-files-a');
   const inputB = document.getElementById('v2v-files-b');
   const statusEl = document.getElementById('v2v-status');
 
-  if (!inputA || !inputB) return;
-
-  function handleFiles(input, version) {
-    const files = input.files;
-    if (!files || files.length === 0) return;
-    
-    const card = document.getElementById(`v2v-card-${version.toLowerCase()}`);
-    const listEl = document.getElementById(`v2v-list-${version.toLowerCase()}`);
-    const badge = document.getElementById(`v2v-badge-${version.toLowerCase()}`);
-    const nameEl = document.getElementById(`v2v-name-${version.toLowerCase()}`);
-
-    // Extract folder name from first file
-    let folderName = 'Version ' + version;
-    if (files[0].webkitRelativePath) {
-      folderName = files[0].webkitRelativePath.split('/')[0];
-    }
-    if (nameEl) nameEl.textContent = folderName;
-
-    // Identify tables
-    let identified = {};
-    let fileListHtml = '';
-    for (let i=0; i<files.length; i++) {
-      const f = files[i];
-      const fname = f.name;
-      if (!fname.endsWith('.xlsx') || fname.startsWith('~$')) continue;
-      const lower = fname.toLowerCase();
-      let table = 'unknown';
-      if (lower.includes('bom')) table = 'bom';
-      else if (lower.includes('fcst') && lower.includes('主表')) table = 'fcst';
-      else if (lower.includes('fcst') && lower.includes('明细')) table = 'fcst_detail';
-      else if (lower.includes('实际值') || lower.includes('actual')) table = 'actual_io';
-      else if (lower.includes('supply') || lower.includes('供应')) table = 'supply';
-      else if (lower.includes('切换矩阵')) table = 'switch';
-      else if (lower.includes('料号快照')) table = 'item';
-      else if (lower.includes('线体日历')) table = 'calendar';
-      else if (lower.includes('线体快照')) table = 'line';
-      else if (lower.includes('计划设置')) table = 'plan_config';
-      else if (lower.includes('排产结果')) table = 'plan_output';
-      else if (lower.includes('结存')) table = 'balance';
-
-      if (table !== 'unknown') identified[table] = fname;
-      
-      const sizeKB = (f.size/1024).toFixed(0);
-      fileListHtml += `<div class="v2v-file-item ${table!=='unknown'?'ok':''}"><span>${table!=='unknown'?'✓':''} ${fname} -> ${table}</span><span class="file-size">${sizeKB}KB</span></div>`;
-    }
-
-    if (listEl) listEl.innerHTML = fileListHtml;
-    if (badge) {
-      badge.textContent = `${Object.keys(identified).length} tables`;
-      badge.className = 'v2v-version-badge success';
-    }
-    if (card) card.classList.add('has-files');
-
-    // Store
-    if (version === 'A') {
-      v2vState.versionA = {name: folderName, files: files, identified};
-    } else {
-      v2vState.versionB = {name: folderName, files: files, identified};
-    }
-
-    updateCompareButton();
+  if (!inputA || !inputB) {
+    console.error('File inputs not found!', inputA, inputB);
+    return;
   }
 
-  inputA.addEventListener('change', () => handleFiles(inputA, 'A'));
-  inputB.addEventListener('change', () => handleFiles(inputB, 'B'));
+  function handleFiles(input, version) {
+    console.log(`handleFiles called for ${version}, files:`, input.files ? input.files.length : 'null');
+    try {
+      const files = input.files;
+      if (!files || files.length === 0) {
+        console.warn(`No files selected for ${version}`);
+        const statusEl = document.getElementById('v2v-status');
+        if (statusEl) statusEl.innerHTML = `<div class="v2v-status warn">⚠️ Version ${version}: No files detected. Please select a folder containing xlsx files.</div>`;
+        return;
+      }
+      
+      const card = document.getElementById(`v2v-card-${version.toLowerCase()}`);
+      const listEl = document.getElementById(`v2v-list-${version.toLowerCase()}`);
+      const badge = document.getElementById(`v2v-badge-${version.toLowerCase()}`);
+      const nameEl = document.getElementById(`v2v-name-${version.toLowerCase()}`);
 
-  // Drag & drop
+      // Extract folder name from first file
+      let folderName = 'Version ' + version;
+      if (files[0].webkitRelativePath) {
+        folderName = files[0].webkitRelativePath.split('/')[0];
+      } else if (files[0].name) {
+        // Fallback: use file name without extension or try to get folder
+        folderName = 'Folder-' + version + ` (${files.length} files)`;
+      }
+      console.log(`Folder name for ${version}:`, folderName);
+      if (nameEl) nameEl.textContent = `📁 ${folderName} - 点击可重新选择`;
+
+      // Identify tables
+      let identified = {};
+      let fileListHtml = '';
+      let xlsxCount = 0;
+      for (let i=0; i<files.length; i++) {
+        const f = files[i];
+        const fname = f.name;
+        if (!fname.toLowerCase().endsWith('.xlsx') || fname.startsWith('~$')) continue;
+        xlsxCount++;
+        const lower = fname.toLowerCase();
+        let table = 'unknown';
+        if (lower.includes('bom')) table = 'bom';
+        else if (lower.includes('fcst') && lower.includes('主表')) table = 'fcst';
+        else if (lower.includes('fcst') && lower.includes('明细')) table = 'fcst_detail';
+        else if (lower.includes('实际值') || lower.includes('actual')) table = 'actual_io';
+        else if (lower.includes('supply') || lower.includes('供应')) table = 'supply';
+        else if (lower.includes('切换矩阵')) table = 'switch';
+        else if (lower.includes('料号快照')) table = 'item';
+        else if (lower.includes('线体日历')) table = 'calendar';
+        else if (lower.includes('线体快照')) table = 'line';
+        else if (lower.includes('计划设置')) table = 'plan_config';
+        else if (lower.includes('排产结果')) table = 'plan_output';
+        else if (lower.includes('结存')) table = 'balance';
+
+        if (table !== 'unknown') identified[table] = fname;
+        
+        const sizeKB = (f.size/1024).toFixed(0);
+        fileListHtml += `<div class="v2v-file-item ${table!=='unknown'?'ok':''}"><span>${table!=='unknown'?'✓':''} ${fname} -> ${table}</span><span class="file-size">${sizeKB}KB</span></div>`;
+      }
+
+      console.log(`Version ${version} identified:`, identified, `xlsxCount: ${xlsxCount}`);
+
+      if (xlsxCount === 0) {
+        fileListHtml = `<div style="color:#dc2626;padding:10px">❌ No xlsx files found in selected folder. Please select a folder containing the 12 xlsx files.<br>Found ${files.length} files but 0 xlsx.<br>Check: ${Array.from(files).slice(0,5).map(f=>f.name).join(', ')}</div>`;
+        if (listEl) listEl.innerHTML = fileListHtml;
+        if (badge) {
+          badge.textContent = `0 xlsx - Error`;
+          badge.className = 'v2v-version-badge error';
+        }
+        return;
+      }
+
+      if (listEl) listEl.innerHTML = fileListHtml;
+      if (badge) {
+        badge.textContent = `${Object.keys(identified).length}/12 tables, ${xlsxCount} xlsx`;
+        badge.className = 'v2v-version-badge success';
+      }
+      if (card) {
+        card.classList.add('has-files');
+        card.classList.remove('error');
+      }
+
+      // Store
+      if (version === 'A') {
+        v2vState.versionA = {name: folderName, files: files, identified};
+      } else {
+        v2vState.versionB = {name: folderName, files: files, identified};
+      }
+
+      console.log(`Stored version ${version}:`, folderName, 'identified count', Object.keys(identified).length);
+      updateCompareButton();
+
+      const statusEl = document.getElementById('v2v-status');
+      if (statusEl) {
+        statusEl.innerHTML = `<div class="v2v-status info">✅ Version ${version} (${folderName}) loaded: ${xlsxCount} xlsx, ${Object.keys(identified).length} recognized. ${v2vState.versionA && v2vState.versionB ? 'Ready to compare!' : '请再选择另一个版本'}</div>`;
+      }
+
+      // Reset input value to allow re-selecting same folder
+      // Don't reset immediately, user may need files for upload
+    } catch(err) {
+      console.error(`Error in handleFiles ${version}:`, err);
+      const statusEl = document.getElementById('v2v-status');
+      if (statusEl) statusEl.innerHTML = `<div class="v2v-status error">❌ Error loading Version ${version}: ${err.message}</div>`;
+    }
+  }
+
+  // Fix: remove old listeners and add new with capture
+  inputA.addEventListener('change', (e) => {
+    console.log('inputA change event fired', e.target.files.length);
+    handleFiles(inputA, 'A');
+  });
+  inputB.addEventListener('change', (e) => {
+    console.log('inputB change event fired', e.target.files.length);
+    handleFiles(inputB, 'B');
+  });
+
+  // Also listen to input event for some browsers
+  inputA.addEventListener('input', () => {
+    if (inputA.files && inputA.files.length > 0) handleFiles(inputA, 'A');
+  });
+  inputB.addEventListener('input', () => {
+    if (inputB.files && inputB.files.length > 0) handleFiles(inputB, 'B');
+  });
+
+  // Make cards clickable to trigger file input (already button does, but card click also)
   ['v2v-card-a', 'v2v-card-b'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener('dragover', (e)=>{ e.preventDefault(); el.style.borderColor='#0f172a'; });
-    el.addEventListener('dragleave', ()=>{ el.style.borderColor=''; });
+    const version = id.includes('-a') ? 'A' : 'B';
+    const input = version === 'A' ? inputA : inputB;
+    el.addEventListener('click', (e) => {
+      // Don't trigger if clicking inside file list or button
+      if (e.target.closest('button') || e.target.closest('input')) return;
+      console.log(`Card ${version} clicked, triggering file input`);
+      input.click();
+    });
+    el.addEventListener('dragover', (e)=>{ e.preventDefault(); el.style.borderColor='#0f172a'; el.style.background='#f0fdf4'; });
+    el.addEventListener('dragleave', ()=>{ el.style.borderColor=''; el.style.background=''; });
     el.addEventListener('drop', (e)=>{
       e.preventDefault();
       el.style.borderColor='';
-      // Note: folder drop needs extra handling, for MVP use file input
+      el.style.background='';
+      console.log(`Drop on ${version}`, e.dataTransfer.files.length);
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        // For drop, we need to handle folder drop? Browser may not support folder drop with files
+        // Create a DataTransfer to assign? For simplicity, show message
+        const statusEl = document.getElementById('v2v-status');
+        if (statusEl) {
+          statusEl.innerHTML = `<div class="v2v-status warn">⚠️ Drag & drop folder may not work in all browsers. Please use the 📁 button to select folder.</div>`;
+        }
+      }
     });
   });
+
+  console.log('setupV2VUpload completed');
 }
 
 function updateCompareButton() {

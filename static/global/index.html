@@ -240,26 +240,28 @@
         <div style="text-align:center;margin:12px 0;color:#94a3b8;font-size:12px">— OR —</div>
 
         <div class="v2v-upload-grid">
-          <div class="v2v-version-card" id="v2v-card-a">
+          <div class="v2v-version-card" id="v2v-card-a" style="cursor:pointer">
             <div class="v2v-version-header">
-              <span class="v2v-version-label">Version A</span>
+              <span class="v2v-version-label">Version A (文件夹上传)</span>
               <span class="v2v-version-badge" id="v2v-badge-a">No files</span>
             </div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-a">选择文件夹，文件夹名将作为版本名</div>
-            <input type="file" id="v2v-files-a" class="v2v-file-input" webkitdirectory directory multiple accept=".xlsx">
+            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-a">点击选择文件夹，文件夹名将作为版本名（推荐用上方Server模式，更稳定）</div>
+            <input type="file" id="v2v-files-a" class="v2v-file-input" webkitdirectory directory multiple style="display:none">
+            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-a').click()" style="margin-bottom:8px">📁 选择文件夹 A</button>
             <div class="v2v-file-list" id="v2v-list-a" style="margin-top:8px">
-              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected</div>
+              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>需包含12个xlsx</small></div>
             </div>
           </div>
-          <div class="v2v-version-card" id="v2v-card-b">
+          <div class="v2v-version-card" id="v2v-card-b" style="cursor:pointer">
             <div class="v2v-version-header">
-              <span class="v2v-version-label">Version B</span>
+              <span class="v2v-version-label">Version B (文件夹上传)</span>
               <span class="v2v-version-badge" id="v2v-badge-b">No files</span>
             </div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-b">选择文件夹，文件夹名将作为版本名</div>
-            <input type="file" id="v2v-files-b" class="v2v-file-input" webkitdirectory directory multiple accept=".xlsx">
+            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-b">点击选择文件夹，文件夹名将作为版本名</div>
+            <input type="file" id="v2v-files-b" class="v2v-file-input" webkitdirectory directory multiple style="display:none">
+            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-b').click()" style="margin-bottom:8px">📁 选择文件夹 B</button>
             <div class="v2v-file-list" id="v2v-list-b" style="margin-top:8px">
-              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected</div>
+              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>需包含12个xlsx</small></div>
             </div>
           </div>
         </div>
