@@ -635,6 +635,15 @@ function clearPendingGroup(){ pendingNewGroup.forEach(t=> reportGroups.push([t])
 window.ioClearPendingGroup=clearPendingGroup;
 function jumpToGroup(gIdx){ const el=document.getElementById(`io_group_${gIdx}`); el?.scrollIntoView({behavior:'smooth',block:'start'}); el?.classList.add('jump-highlight'); setTimeout(()=>el?.classList.remove('jump-highlight'),1500); }
 window.ioJumpToGroup=jumpToGroup;
+function removeEmptyGroup(gIdx){
+  try{
+    if (gIdx>=0 && gIdx < reportGroups.length){
+      reportGroups.splice(gIdx,1);
+      renderAllReports();
+    }
+  }catch(e){ console.error('removeEmptyGroup failed', e); }
+}
+window.ioRemoveEmptyGroup=removeEmptyGroup;
 
 function mergeTypesData(types){
   let columns=[]; let colSet=new Set();
@@ -658,7 +667,7 @@ function renderLeftGroupBoxes(){
     const isEmpty=groupTypes.length===0; const isMerged=groupTypes.length>1;
     const border=isEmpty?'#cbd5e1':(isMerged?'#8b5cf6':'#3b82f6'); const bg=isEmpty?'#f8fafc':(isMerged?'#faf5ff':'#fff');
     if(isEmpty){
-      html+=`<div class="group-box empty" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" style="border:2px dashed ${border};background:${bg};border-radius:8px;padding:12px;text-align:center;cursor:copy"><div style="font-size:11px;color:#94a3b8">📭 Empty Box ${gIdx+1}<br>Drop here</div><button class="btn btn-sm btn-outline" style="margin-top:6px" onclick="reportGroups.splice(${gIdx},1); renderAllReports();">✕ Remove</button></div>`;
+      html+=`<div class="group-box empty" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" style="border:2px dashed ${border};background:${bg};border-radius:8px;padding:12px;text-align:center;cursor:copy"><div style="font-size:11px;color:#94a3b8">📭 Empty Box ${gIdx+1}<br>Drop here</div><button class="btn btn-sm btn-outline" style="margin-top:6px" onclick="ioRemoveEmptyGroup(${gIdx})">✕ Remove</button></div>`;
     }else{
       const chips=groupTypes.map(t=>`<span class="report-chip chip-${t}" draggable="true" data-type="${t}" data-group="${gIdx}" ondragstart="ioHandleReportDragStart(event)" ondragend="ioHandleReportDragEnd(event)"><span class="type-dot dot-${t}"></span>${esc(REPORT_NAMES[t])}<span class="remove" onclick="event.stopPropagation(); ioSplitType(${gIdx},'${t}')">×</span></span>`).join('');
       html+=`<div class="group-box ${isMerged?'merged':''}" id="left_group_${gIdx}" data-group-idx="${gIdx}" ondragover="ioHandleGroupDragOver(event)" ondragleave="ioHandleGroupDragLeave(event)" ondrop="ioHandleGroupDrop(event, ${gIdx})" onclick="ioJumpToGroup(${gIdx})" style="border:1px solid ${border};background:${bg};border-radius:8px;padding:8px;cursor:pointer"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:10px;font-weight:700;color:#475569">BOX ${gIdx+1} ${isMerged?`(${groupTypes.length} merged)`:''}</span><span style="font-size:10px;color:#94a3b8">${isMerged?'🔗':''}</span></div><div style="display:flex;flex-wrap:wrap;gap:4px">${chips}</div></div>`;
