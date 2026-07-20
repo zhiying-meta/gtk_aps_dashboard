@@ -299,9 +299,28 @@ def process_uploaded_data(file_map, config):
                         if s > 0: vals[w] = round(s,0)
             else:
                 vals = {}
-                for w in all_weeks:
-                    s = sum(sku_data.get((s,vt,vd),{}).get(w,0) or 0 for s in skus)
-                    if s > 0: vals[w] = round(s,0)
+                if vd == "Packout vs ExF":
+                    # Keep negative diffs: show if any underlying SKU has data for this week
+                    for w in all_weeks:
+                        s = sum(sku_data.get((s,vt,vd),{}).get(w,0) or 0 for s in skus)
+                        # has data if any sku has packout vs exf entry, or packout, or ExF
+                        has_data = False
+                        for sku in skus:
+                            if sku_data.get((sku,vt,vd),{}).get(w) is not None:
+                                has_data = True
+                                break
+                            if sku_data.get((sku,vt,"Packout"),{}).get(w) is not None:
+                                has_data = True
+                                break
+                            if sku_data.get((sku,"ExF",""),{}).get(w) is not None:
+                                has_data = True
+                                break
+                        if has_data:
+                            vals[w] = round(s,0)
+                else:
+                    for w in all_weeks:
+                        s = sum(sku_data.get((s,vt,vd),{}).get(w,0) or 0 for s in skus)
+                        if s > 0: vals[w] = round(s,0)
             cd = "" if vt == "CTB" else cfg["gb_cut"]
             rows.append({**base, "Version-Type": vt, "Version-Detail": vd, "Cut Day": cd, **fill(vals)})
 

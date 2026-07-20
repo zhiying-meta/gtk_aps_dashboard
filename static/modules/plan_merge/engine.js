@@ -499,14 +499,31 @@
             });
           }
         } else {
-          allWeeks.forEach(w=>{
-            let s=0;
-            skus.forEach(sku=>{
-              let sd = skuData[sku+'||'+vt+'||'+vd] || {};
-              s += sd[w]||0;
+          if (vd==='Packout vs ExF'){
+            allWeeks.forEach(w=>{
+              let s=0;
+              let hasData=false;
+              skus.forEach(sku=>{
+                let sdPackVs = skuData[sku+'||'+vt+'||'+vd] || {};
+                let sdPack = skuData[sku+'||'+vt+'||Packout'] || {};
+                let sdExf = skuData[sku+'||ExF||'] || {};
+                if (sdPackVs[w]!=null) hasData=true;
+                if (sdPack[w]!=null) hasData=true;
+                if (sdExf[w]!=null) hasData=true;
+                s += sdPackVs[w]||0;
+              });
+              if (hasData) vals[w]=Math.round(s);
             });
-            if (s>0) vals[w]=Math.round(s);
-          });
+          } else {
+            allWeeks.forEach(w=>{
+              let s=0;
+              skus.forEach(sku=>{
+                let sd = skuData[sku+'||'+vt+'||'+vd] || {};
+                s += sd[w]||0;
+              });
+              if (s>0) vals[w]=Math.round(s);
+            });
+          }
         }
         let cd = (vt==='CTB') ? '' : cfg.gb_cut;
         rows.push(Object.assign({}, base, {'Version-Type':vt,'Version-Detail':vd,'Cut Day':cd}, fill(vals)));

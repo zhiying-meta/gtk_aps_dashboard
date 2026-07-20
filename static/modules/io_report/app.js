@@ -960,7 +960,9 @@ function buildMergedHierarchicalTable(data, dimOrder, gIdx){
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="toggle">${isExpanded?'▼':'▶'}</span> ${esc(node.key)}</td>`;
               }else if(d===depth+1){
                 const filtered=filterNodeByType(node, t);
-                const cnt=filtered ? (function countItems(n){ let c=0; function walk(ns){ ns.forEach(nn=>{ if(nn.items&&nn.items.length>0) walk(nn.items); else c+=1; }); } walk([filtered]); return c; })(filtered) : 0;
+                // FIX: show immediate child groups count, not total leaf rows
+                // For LINE+STYLE: should be 1 (STYLE groups), not 10 (PN leaf rows)
+                const cnt=filtered ? filtered.items.length : 0;
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5;color:#64748b">${cnt} items</td>`;
               }else if(effDims[d]==='_REPORT_TYPE'){
                 out+=`<td class="frozen" style="left:${left}px;min-width:${w}px;z-index:5"><span class="type-badge type-${t}">${esc(REPORT_NAMES[t]||t)}</span></td>`;
