@@ -733,11 +733,10 @@ function renderV2VTableDetail(data, tableName) {
   // Header with actions + special note for FCST
   let extraNote = '';
   if (tableName === 'fcst' && data.summary && data.summary.note) {
-    extraNote = `<div style="background:#fffbeb;border:1px solid #fde68a;padding:8px;border-radius:4px;margin-bottom:8px;font-size:12px;color:#92400e">💡 ${esc(data.summary.note)}<br>Grouped view shows SKU×Week aggregated (1 detail edit may appear as 2 grouped modifies if 2 SKUs share same MAIN_ID). Raw detail rows changed: ${data.summary.raw_total_a !== undefined ? (data.records.length + ' grouped, raw diff count in backend is ' + (data.summary.modified_raw||'?')) : ''}</div>`;
+    extraNote = `<div style="background:#fffbeb;border:1px solid #fde68a;padding:8px;border-radius:4px;margin-bottom:8px;font-size:12px;color:#92400e">💡 ${esc(data.summary.note)}<br>Grouped view shows SKU×Week aggregated (1 detail edit may appear as 2 grouped modifies if 2 SKUs share same MAIN_ID).</div>`;
   }
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:12px;color:#64748b">Showing ${records.length} of ${pagination.total||records.length} records | Page ${pagination.page||1} | Table: ${def.name} | <span style="cursor:pointer;color:#3b82f6" onclick="document.getElementById('v2v-chart-container').style.display='block'">Click row 📈 for chart, click card for detail</span></div><div><button class="btn btn-sm" onclick="showV2VChart('${tableName}')">📈 Chart</button></div></div>`;
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:12px;color:#64748b">Showing ${records.length} of ${pagination.total||records.length} records | Page ${pagination.page||1} | Table: ${def.name} | Click card for detail, click row action for drill-down</div></div>`;
   html += extraNote;
-  html += `<div id="v2v-chart-container" style="margin:12px 0;display:none;padding:12px;background:white;border:1px solid #e2e8f0;border-radius:6px"><canvas id="v2v-chart" style="max-height:300px"></canvas><div style="margin-top:8px;display:flex;gap:8px"><input type="text" id="v2v-chart-key" placeholder="Enter ${tableName==='supply'?'PN_CODE': tableName==='calendar'?'LINE_CODE': tableName==='actual_io'?'LINE_CODE or leave blank': 'Key for chart'}" style="padding:6px;border:1px solid #cbd5e1;border-radius:4px;flex:1"><button class="btn btn-sm" onclick="loadV2VChart('${tableName}')">Load Chart</button></div></div>`;
   html += '<div class="v2v-table-wrapper"><table class="v2v-table"><thead><tr>';
 
   // Headers per table
@@ -748,23 +747,23 @@ function renderV2VTableDetail(data, tableName) {
   } else if (tableName === 'plan_config') {
     html += '<th>Field</th><th>A</th><th>B</th><th>Change</th>';
   } else if (tableName === 'actual_io') {
-    html += '<th>Change</th><th>Line</th><th>SKU</th><th>Date</th><th>Shift</th><th>Field</th><th>A</th><th>B</th><th>Delta</th><th>Chart</th>';
+    html += '<th>Change</th><th>Line</th><th>SKU</th><th>Date</th><th>Shift</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'supply') {
-    html += '<th>Change</th><th>PN_CODE</th><th>Date/Week</th><th>Field</th><th>A</th><th>B</th><th>Delta</th><th>Chart</th>';
+    html += '<th>Change</th><th>PN_CODE</th><th>Date/Week</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'switch') {
     html += '<th>Change</th><th>Line</th><th>Before PN</th><th>After PN</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'calendar') {
-    html += '<th>Change</th><th>Line</th><th>Type</th><th>Date</th><th>Shift</th><th>Item</th><th>A</th><th>B</th><th>Delta</th><th>Chart</th>';
+    html += '<th>Change</th><th>Line</th><th>Type</th><th>Date</th><th>Shift</th><th>Item</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'item') {
     html += '<th>Change</th><th>Item No</th><th>Field</th><th>A</th><th>B</th>';
   } else if (tableName === 'line') {
     html += '<th>Change</th><th>Line Code</th><th>Field</th><th>A</th><th>B</th>';
   } else if (tableName === 'plan_output') {
-    html += '<th>Time</th><th>Group</th><th>A Total</th><th>B Total</th><th>Diff</th><th>Diff%</th><th>Drill</th><th>Chart</th>';
+    html += '<th>Time</th><th>Group</th><th>A Total</th><th>B Total</th><th>Diff</th><th>Diff%</th><th>Drill</th>';
   } else if (tableName === 'balance') {
-    html += '<th>Time</th><th>Group</th><th>A Balance</th><th>B Balance</th><th>Diff</th><th>Diff%/Neg</th><th>Drill</th><th>Chart</th>';
+    html += '<th>Time</th><th>Group</th><th>A Balance</th><th>B Balance</th><th>Diff</th><th>Diff%/Neg</th><th>Drill</th>';
   } else if (tableName === 'plan_input') {
-    html += '<th>Time</th><th>SKU/PN</th><th>A FCST</th><th>B FCST</th><th>Diff</th><th>Diff%</th><th>Drill</th><th>Chart</th>';
+    html += '<th>Time</th><th>SKU/PN</th><th>A FCST</th><th>B FCST</th><th>Diff</th><th>Diff%</th><th>Drill</th>';
   } else {
     const first = records[0];
     const keys = Object.keys(first).slice(0,8);
@@ -817,7 +816,6 @@ function renderV2VTableDetail(data, tableName) {
       html += `<td>${rec.value_a||''}</td>`;
       html += `<td>${rec.value_b||''}</td>`;
       html += `<td style="${(rec.delta||0)>0?'color:#16a34a':(rec.delta||0)<0?'color:#dc2626':''}">${rec.delta||''}</td>`;
-      html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('supply', {pn_code:'${esc(key.PN_CODE||'')}'})">📈</button></td>`;
     } else if (tableName === 'switch') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
       html += `<td>${esc(key.LINE_CODE||'')}</td>`;
@@ -837,7 +835,6 @@ function renderV2VTableDetail(data, tableName) {
       html += `<td>${rec.value_a||''}</td>`;
       html += `<td>${rec.value_b||''}</td>`;
       html += `<td style="${(rec.delta||0)>0?'color:#16a34a':(rec.delta||0)<0?'color:#dc2626':''}">${rec.delta||''}</td>`;
-      html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('calendar', {line_code:'${esc(key.LINE_CODE||'')}', plan_type:'${esc(key.PLAN_TYPE||'UPH')}'})">📈</button></td>`;
     } else if (tableName === 'item' || tableName === 'line') {
       const keyName = tableName==='item'?'ITEM_NO':'LINE_CODE';
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
@@ -860,7 +857,6 @@ function renderV2VTableDetail(data, tableName) {
         drillBtn = `<button class="v2v-drill-btn" onclick="drillDownOutput('${nextGran}', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">▶ ${nextGran}</button>`;
       }
       html += `<td>${drillBtn}</td>`;
-      html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('plan_output', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">📈</button></td>`;
     } else if (tableName === 'balance') {
       const groupVals = rec._group_values || key;
       html += `<td>${esc(rec._WEEK||rec._DATE||rec.ITEM_CODE||'')}</td>`;
@@ -878,7 +874,6 @@ function renderV2VTableDetail(data, tableName) {
         drillBtn = `<button class="v2v-drill-btn" onclick="drillDownOutput('${nextGran}', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">▶ ${nextGran}</button>`;
       }
       html += `<td>${drillBtn}</td>`;
-      html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('balance', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">📈</button></td>`;
     } else if (tableName === 'plan_input') {
       const groupVals = rec._group_values || key;
       html += `<td>${esc(rec._WEEK||rec._MONTH||rec._DATE||rec.PN_CODE||rec.PN_CODE||'')}</td>`;
@@ -893,7 +888,6 @@ function renderV2VTableDetail(data, tableName) {
         drillBtn = `<button class="v2v-drill-btn" onclick="drillDownOutput('${drill.next_granularity}', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">▶ ${drill.next_granularity}</button>`;
       }
       html += `<td>${drillBtn}</td>`;
-      html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('plan_input', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">📈</button></td>`;
     } else {
       for (const [k,v] of Object.entries(rec).slice(0,8)) {
         html += `<td>${esc(String(v||'').substring(0,100))}</td>`;
@@ -1119,6 +1113,7 @@ async function loadPlanOutputMatrix() {
 
   const skuPrefix = document.getElementById('v2v-po-sku-prefix') ? document.getElementById('v2v-po-sku-prefix').value : 'SK';
   const lineFilter = document.getElementById('v2v-po-line-filter') ? document.getElementById('v2v-po-line-filter').value : '';
+  const exactSku = document.getElementById('v2v-po-exact-sku') ? document.getElementById('v2v-po-exact-sku').value.trim() : '';
   const granularity = document.getElementById('v2v-po-granularity') ? document.getElementById('v2v-po-granularity').value : 'day';
   const cum = document.getElementById('v2v-po-cum') ? document.getElementById('v2v-po-cum').checked : true;
 
@@ -1128,7 +1123,7 @@ async function loadPlanOutputMatrix() {
   }
 
   wrapper.innerHTML = '<div class="v2v-loading"><div class="v2v-spinner"></div>Loading detailed matrix... (may take 10-20s for 20w rows)</div>';
-  if (statusEl) statusEl.textContent = `Loading matrix for SKU prefix ${skuPrefix}, Line ${lineFilter||'All'}, Granularity ${granularity}, Cum ${cum}...`;
+  if (statusEl) statusEl.textContent = `Loading matrix for SKU prefix ${skuPrefix}${exactSku?' exact '+exactSku:''}, Line ${lineFilter||'All'}, Granularity ${granularity}, Cum ${cum}...`;
 
   try {
     const params = new URLSearchParams({
@@ -1138,6 +1133,7 @@ async function loadPlanOutputMatrix() {
       granularity: granularity,
       cum: cum ? 'true' : 'false'
     });
+    if (exactSku) params.append('exact_sku', exactSku);
 
     const resp = await fetch(`/v2v/api/plan_output/matrix?${params}`);
     const data = await resp.json();
@@ -1198,7 +1194,7 @@ async function loadPlanOutputMatrix() {
     // For performance, only show first 100 SKUs initially
     const displaySkus = skuList.slice(0, 100);
     for (const sku of displaySkus) {
-      // Action buttons for drill-down: BOM children (FG -> GB/LT/FR/RT) and Line/Shift breakdown
+      // Action buttons for drill-down: BOM children (FG -> GB/LT/FR/RT) and Line/Shift breakdown - Chart removed per user request
       const skuEsc = esc(sku).replace(/'/g, "\\'");
       html += `<tr><td style="left:0;position:sticky;background:white;z-index:10;font-weight:600;min-width:220px" class="frozen">
         <div style="display:flex;flex-direction:column;gap:2px">
@@ -1206,7 +1202,6 @@ async function loadPlanOutputMatrix() {
           <div style="display:flex;gap:2px;flex-wrap:wrap">
             <button class="v2v-drill-btn" style="font-size:10px;padding:2px 6px" onclick="showBOMChildren('${skuEsc}')" title="Show BOM children: FG -> GB -> FR/LT/RT">🔍 BOM</button>
             <button class="v2v-drill-btn" style="font-size:10px;padding:2px 6px" onclick="showBreakdown('${skuEsc}', '')" title="Breakdown by Line/Shift">📊 Line/Shift</button>
-            <button class="v2v-drill-btn" style="font-size:10px;padding:2px 6px" onclick="handleV2VRowChart('plan_output', {SKU:'${skuEsc}'})">📈 Chart</button>
           </div>
         </div>
       </td>`;
@@ -1292,7 +1287,7 @@ async function showBOMChildren(parentPn) {
       const isAdded = data.added.includes(childPn);
       const isDeleted = data.deleted.includes(childPn);
       const rowClass = isAdded ? 'diff-add' : isDeleted ? 'diff-del' : '';
-      html += `<tr class="${rowClass}"><td>${child.level}</td><td style="font-weight:600">${esc(child.child)}</td><td><span class="v2v-change-badge ${child.type==='GB'?'add':''}">${esc(child.type)}</span></td><td>${child.unit_num||''}</td><td>${child.loss_rate||''}</td><td style="font-size:11px;color:#64748b">${esc(child.parent_chain||child.parent||'')}</td><td><button class="v2v-drill-btn" onclick="handleV2VRowChart('plan_output', {SKU:'${esc(child.child)}'}); document.getElementById('v2v-bom-modal').style.display='none';">📈 View Plan</button> <button class="v2v-drill-btn" onclick="showBOMChildren('${esc(child.child)}')">▶ Children</button></td></tr>`;
+      html += `<tr class="${rowClass}"><td>${child.level}</td><td style="font-weight:600">${esc(child.child)}</td><td><span class="v2v-change-badge ${child.type==='GB'?'add':''}">${esc(child.type)}</span></td><td>${child.unit_num||''}</td><td>${child.loss_rate||''}</td><td style="font-size:11px;color:#64748b">${esc(child.parent_chain||child.parent||'')}</td><td><button class="v2v-drill-btn" onclick="document.getElementById('v2v-bom-modal').style.display='none'; document.getElementById('v2v-po-sku-prefix').value='${child.type==='GB'?'GB':child.type==='LT'?'LT':child.type==='FR'?'FR':child.type==='RT'?'RT':'SK'}'; loadPlanOutputMatrix();">📋 View Plan</button> <button class="v2v-drill-btn" onclick="showBOMChildren('${esc(child.child)}')">▶ Children</button></td></tr>`;
     }
 
     html += '</tbody></table>';

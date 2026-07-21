@@ -416,7 +416,7 @@ def get_chart_data_plan_output(df_a, df_b, group_by=None, filters=None, granular
         return {"error": str(e), "dates": [], "values_a": [], "values_b": []}
 
 
-def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter=None, granularity="day", cum=True, filters=None):
+def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter=None, granularity="day", cum=True, filters=None, exact_sku=None):
     """
     Detailed daily matrix for Plan Output
     - Rows: SKU (filtered by prefix, e.g., SK for FG, GB/LT/FR/RT for intermediate)
@@ -448,22 +448,27 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
         df_a_filt = apply_filters(df_a_norm, filters) if filters else df_a_norm
         df_b_filt = apply_filters(df_b_norm, filters) if filters else df_b_norm
 
-        # Filter by SKU prefix (FG vs intermediate)
-        if sku_prefix and sku_prefix != "ALL":
-            # sku_prefix can be "SK", "GB", "LT", "FR", "RT" or comma separated
-            prefixes = [p.strip() for p in sku_prefix.split(",") if p.strip()]
-            if prefixes:
-                # Keep rows where SKU starts with any prefix
-                def matches_prefix(sku):
-                    if pd.isna(sku):
+        # Exact SKU filter has priority over prefix
+        if exact_sku and exact_sku.strip():
+            exact = exact_sku.strip()
+            df_a_filt = df_a_filt[df_a_filt["SKU"] == exact]
+            df_b_filt = df_b_filt[df_b_filt["SKU"] == exact]
+        else:
+            # Filter by SKU prefix (FG vs intermediate)
+            if sku_prefix and sku_prefix != "ALL":
+                # sku_prefix can be "SK", "GB", "LT", "FR", "RT" or comma separated
+                prefixes = [p.strip() for p in sku_prefix.split(",") if p.strip()]
+                if prefixes:
+                    def matches_prefix(sku):
+                        if pd.isna(sku):
+                            return False
+                        s = str(sku)
+                        for pref in prefixes:
+                            if s.startswith(pref+"-") or s.startswith(pref):
+                                return True
                         return False
-                    s = str(sku)
-                    for pref in prefixes:
-                        if s.startswith(pref+"-") or s.startswith(pref):
-                            return True
-                    return False
-                df_a_filt = df_a_filt[df_a_filt["SKU"].apply(matches_prefix)]
-                df_b_filt = df_b_filt[df_b_filt["SKU"].apply(matches_prefix)]
+                    df_a_filt = df_a_filt[df_a_filt["SKU"].apply(matches_prefix)]
+                    df_b_filt = df_b_filt[df_b_filt["SKU"].apply(matches_prefix)]
 
         # Filter by line
         if line_filter and line_filter != "ALL":

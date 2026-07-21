@@ -569,6 +569,7 @@ def get_plan_output_matrix():
         sku_prefix = request.args.get('sku_prefix', 'SK')  # default FG
         line_filter = request.args.get('line_filter', None)
         shift_filter = request.args.get('shift_filter', None)
+        exact_sku = request.args.get('exact_sku', None)
         granularity = request.args.get('granularity', 'day')
         cum = request.args.get('cum', 'true').lower() in ['true', '1', 'yes']
 
@@ -577,9 +578,7 @@ def get_plan_output_matrix():
         if df_a is None or df_b is None:
             return jsonify({"error": "Missing plan_output"}), 400
 
-        # For matrix, we ignore granularity for now and always return daily with weekly grouping,
-        # but we respect sku_prefix, line_filter, shift_filter
-        matrix = get_daily_matrix(df_a, df_b, sku_prefix=sku_prefix, line_filter=line_filter, shift_filter=shift_filter, granularity=granularity, cum=cum)
+        matrix = get_daily_matrix(df_a, df_b, sku_prefix=sku_prefix, line_filter=line_filter, shift_filter=shift_filter, granularity=granularity, cum=cum, exact_sku=exact_sku)
 
         matrix["job_id"] = job_id
         matrix["table"] = "plan_output"
@@ -588,7 +587,8 @@ def get_plan_output_matrix():
             "line_filter": line_filter,
             "shift_filter": shift_filter,
             "granularity": granularity,
-            "cum": cum
+            "cum": cum,
+            "exact_sku": exact_sku
         }
         return jsonify(matrix)
     except Exception as e:
