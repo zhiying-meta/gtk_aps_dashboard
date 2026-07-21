@@ -91,24 +91,26 @@ TABLE_DEFS = {
     },
     # Output tables
     "plan_output": {
-        "keywords": ["plan_output", "output_result", "production_result"],
+        "keywords": ["plan_output", "output_result", "production_result", "排产结果"],
         "display_name": "Plan Output",
         "category": "output",
-        "key_fields": ["LINE_CODE", "SKU", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM"],
+        "key_fields": ["SKU", "PLAN_DATE"],
         "compare_fields": ["PLAN_VALUE"],
         "icon": "📋",
-        "supports_granularity": True
+        "supports_granularity": True,
+        "fixed_sku_level": True
     },
     "balance": {
-        "keywords": ["balance", "boh", "wip", "onhand", "inventory"],
+        "keywords": ["balance", "boh", "wip", "onhand", "inventory", "结存"],
         "display_name": "BOH",
         "category": "output",
         "key_fields": ["ITEM_CODE", "PLAN_DATE", "SHIFT_NAME"],
         "compare_fields": ["BALANCE_QTY", "SHIFT_OUT_QTY", "PRE_INPUT_QTY"],
         "icon": "📦",
-        "supports_granularity": True
+        "supports_granularity": True,
+        "fixed_sku_level": True
     },
-    # Aggregated Input (virtual, but belongs to Output per user request)
+    # Aggregated Input (virtual, but belongs to Output per user request) - Fixed SKU level
     "plan_input": {
         "keywords": ["plan_input", "input_summary", "inputs"],
         "display_name": "Plan Input",
@@ -117,7 +119,8 @@ TABLE_DEFS = {
         "compare_fields": ["PLAN_VALUE", "FCST_QTY", "SUPPLY_QTY"],
         "icon": "📥",
         "supports_granularity": True,
-        "is_virtual": True
+        "is_virtual": True,
+        "fixed_sku_level": True
     }
 }
 

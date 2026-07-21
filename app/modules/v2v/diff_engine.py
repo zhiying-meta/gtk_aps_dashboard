@@ -374,8 +374,34 @@ def load_single_table(folder_path: str, table_key: str):
         return None
     fpath = scan["tables"][table_key]
     try:
-        df = pd.read_excel(fpath)
-        return df
+        # Optimized column selection for large tables to improve speed
+        needed_map = {
+            "balance": ["ITEM_CODE", "PLAN_DATE", "SHIFT_NAME", "SHIFT_CODE", "BALANCE_QTY", "SHIFT_OUT_QTY", "PRE_INPUT_QTY"],
+            "plan_output": ["LINE_CODE", "SKU", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM", "PLAN_VALUE"],
+            "supply": ["PN_CODE", "KITTING_DATE", "KITTING_VALUE", "QTY_REM", "QTY_REM2"],
+            "calendar": ["LINE_CODE", "PLAN_TYPE", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM", "PLAN_VALUE"],
+            "bom": ["PARENT_PN_CODE", "ITEM_NO", "UNIT_NUM", "LOSS_RATE", "PROCESS_LT", "PN_CODE_PATH"],
+            "item": ["ITEM_NO", "PRODUCT_STYLE", "COLOR", "TYPE", "STYLE", "PRODUCT_TYPE", "MAKE_OR_BUY", "PRODUCT_CATEGORY", "PRODUCT_LINE", "ITEM_DESC"],
+            "line": ["LINE_CODE", "LINE_LEVEL", "LINE_TYPE", "IS_MAIN_PROCESS", "LINE_NAME"],
+        }
+        needed = needed_map.get(table_key)
+        if needed:
+            try:
+                # Use usecols to speed up reading
+                df = pd.read_excel(fpath, usecols=lambda c: c in needed or any(nc.lower() in str(c).lower() for nc in needed))
+                # If we filtered too aggressively and missing key cols, fallback to full read
+                if table_key == "balance" and "ITEM_CODE" not in df.columns:
+                    df = pd.read_excel(fpath)
+                elif table_key == "plan_output" and "SKU" not in df.columns:
+                    df = pd.read_excel(fpath)
+                return df
+            except Exception as e:
+                # Fallback
+                df = pd.read_excel(fpath)
+                return df
+        else:
+            df = pd.read_excel(fpath)
+            return df
     except Exception as e:
         print(f"Failed to load {table_key} from {fpath}: {e}")
         return None
@@ -613,37 +639,23 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
         }
 
     elif table_name == "plan_output":
-        # Phase3 refined: support group_by, filters, thresholds
-        # Extract additional params from filters dict which may contain group_by etc
-        # For backward compatibility, get_detailed_diff may be called with filters that include group_by
-        # But we handle group_by separately via kwargs in filters
+        # Refactored: Fixed SKU level, no dimension builder, default only_diff
         from .parsers.plan_output_parser import diff_plan_output as diff_plan_output_agg
         if data_a.get("plan_output") is None or data_b.get("plan_output") is None:
             return {"error": "plan_output missing"}
-        # Parse group_by from filters if passed as special key
-        group_by = filters.get("group_by") if filters else None
-        if isinstance(group_by, str):
-            group_by = [g.strip() for g in group_by.split(",") if g.strip()]
-        if not group_by:
-            group_by = ["LINE_CODE"]  # default overall per line
-        # Extract real filters (excluding group_by etc)
+        # Force SKU level per user request - ignore incoming group_by
+        group_by = ["SKU"]
         real_filters = {}
         if filters:
             for k,v in filters.items():
-                if k not in ["group_by", "change_type", "week", "line", "sku", "group_by_str"]:
-                    if k in ["LINE_CODE", "SKU", "WEEK", "DATE", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM"]:
+                if k in ["SKU", "WEEK", "DATE", "_WEEK", "_DATE", "_MONTH", "MONTH", "PLAN_DATE", "SHIFT_NAME", "LINE_CODE", "PLAN_ITEM"]:
+                    if v:
                         real_filters[k] = v
-                    elif k not in ["change_type"]:
-                        # Also support week, line, sku as filters
-                        if k == "week" and v:
-                            real_filters["WEEK"] = v
-                        if k == "line" and v:
-                            real_filters["LINE_CODE"] = v
-                        if k == "sku" and v:
-                            real_filters["SKU"] = v
-        # Also check for granularity-specific week filter
-        if filters and filters.get("week"):
-            real_filters["WEEK"] = filters["week"]
+                # Support generic sku/week filters
+                if k == "sku" and v:
+                    real_filters["SKU"] = v
+                if k == "week" and v:
+                    real_filters["WEEK"] = v
         only_diff = filters.get("only_diff", True) if filters else True
         if isinstance(only_diff, str):
             only_diff = only_diff.lower() != "false"
@@ -652,7 +664,7 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
         sort_by = filters.get("sort", "abs_diff_desc") if filters else "abs_diff_desc"
         page = int(filters.get("page", page)) if filters and filters.get("page") else page
         page_size = int(filters.get("page_size", page_size)) if filters and filters.get("page_size") else page_size
-        cum = filters.get("cum", True) if filters else True  # Default cum=True for V2V as per user request
+        cum = filters.get("cum", False) if filters else False  # Default cum False now, per fixed table logic
         if isinstance(cum, str):
             cum = cum.lower() in ["true", "1", "yes", "cum"]
 
@@ -693,24 +705,20 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
         from .parsers.balance_parser import diff_balance as diff_balance_agg
         if data_a.get("balance") is None or data_b.get("balance") is None:
             return {"error": "balance missing"}
-        group_by = filters.get("group_by") if filters else None
-        if isinstance(group_by, str):
-            group_by = [g.strip() for g in group_by.split(",") if g.strip()]
-        if not group_by:
-            group_by = ["ITEM_CODE"]
+        # Force SKU level (ITEM_CODE + time) per user request - no dimension builder
+        group_by = ["ITEM_CODE"]
         real_filters = {}
         if filters:
             for k,v in filters.items():
-                if k not in ["group_by", "change_type", "week", "line", "sku", "group_by_str", "compare_field"]:
-                    if k in ["ITEM_CODE", "WEEK", "DATE", "PLAN_DATE", "SHIFT_NAME"]:
+                if k in ["ITEM_CODE", "WEEK", "DATE", "_WEEK", "_DATE", "_MONTH", "MONTH", "PLAN_DATE", "SHIFT_NAME", "SKU"]:
+                    if v:
                         real_filters[k] = v
-                    else:
-                        if k == "week" and v:
-                            real_filters["WEEK"] = v
-                        if k == "item" and v:
-                            real_filters["ITEM_CODE"] = v
-        if filters and filters.get("week"):
-            real_filters["WEEK"] = filters["week"]
+                if k == "week" and v:
+                    real_filters["WEEK"] = v
+                if k in ["item", "sku"] and v:
+                    real_filters["ITEM_CODE"] = v
+                if k == "MONTH" and v:
+                    real_filters["_MONTH"] = v
         only_diff = filters.get("only_diff", True) if filters else True
         if isinstance(only_diff, str):
             only_diff = only_diff.lower() != "false"
@@ -749,29 +757,23 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
         }
 
     elif table_name == "plan_input":
-        # Virtual table: aggregated FCST + Supply input
+        # Virtual table: FCST aggregated, fixed SKU level
         from .parsers.plan_input_parser import diff_plan_input as diff_pi
-        # Load FCST data
         fcst_main_a = load_single_table(folder_a, "fcst")
         fcst_detail_a = load_single_table(folder_a, "fcst_detail")
         fcst_main_b = load_single_table(folder_b, "fcst")
         fcst_detail_b = load_single_table(folder_b, "fcst_detail")
-        supply_a = load_single_table(folder_a, "supply")
-        supply_b = load_single_table(folder_b, "supply")
         if fcst_main_a is None or fcst_detail_a is None or fcst_main_b is None or fcst_detail_b is None:
             return {"error": "FCST data missing for plan_input"}
 
-        group_by = filters.get("group_by") if filters else None
-        if isinstance(group_by, str):
-            group_by = [g.strip() for g in group_by.split(",") if g.strip()]
-        if not group_by:
-            group_by = ["PN_CODE"]
+        group_by = ["PN_CODE"]  # Force SKU level
 
         real_filters = {}
         if filters:
             for k,v in filters.items():
-                if k in ["PN_CODE", "SKU", "WEEK", "ITEM_CODE"]:
-                    real_filters[k] = v
+                if k in ["PN_CODE", "SKU", "WEEK", "_WEEK", "_MONTH", "MONTH", "ITEM_CODE", "DATE", "_DATE"]:
+                    if v:
+                        real_filters[k] = v
                 if k == "sku" and v:
                     real_filters["PN_CODE"] = v
                 if k == "week" and v:
@@ -784,7 +786,7 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
 
         diff_result = diff_pi(
             fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b,
-            supply_a, supply_b,
+            None, None,
             group_by=group_by,
             granularity=granularity,
             filters=real_filters,

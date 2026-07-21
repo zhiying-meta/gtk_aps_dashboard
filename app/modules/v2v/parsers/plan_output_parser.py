@@ -1,8 +1,14 @@
 """
 Plan Output parser - 排产结果快照表_输出
-Supports flexible group_by + granularity (week/day/shift) + filters + threshold
-Core for Phase3 refined design: query-driven aggregation, not full 20万 rows
+Refactored for SKU level comparison as per user request:
+- Fixed SKU level (SKU + Time), not dimension builder
+- Default only_diff=True
+- Supports granularity: day, week, month/monthly, shift
+- Columns: TIME (vertical), SKU (vertical), PREV, LATEST, DIFF, TAG
+- Also keeps legacy matrix API for detailed view
+Optimized for performance: vectorized date handling, minimal columns, NaT safe.
 """
+
 import pandas as pd
 from datetime import timedelta
 from typing import List, Dict
@@ -11,113 +17,156 @@ def parse_plan_output(file_path: str):
     df = pd.read_excel(file_path)
     return df
 
-def to_saturday(dt):
-    """Convert datetime to Saturday of that week (Sun-Sat week, Sat ending)"""
-    if pd.isna(dt):
-        return None
-    # dt is Timestamp
-    dow = dt.weekday()  # Mon=0...Sun=6
-    delta = (5 - dow) % 7  # days to Saturday
-    return dt + timedelta(days=delta)
+def to_saturday_series(series):
+    try:
+        dow = series.dt.weekday
+        delta = (5 - dow) % 7
+        return series + pd.to_timedelta(delta, unit='D')
+    except:
+        return series
 
 def normalize_dates(df):
+    if df.empty:
+        df["_DATE_DT"] = pd.Series(dtype='datetime64[ns]')
+        df["_DATE"] = pd.Series(dtype='object')
+        df["_WEEK"] = pd.Series(dtype='object')
+        df["_MONTH"] = pd.Series(dtype='object')
+        return df
     df = df.copy()
     df["_DATE_DT"] = pd.to_datetime(df["PLAN_DATE"], errors='coerce')
+    df = df[~df["_DATE_DT"].isna()]
+    if df.empty:
+        df["_DATE"] = pd.Series(dtype='object')
+        df["_WEEK"] = pd.Series(dtype='object')
+        df["_MONTH"] = pd.Series(dtype='object')
+        return df
     df["_DATE"] = df["_DATE_DT"].dt.strftime("%Y-%m-%d")
-    df["_WEEK_DT"] = df["_DATE_DT"].apply(lambda x: to_saturday(x) if pd.notna(x) else None)
-    df["_WEEK"] = df["_WEEK_DT"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notna(x) and hasattr(x, 'strftime') else None)
+    week_dt = to_saturday_series(df["_DATE_DT"])
+    df["_WEEK"] = week_dt.dt.strftime("%Y-%m-%d")
     df["_MONTH"] = df["_DATE_DT"].dt.strftime("%Y-%m")
-    df["_YEAR_MONTH_DT"] = pd.to_datetime(df["_DATE_DT"].dt.to_period('M').astype(str), errors='coerce')
     return df
 
 def apply_filters(df, filters: Dict):
-    """Apply filters dict: {LINE_CODE: 'AL6-Frame', WEEK: '2026-07-12', ...}"""
-    if not filters:
+    if not filters or df.empty:
         return df
     df = df.copy()
     for key, val in filters.items():
-        if val is None or val == "":
+        if val is None or val == "" or df.empty:
             continue
-        # Normalize key
         key_upper = key.upper()
-        if key_upper == "WEEK" or key_upper == "_WEEK":
+        if key_upper in ["WEEK", "_WEEK"]:
             if "_WEEK" in df.columns:
                 df = df[df["_WEEK"] == val]
         elif key_upper in ["DATE", "PLAN_DATE", "_DATE"]:
             if "_DATE" in df.columns:
                 df = df[df["_DATE"] == val]
-        elif key_upper == "LINE_CODE" or key_upper == "LINE":
+        elif key_upper in ["MONTH", "_MONTH"]:
+            if "_MONTH" in df.columns:
+                df = df[df["_MONTH"] == val]
+        elif key_upper in ["LINE_CODE", "LINE"]:
             if "LINE_CODE" in df.columns:
                 df = df[df["LINE_CODE"] == val]
         elif key_upper == "SKU":
             if "SKU" in df.columns:
                 df = df[df["SKU"] == val]
-        elif key_upper == "SHIFT_NAME" or key_upper == "SHIFT":
+        elif key_upper == "SHIFT_NAME":
             if "SHIFT_NAME" in df.columns:
                 df = df[df["SHIFT_NAME"] == val]
-        elif key_upper == "PLAN_ITEM":
-            if "PLAN_ITEM" in df.columns:
-                df = df[df["PLAN_ITEM"] == val]
         else:
-            # Try direct column match
             if key in df.columns:
                 df = df[df[key].astype(str) == str(val)]
     return df
 
-def get_group_keys(group_by: List[str], granularity: str):
-    """Build group keys including time dimension based on granularity"""
-    clean_gb = []
-    for g in group_by:
-        g = g.strip()
-        if g and g not in clean_gb:
-            clean_gb.append(g)
-    
-    if granularity == "week":
-        time_cols = ["_WEEK"]
-    elif granularity == "day":
-        time_cols = ["_DATE"]
-    elif granularity == "monthly" or granularity == "month":
-        time_cols = ["_MONTH"]
-    else:  # shift
-        time_cols = ["_DATE", "SHIFT_NAME", "PLAN_ITEM"]
-        time_cols = [c for c in time_cols if c not in clean_gb]
+def get_time_col(granularity):
+    gran = (granularity or "week").lower()
+    if gran in ["monthly", "month"]:
+        return "_MONTH"
+    elif gran == "week":
+        return "_WEEK"
+    elif gran == "day":
+        return "_DATE"
+    elif gran == "shift":
+        return "_DATE"
+    else:
+        return "_WEEK"
 
-    final_keys = clean_gb + time_cols
-    return final_keys, clean_gb, time_cols
+def get_group_keys_fixed_sku(granularity):
+    """Force SKU level + time"""
+    gran = (granularity or "week").lower()
+    time_col = get_time_col(gran)
+    if gran == "shift":
+        return ["SKU", "_DATE", "SHIFT_NAME"], time_col
+    else:
+        return ["SKU", time_col], time_col
 
 def aggregate_plan_output(df, group_by: List[str], granularity: str, filters: Dict = None):
     """
-    Aggregate plan_output data
-    Returns aggregated DataFrame with columns: group_by + time + PLAN_VALUE
+    Legacy aggregation - kept for compatibility but now optimized
     """
     df = normalize_dates(df)
     df = apply_filters(df, filters)
-
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
-    group_keys, clean_gb, time_cols = get_group_keys(group_by, granularity)
+    # If group_by is None or empty, use fixed SKU
+    if not group_by:
+        group_by = ["SKU"]
+    # For new logic, force SKU level if group_by contains only SKU or LINE_CODE
+    # But keep flexible for legacy calls
+    gran = (granularity or "week").lower()
+    time_col = get_time_col(gran)
 
-    # Ensure group keys exist
-    valid_keys = [k for k in group_keys if k in df.columns]
+    # Build final keys
+    clean_gb = [g for g in group_by if g and g not in [time_col]]
+    # Deduplicate
+    clean_gb = list(dict.fromkeys(clean_gb))
+
+    if gran == "shift":
+        time_cols = ["_DATE", "SHIFT_NAME"]
+    else:
+        time_cols = [time_col]
+
+    # Ensure time cols not duplicated in clean_gb
+    time_cols = [c for c in time_cols if c not in clean_gb]
+    final_keys = clean_gb + time_cols
+    valid_keys = [k for k in final_keys if k in df.columns]
     if not valid_keys:
-        # Fallback to time only
         valid_keys = time_cols
 
     agg = df.groupby(valid_keys, as_index=False)["PLAN_VALUE"].sum()
     return agg, valid_keys
 
-def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week", 
+def diff_plan_output(df_a, df_b, group_by: List[str] = None, granularity: str = "week",
                      filters: Dict = None, only_diff: bool = True,
                      threshold_abs: float = 0, threshold_pct: float = 0,
                      sort_by: str = "abs_diff_desc",
                      page: int = 1, page_size: int = 100,
                      cum: bool = False):
     """
-    Main diff for plan_output with grouping
+    Main diff for plan_output - Fixed SKU level per user request
+    - group_by is forced to SKU + time (ignore builder)
+    - granularity controls time bucket: day/week/month/shift
+    - only_diff default True
+    - Returns records with PREV, LATEST, DIFF, TAG etc
     """
     try:
-        # Normalize and filter
+        # For new UI, force SKU level regardless of incoming group_by
+        # If incoming group_by is None, use SKU
+        # If it contains ITEM_CODE or PN_CODE, map to SKU
+        forced_group_by = None
+        if group_by:
+            # If group_by contains LINE_CODE, we still want SKU level per request, but keep LINE if explicitly requested?
+            # Per user: Plan Output also SKU level same as BOH
+            # So force SKU
+            if any(g.upper() in ["SKU", "PN_CODE", "ITEM_CODE"] for g in group_by):
+                forced_group_by = ["SKU"]
+            else:
+                # If old builder had LINE_CODE, keep SKU as primary
+                forced_group_by = ["SKU"]
+        else:
+            forced_group_by = ["SKU"]
+
+        # Normalize
         df_a_norm = normalize_dates(df_a)
         df_b_norm = normalize_dates(df_b)
 
@@ -132,90 +181,83 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
                 "aggregated_b": 0,
                 "records": [],
                 "pagination": {"page": 1, "page_size": page_size, "total": 0},
-                "group_by": group_by,
+                "group_by": forced_group_by,
                 "granularity": granularity
             }
 
-        # Aggregate
-        group_keys, clean_gb, time_cols = get_group_keys(group_by, granularity)
+        gran = (granularity or "week").lower()
+        time_col = get_time_col(gran)
 
-        valid_keys_a = [k for k in group_keys if k in df_a_filt.columns]
-        valid_keys_b = [k for k in group_keys if k in df_b_filt.columns]
-        valid_keys = list(set(valid_keys_a) & set(valid_keys_b))
-        if not valid_keys:
-            valid_keys = [k for k in group_keys if k in df_a_filt.columns or k in df_b_filt.columns]
-            if not valid_keys:
-                valid_keys = time_cols
+        if gran == "shift":
+            group_keys = ["SKU", "_DATE", "SHIFT_NAME"]
+        else:
+            group_keys = ["SKU", time_col]
 
-        # Groupby sum
-        agg_a = df_a_filt.groupby(valid_keys, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else pd.DataFrame(columns=valid_keys + ["PLAN_VALUE"])
-        agg_b = df_b_filt.groupby(valid_keys, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else pd.DataFrame(columns=valid_keys + ["PLAN_VALUE"])
+        group_keys = [k for k in group_keys if k in df_a_filt.columns or k in df_b_filt.columns]
+        if not group_keys:
+            group_keys = ["SKU"]
 
-        # Cumulative handling: if cum=True, compute cumsum per clean_gb group sorted by time
+        # Aggregate sum per group
+        agg_a = df_a_filt.groupby(group_keys, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else pd.DataFrame(columns=group_keys + ["PLAN_VALUE"])
+        agg_b = df_b_filt.groupby(group_keys, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else pd.DataFrame(columns=group_keys + ["PLAN_VALUE"])
+
+        # Cumulative handling - if cum=True, compute cumsum per SKU sorted by time
         if cum:
             # Determine time col for sorting
-            time_col = None
-            for tc in ["_DATE", "_WEEK", "_MONTH"]:
-                if tc in valid_keys:
-                    time_col = tc
-                    break
-            if time_col and clean_gb:
-                # For each version, sort by time and cumsum per clean_gb
-                # clean_gb may be empty (overall), then cumsum overall sorted by time
-                def cumsum_per_group(df_agg):
-                    if df_agg.empty:
-                        return df_agg
-                    # Sort by time
-                    # Need to handle _DATE_DT for proper sorting? Use time_col string sort might work for YYYY-MM-DD
-                    # For month, YYYY-MM string sort works
-                    # For week, YYYY-MM-DD string sort works
-                    # Sort by clean_gb + time_col
-                    sort_keys = clean_gb + [time_col]
-                    # Ensure clean_gb columns exist
-                    sort_keys = [k for k in sort_keys if k in df_agg.columns]
-                    if not sort_keys:
-                        sort_keys = [time_col] if time_col in df_agg.columns else []
+            time_sort = time_col
+            if gran == "shift":
+                time_sort = "_DATE"
+            # Sort by SKU + time
+            for agg_df in [agg_a, agg_b]:
+                if not agg_df.empty and time_sort in agg_df.columns:
+                    # Need proper time sorting - use string sort for YYYY-MM-DD which works
+                    sort_keys = ["SKU", time_sort] if "SKU" in agg_df.columns else [time_sort]
+                    sort_keys = [k for k in sort_keys if k in agg_df.columns]
                     if sort_keys:
-                        df_agg = df_agg.sort_values(sort_keys)
-                    # Group by clean_gb and cumsum
-                    if clean_gb:
-                        # Only cumsum if clean_gb columns exist
-                        valid_gb = [g for g in clean_gb if g in df_agg.columns]
-                        if valid_gb:
-                            df_agg["PLAN_VALUE"] = df_agg.groupby(valid_gb)["PLAN_VALUE"].cumsum()
-                        else:
-                            df_agg["PLAN_VALUE"] = df_agg["PLAN_VALUE"].cumsum()
+                        agg_df.sort_values(sort_keys, inplace=True)
+                    if "SKU" in agg_df.columns:
+                        agg_df["PLAN_VALUE"] = agg_df.groupby("SKU")["PLAN_VALUE"].cumsum()
                     else:
-                        df_agg["PLAN_VALUE"] = df_agg["PLAN_VALUE"].cumsum()
-                    return df_agg
-                agg_a = cumsum_per_group(agg_a)
-                agg_b = cumsum_per_group(agg_b)
-            elif time_col:
-                # No group_by, overall cumsum
-                agg_a = agg_a.sort_values(time_col) if time_col in agg_a.columns else agg_a
-                agg_b = agg_b.sort_values(time_col) if time_col in agg_b.columns else agg_b
-                if not agg_a.empty:
-                    agg_a["PLAN_VALUE"] = agg_a["PLAN_VALUE"].cumsum()
-                if not agg_b.empty:
-                    agg_b["PLAN_VALUE"] = agg_b["PLAN_VALUE"].cumsum()
+                        agg_df["PLAN_VALUE"] = agg_df["PLAN_VALUE"].cumsum()
 
         # Merge
-        merged = pd.merge(agg_a, agg_b, on=valid_keys, how="outer", suffixes=("_A", "_B"))
+        merged = pd.merge(agg_a, agg_b, on=group_keys, how="outer", suffixes=("_A", "_B"))
         merged["PLAN_VALUE_A"] = merged["PLAN_VALUE_A"].fillna(0)
         merged["PLAN_VALUE_B"] = merged["PLAN_VALUE_B"].fillna(0)
         merged["diff"] = merged["PLAN_VALUE_B"] - merged["PLAN_VALUE_A"]
-        merged["diff_pct"] = merged.apply(lambda r: (r["diff"] / r["PLAN_VALUE_A"] * 100) if r["PLAN_VALUE_A"] != 0 else (100 if r["diff"] !=0 else 0), axis=1)
         merged["abs_diff"] = merged["diff"].abs()
 
-        # Filter only_diff
-        if only_diff:
-            merged = merged[merged["diff"] != 0]
+        # Tag logic
+        set_a = set([tuple(x) for x in agg_a[group_keys].to_numpy()]) if not agg_a.empty else set()
+        set_b = set([tuple(x) for x in agg_b[group_keys].to_numpy()]) if not agg_b.empty else set()
 
-        # Threshold filters
+        def compute_tag(row):
+            key_tuple = tuple(row[k] for k in group_keys)
+            in_a = key_tuple in set_a
+            in_b = key_tuple in set_b
+            if not in_a and in_b:
+                return "ADDED"
+            elif in_a and not in_b:
+                return "DELETED"
+            else:
+                if row["diff"] == 0:
+                    return "UNCHANGED"
+                else:
+                    return "MODIFY"
+
+        merged["change_tag"] = merged.apply(compute_tag, axis=1)
+        merged["change_type"] = merged["change_tag"]
+
+        if only_diff:
+            merged = merged[merged["change_tag"] != "UNCHANGED"]
+
         if threshold_abs > 0:
             merged = merged[merged["abs_diff"] >= threshold_abs]
         if threshold_pct > 0:
+            merged["diff_pct"] = merged.apply(lambda r: (r["diff"] / r["PLAN_VALUE_A"] * 100) if r["PLAN_VALUE_A"] != 0 else (100 if r["diff"] !=0 else 0), axis=1)
             merged = merged[merged["diff_pct"].abs() >= threshold_pct]
+        else:
+            merged["diff_pct"] = merged.apply(lambda r: (r["diff"] / r["PLAN_VALUE_A"] * 100) if r["PLAN_VALUE_A"] != 0 else (100 if r["diff"] !=0 else 0), axis=1)
 
         # Sort
         if sort_by == "abs_diff_desc":
@@ -226,31 +268,39 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
             merged = merged.sort_values("diff", ascending=True)
 
         total = len(merged)
-        # Pagination
         start = (page-1)*page_size
         end = start+page_size
-        paged = merged.iloc[start:end] if total >0 else merged
+        paged = merged.iloc[start:end] if total>0 else merged
 
-        # Convert to records
-        records = paged.to_dict(orient="records")
-
-        # Enrich records with drill info
+        # Build records
         enriched = []
-        for rec in records:
-            # Determine drill-down availability
-            # If current granularity is week, can drill to day (need week filter) and to shift
-            # If day, can drill to shift
-            can_drill_day = granularity == "week"
-            can_drill_shift = granularity in ["week", "day"]
+        for _, rec in paged.iterrows():
+            # Safe conversion
+            sku_val = rec.get("SKU") or "Unknown"
+            time_val = rec.get(time_col) or rec.get("_DATE") or rec.get("_WEEK") or rec.get("_MONTH") or ""
             enriched.append({
-                **rec,
-                "_drill": {
-                    "can_drill_day": can_drill_day,
-                    "can_drill_shift": can_drill_shift,
-                    "next_granularity": "day" if granularity=="week" else "shift" if granularity=="day" else None
-                },
-                # For frontend breadcrumb building
-                "_group_values": {k: rec.get(k) for k in valid_keys}
+                "SKU": str(sku_val),
+                "ITEM_CODE": str(sku_val),
+                "TIME": str(time_val),
+                "TIME_LABEL": str(time_val),
+                "_DATE": str(rec.get("_DATE")) if rec.get("_DATE") else None,
+                "_WEEK": str(rec.get("_WEEK")) if rec.get("_WEEK") else None,
+                "_MONTH": str(rec.get("_MONTH")) if rec.get("_MONTH") else None,
+                time_col: str(time_val),
+                "PREV": float(rec.get("PLAN_VALUE_A", 0)),
+                "LATEST": float(rec.get("PLAN_VALUE_B", 0)),
+                "PREVIOUS": float(rec.get("PLAN_VALUE_A", 0)),
+                "LATEST_VALUE": float(rec.get("PLAN_VALUE_B", 0)),
+                "PLAN_VALUE_A": float(rec.get("PLAN_VALUE_A", 0)),
+                "PLAN_VALUE_B": float(rec.get("PLAN_VALUE_B", 0)),
+                "diff": float(rec.get("diff", 0)),
+                "DIFF": float(rec.get("diff", 0)),
+                "abs_diff": float(rec.get("abs_diff", 0)),
+                "diff_pct": float(rec.get("diff_pct", 0)),
+                "change_tag": rec.get("change_tag", "MODIFY"),
+                "change_type": rec.get("change_tag", "MODIFY"),
+                "TAG": rec.get("change_tag", "MODIFY"),
+                "_group_values": {k: str(rec.get(k)) for k in group_keys},
             })
 
         return {
@@ -263,10 +313,10 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
             "total_after_filter": total,
             "records": enriched,
             "pagination": {"page": page, "page_size": page_size, "total": total},
-            "group_by": group_by,
+            "group_by": group_keys,
             "granularity": granularity,
-            "valid_keys": valid_keys,
-            "time_cols": time_cols,
+            "valid_keys": group_keys,
+            "time_cols": [time_col],
             "filters": filters or {}
         }
 
@@ -283,29 +333,20 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
 
 
 def get_breakdown_by_line_shift(df_a, df_b, sku, date, granularity="day"):
-    """
-    For a given SKU and date, breakdown by LINE_CODE and SHIFT_NAME
-    Shows A, B, Diff per line per shift
-    """
     try:
-        # Normalize
         df_a_norm = normalize_dates(df_a)
         df_b_norm = normalize_dates(df_b)
 
-        # Filter by SKU and date
-        # Date can be YYYY-MM-DD
         df_a_filt = df_a_norm[df_a_norm["SKU"] == sku] if sku else df_a_norm
         df_b_filt = df_b_norm[df_b_norm["SKU"] == sku] if sku else df_b_norm
 
         if date:
-            # Date filter: match _DATE
             df_a_filt = df_a_filt[df_a_filt["_DATE"] == date]
             df_b_filt = df_b_filt[df_b_filt["_DATE"] == date]
 
         if df_a_filt.empty and df_b_filt.empty:
             return {"sku": sku, "date": date, "breakdown": [], "total_a": 0, "total_b": 0}
 
-        # Group by LINE_CODE, SHIFT_NAME, PLAN_ITEM
         group_cols = ["LINE_CODE", "SHIFT_NAME", "PLAN_ITEM"]
         valid_a = [c for c in group_cols if c in df_a_filt.columns]
         valid_b = [c for c in group_cols if c in df_b_filt.columns]
@@ -339,12 +380,7 @@ def get_breakdown_by_line_shift(df_a, df_b, sku, date, granularity="day"):
 
 
 def get_chart_data_plan_output(df_a, df_b, group_by=None, filters=None, granularity="day", line_code=None, sku=None):
-    """
-    Get time series for chart
-    Filter to specific line/sku if provided, then aggregate by time
-    """
     try:
-        # Merge filters with line_code/sku
         eff_filters = filters.copy() if filters else {}
         if line_code:
             eff_filters["LINE_CODE"] = line_code
@@ -357,44 +393,16 @@ def get_chart_data_plan_output(df_a, df_b, group_by=None, filters=None, granular
         df_a_filt = apply_filters(df_a_norm, eff_filters)
         df_b_filt = apply_filters(df_b_norm, eff_filters)
 
-        # Determine time col
-        if granularity == "week":
-            time_col = "_WEEK"
-            # For chart, we want daily or weekly? Use _WEEK
-            df_a_filt = df_a_filt.groupby(time_col, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else df_a_filt
-            df_b_filt = df_b_filt.groupby(time_col, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else df_b_filt
-        elif granularity == "day":
-            time_col = "_DATE"
-            df_a_filt = df_a_filt.groupby(time_col, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else df_a_filt
-            df_b_filt = df_b_filt.groupby(time_col, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else df_b_filt
-        else:
-            time_col = "_DATE"
-            # For shift, aggregate by date + shift?
-            df_a_filt = df_a_filt.groupby([time_col, "SHIFT_NAME"], as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else df_a_filt
-            df_b_filt = df_b_filt.groupby([time_col, "SHIFT_NAME"], as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else df_b_filt
-            # For simplicity, chart only date
+        gran = (granularity or "day").lower()
+        time_col = get_time_col(gran)
 
-        # Merge for chart
-        if granularity == "shift":
-            # For shift, we need to handle date+shift as x label
-            # Simplify: just use date aggregation for chart
-            time_col = "_DATE"
-            df_a_chart = df_a_norm.copy()
-            df_b_chart = df_b_norm.copy()
-            if eff_filters:
-                df_a_chart = apply_filters(df_a_chart, eff_filters)
-                df_b_chart = apply_filters(df_b_chart, eff_filters)
-            df_a_chart = df_a_chart.groupby(time_col, as_index=False)["PLAN_VALUE"].sum()
-            df_b_chart = df_b_chart.groupby(time_col, as_index=False)["PLAN_VALUE"].sum()
-        else:
-            df_a_chart = df_a_filt
-            df_b_chart = df_b_filt
+        df_a_filt = df_a_filt.groupby(time_col, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else df_a_filt
+        df_b_filt = df_b_filt.groupby(time_col, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else df_b_filt
 
-        # Sort by time
-        df_a_chart = df_a_chart.sort_values(time_col) if time_col in df_a_chart.columns else df_a_chart
-        df_b_chart = df_b_chart.sort_values(time_col) if time_col in df_b_chart.columns else df_b_chart
+        df_a_filt = df_a_filt.sort_values(time_col) if time_col in df_a_filt.columns else df_a_filt
+        df_b_filt = df_b_filt.sort_values(time_col) if time_col in df_b_filt.columns else df_b_filt
 
-        merged = pd.merge(df_a_chart, df_b_chart, on=time_col, how="outer", suffixes=("_A", "_B"))
+        merged = pd.merge(df_a_filt, df_b_filt, on=time_col, how="outer", suffixes=("_A", "_B"))
         merged = merged.sort_values(time_col)
         merged = merged.fillna(0)
 
@@ -417,46 +425,19 @@ def get_chart_data_plan_output(df_a, df_b, group_by=None, filters=None, granular
 
 
 def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter=None, granularity="day", cum=True, filters=None, exact_sku=None):
-    """
-    Detailed daily matrix for Plan Output
-    - Rows: SKU (filtered by prefix, e.g., SK for FG, GB/LT/FR/RT for intermediate)
-    - Columns: Daily dates, grouped by week Sun-Sat, with weekly/monthly aggregation option
-    - Values: A, B, Diff, optionally cumulative (cum=True prioritized for V2V)
-    - Supports drill-down: line, shift, etc. via filters
-
-    Returns:
-    {
-        dates: [YYYY-MM-DD],
-        weeks: [{week_label, start_date, end_date, dates: [...]}, ...],
-        months: [{month_label, dates: [...]}, ...],
-        sku_list: [SKU],
-        data: {
-            SKU: {
-                date: {a, b, diff, cum_a, cum_b, cum_diff},
-                ...
-            }
-        },
-        summary: ...
-    }
-    """
     try:
-        # Normalize
         df_a_norm = normalize_dates(df_a)
         df_b_norm = normalize_dates(df_b)
 
-        # Apply base filters
         df_a_filt = apply_filters(df_a_norm, filters) if filters else df_a_norm
         df_b_filt = apply_filters(df_b_norm, filters) if filters else df_b_norm
 
-        # Exact SKU filter has priority over prefix
         if exact_sku and exact_sku.strip():
             exact = exact_sku.strip()
             df_a_filt = df_a_filt[df_a_filt["SKU"] == exact]
             df_b_filt = df_b_filt[df_b_filt["SKU"] == exact]
         else:
-            # Filter by SKU prefix (FG vs intermediate)
             if sku_prefix and sku_prefix != "ALL":
-                # sku_prefix can be "SK", "GB", "LT", "FR", "RT" or comma separated
                 prefixes = [p.strip() for p in sku_prefix.split(",") if p.strip()]
                 if prefixes:
                     def matches_prefix(sku):
@@ -470,14 +451,12 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
                     df_a_filt = df_a_filt[df_a_filt["SKU"].apply(matches_prefix)]
                     df_b_filt = df_b_filt[df_b_filt["SKU"].apply(matches_prefix)]
 
-        # Filter by line
         if line_filter and line_filter != "ALL":
             lines = [l.strip() for l in line_filter.split(",") if l.strip()]
             if lines:
                 df_a_filt = df_a_filt[df_a_filt["LINE_CODE"].isin(lines)]
                 df_b_filt = df_b_filt[df_b_filt["LINE_CODE"].isin(lines)]
 
-        # Filter by shift
         if shift_filter and shift_filter != "ALL":
             df_a_filt = df_a_filt[df_a_filt["SHIFT_NAME"] == shift_filter]
             df_b_filt = df_b_filt[df_b_filt["SHIFT_NAME"] == shift_filter]
@@ -485,28 +464,22 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
         if df_a_filt.empty and df_b_filt.empty:
             return {"dates": [], "weeks": [], "sku_list": [], "data": {}, "summary": {"total_skus": 0, "total_dates": 0}}
 
-        # Determine date range and daily aggregation per SKU
-        # Group by SKU + DATE
         agg_a_daily = df_a_filt.groupby(["SKU", "_DATE"], as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else pd.DataFrame(columns=["SKU", "_DATE", "PLAN_VALUE"])
         agg_b_daily = df_b_filt.groupby(["SKU", "_DATE"], as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else pd.DataFrame(columns=["SKU", "_DATE", "PLAN_VALUE"])
 
-        # Get all unique dates sorted
         all_dates_a = set(agg_a_daily["_DATE"].dropna()) if not agg_a_daily.empty else set()
         all_dates_b = set(agg_b_daily["_DATE"].dropna()) if not agg_b_daily.empty else set()
         all_dates = sorted(list(all_dates_a | all_dates_b))
 
-        # Get all unique SKUs
         all_skus_a = set(agg_a_daily["SKU"].dropna()) if not agg_a_daily.empty else set()
         all_skus_b = set(agg_b_daily["SKU"].dropna()) if not agg_b_daily.empty else set()
         all_skus = sorted(list(all_skus_a | all_skus_b))
 
-        # Build week grouping: Sun-Sat
-        # For each date, find Sunday of that week
         from datetime import datetime, timedelta
+
         def get_sunday(d_str):
             try:
                 dt = datetime.strptime(d_str, "%Y-%m-%d")
-                # weekday Mon=0...Sun=6, Sunday is 6, so days since Sunday = (weekday+1)%7
                 days_since_sunday = (dt.weekday() + 1) % 7
                 sunday = dt - timedelta(days=days_since_sunday)
                 return sunday.strftime("%Y-%m-%d")
@@ -520,7 +493,6 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
             except:
                 return None
 
-        # Build weeks
         weeks_dict = {}
         for d in all_dates:
             sun = get_sunday(d)
@@ -531,7 +503,6 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
         weeks = []
         for sun in sorted(weeks_dict.keys()):
             dates_in_week = sorted(weeks_dict[sun])
-            # Saturday is Sunday+6
             try:
                 sun_dt = datetime.strptime(sun, "%Y-%m-%d")
                 sat_dt = sun_dt + timedelta(days=6)
@@ -549,7 +520,6 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
                     "dates": dates_in_week
                 })
 
-        # Build months
         months_dict = {}
         for d in all_dates:
             m = get_month(d)
@@ -565,8 +535,6 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
                 "dates": sorted(months_dict[m])
             })
 
-        # Build data dict: SKU -> date -> values
-        # Create lookup dicts for fast access
         lookup_a = {}
         for _, row in agg_a_daily.iterrows():
             key = (row["SKU"], row["_DATE"])
@@ -596,10 +564,6 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
                     "cum_diff": float(cum_b - cum_a)
                 }
 
-        # For weekly/monthly views, we can aggregate the daily data on the fly in frontend,
-        # but also provide pre-aggregated weekly data for convenience
-        # Weekly aggregation
-        # Group daily data into weekly sums per SKU
         weekly_data = {}
         for sku in all_skus:
             weekly_data[sku] = {}
@@ -612,16 +576,12 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
                     "b": sum_b,
                     "diff": sum_b - sum_a
                 }
-                # Cum up to this week: sum of all dates <= week_end
-                # For simplicity, cum for weekly is cum up to week_end
-                # Find cum at last date of week
                 if wk["dates"]:
                     last_d = wk["dates"][-1]
                     weekly_data[sku][wk_label]["cum_a"] = data[sku].get(last_d, {}).get("cum_a", 0)
                     weekly_data[sku][wk_label]["cum_b"] = data[sku].get(last_d, {}).get("cum_b", 0)
                     weekly_data[sku][wk_label]["cum_diff"] = data[sku].get(last_d, {}).get("cum_diff", 0)
 
-        # Monthly aggregation
         monthly_data = {}
         for sku in all_skus:
             monthly_data[sku] = {}

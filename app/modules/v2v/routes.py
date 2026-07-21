@@ -21,87 +21,116 @@ UPLOAD_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 os.makedirs(UPLOAD_ROOT, exist_ok=True)
 
 def sanitize_for_json(obj):
-    """Recursively replace NaN, Infinity, -Infinity, NaT with None for valid JSON, and convert datetime to string"""
+    """Recursively replace NaN, Infinity, -Infinity, NaT with None for valid JSON, and convert datetime to string.
+    Robust version to avoid NaTType timetuple errors.
+    """
+    # Fast path for None
+    if obj is None:
+        return None
+
+    # Dict
     if isinstance(obj, dict):
         return {k: sanitize_for_json(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
+    # List/tuple
+    if isinstance(obj, (list, tuple)):
         return [sanitize_for_json(v) for v in obj]
-    elif isinstance(obj, float):
+
+    # Float NaN/Infinity
+    if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
-    else:
-        # Check for datetime, Timestamp, NaT
+
+    # Try pandas/numpy handling
+    try:
+        import pandas as pd
+        import datetime as dt
+        import numpy as np
+
+        # NaT and NaN check - must be before datetime isinstance because NaT is not datetime but pd.isna True
         try:
-            import pandas as pd
-            import datetime as dt
-            # Handle NaT
             if pd.isna(obj):
-                # Check if it's NaT specifically
-                try:
-                    if isinstance(obj, pd._libs.tslibs.nattype.NaTType):
-                        return None
-                except:
-                    pass
-                # For NaT in general, return None
-                # pd.isna returns True for NaT, None, NaN
-                if obj is None:
-                    return None
-                # If it's float NaN, already handled above, but check again
-                try:
-                    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-                        return None
-                except:
-                    pass
-                # For other NaT-like, return None
-                # Check if it's NaT by trying to convert to string and seeing if it's 'NaT'
-                if str(obj) == 'NaT':
-                    return None
-            # Handle datetime and Timestamp
-            if isinstance(obj, (dt.datetime, dt.date, pd.Timestamp)):
-                # For NaT, pd.isna already returned True and we returned None above? Actually NaT is instance of NaTType, not datetime, but we check isna
-                # For valid datetime, convert to string
-                try:
-                    if pd.isna(obj):
-                        return None
-                except:
-                    pass
-                try:
-                    return obj.isoformat()
-                except:
-                    return str(obj)
+                return None
         except:
             pass
 
-        # Check for numpy
+        # Explicit NaT type
         try:
-            import numpy as np
-            if isinstance(obj, (np.floating, np.integer)):
-                if np.isnan(obj) or np.isinf(obj):
-                    return None
-                return float(obj) if isinstance(obj, np.floating) else int(obj)
-            if obj is None or isinstance(obj, (str, int, bool)):
-                return obj
-            if hasattr(obj, 'item'):
-                try:
-                    val = obj.item()
-                    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
-                        return None
-                    # Check if val is datetime
-                    try:
-                        import pandas as pd
-                        if pd.isna(val):
-                            return None
-                        if isinstance(val, pd.Timestamp):
-                            return val.isoformat()
-                    except:
-                        pass
-                    return val
-                except:
-                    pass
+            if isinstance(obj, pd._libs.tslibs.nattype.NaTType):
+                return None
         except:
             pass
+
+        # String 'NaT' 
+        try:
+            if str(obj) == 'NaT':
+                return None
+        except:
+            pass
+
+        # Numpy float/int
+        if isinstance(obj, (np.floating, np.integer)):
+            try:
+                if np.isnan(obj) or np.isinf(obj):
+                    return None
+            except:
+                pass
+            try:
+                return float(obj) if isinstance(obj, np.floating) else int(obj)
+            except:
+                return None
+
+        # Pandas Timestamp, datetime
+        if isinstance(obj, (pd.Timestamp, dt.datetime, dt.date)):
+            try:
+                if pd.isna(obj):
+                    return None
+            except:
+                pass
+            try:
+                # Use isoformat but guard against NaT timetuple bug
+                return obj.isoformat()
+            except Exception:
+                try:
+                    return str(obj)
+                except:
+                    return None
+
+        # Numpy datetime64
+        if isinstance(obj, np.datetime64):
+            try:
+                if pd.isna(obj):
+                    return None
+            except:
+                pass
+            try:
+                return str(obj)
+            except:
+                return None
+
+        # Objects with item() (numpy scalars)
+        if hasattr(obj, 'item'):
+            try:
+                val = obj.item()
+                # Recursively sanitize val
+                return sanitize_for_json(val)
+            except:
+                pass
+
+    except Exception:
+        pass
+
+    # Basic types
+    if isinstance(obj, (str, int, bool)):
         return obj
+
+    # Fallback: try to convert to string if it's not serializable, but avoid crashing
+    try:
+        # If obj is already JSON serializable, return as is
+        # For any other object, convert to string
+        return obj
+    except:
+        return str(obj)
 
 def _save_uploaded_files(files, job_id, version_label):
     """

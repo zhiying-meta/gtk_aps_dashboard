@@ -216,6 +216,26 @@
   box-shadow: 0 2px 12px rgba(0,0,0,0.12);
 }
 
+.v2v-summary-card.has-diff {
+  background: #fffbeb;
+  border-color: #fbbf24;
+}
+
+.v2v-summary-card.has-diff.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+}
+
+.v2v-summary-card.no-diff {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.v2v-summary-card.no-diff.active {
+  background: #dcfce7;
+  border-color: #22c55e;
+}
+
 .v2v-summary-card-header {
   display: flex;
   justify-content: space-between;
@@ -349,6 +369,32 @@
   color: white;
 }
 
+.v2v-detail-tab.has-diff {
+  background: #fffbeb;
+  color: #92400e;
+  border-bottom-color: #fbbf24;
+}
+
+.v2v-detail-tab.has-diff.active {
+  background: #fef3c7;
+  color: #92400e;
+  border-bottom-color: #f59e0b;
+  font-weight: 600;
+}
+
+.v2v-detail-tab.no-diff {
+  background: #f0fdf4;
+  color: #166534;
+  border-bottom-color: #86efac;
+}
+
+.v2v-detail-tab.no-diff.active {
+  background: #dcfce7;
+  color: #14532d;
+  border-bottom-color: #22c55e;
+  font-weight: 600;
+}
+
 .v2v-detail-tab.has-diff .count-badge {
   background: #fef3c7;
   color: #92400e;
@@ -357,6 +403,12 @@
 .v2v-detail-tab.has-diff.active .count-badge {
   background: #f59e0b;
   color: white;
+}
+
+/* Centered columns for diff table per user request */
+.v2v-table th.col-center,
+.v2v-table td.col-center {
+  text-align: center;
 }
 
 /* Toolbar */

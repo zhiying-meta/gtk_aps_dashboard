@@ -44,6 +44,14 @@ def diff_line(df_a, df_b):
                         "change_type": "MODIFY"
                     })
 
+        # Build consistent records
+        def build_recs(df_sub, ct):
+            recs=[]
+            for _, r in df_sub.head(100).iterrows():
+                lc = r.get(key) or r.get(f"{key}_A") or r.get(f"{key}_B") or "Unknown"
+                recs.append({"key": {key: str(lc)}, "LINE_CODE": str(lc), "change_type": ct, "field": key})
+            return recs
+
         return {
             "total_a": len(df_a),
             "total_b": len(df_b),
@@ -51,8 +59,8 @@ def diff_line(df_a, df_b):
             "deleted": len(deleted),
             "modified": len(modified),
             "records": {
-                "added": added.head(50).to_dict(orient="records"),
-                "deleted": deleted.head(50).to_dict(orient="records"),
+                "added": build_recs(added, "ADD"),
+                "deleted": build_recs(deleted, "DEL"),
                 "modified": modified[:100]
             },
             "summary": {

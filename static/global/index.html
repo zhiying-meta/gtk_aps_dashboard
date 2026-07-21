@@ -206,6 +206,12 @@
 
     <!-- ===== V2V Module ===== -->
     <div id="module-v2v" class="module-section">
+      <!-- Top actions - Download/Export at page's right top per user request -->
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
+        <button id="v2v-btn-download" class="btn btn-sm" style="background:#0f172a;color:white">📥 Download Current View</button>
+        <button id="v2v-btn-export-html" class="btn btn-sm" style="background:#2563eb;color:white">📄 Export HTML Report</button>
+      </div>
+
       <!-- Version Loader Section -->
       <div class="v2v-section" id="v2v-upload-section">
         <div class="v2v-section-header">
@@ -239,7 +245,7 @@
             <div class="v2v-granularity-toggle">
               <button data-granularity="monthly">Month</button>
               <button data-granularity="week" class="active">Week</button>
-              <button data-granularity="day">Daily</button>
+              <button data-granularity="day">Day</button>
               <button data-granularity="shift">Shift</button>
             </div>
           </div>
@@ -248,100 +254,16 @@
         <div id="v2v-breadcrumb" class="v2v-breadcrumb"></div>
         <div class="v2v-detail-tabs" id="v2v-detail-tabs"></div>
 
-        <!-- Output Table Dimension Builder - Hidden per user request, BOH is SKU level only, dimension switching at top -->
-        <div id="v2v-output-builder" class="v2v-section" style="margin:0 0 12px 0;padding:12px;background:#f8fafc;display:none !important">
-          <div style="font-weight:600;font-size:13px;margin-bottom:8px">Dimension Builder (On-demand aggregation)</div>
-          <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end">
-            <div>
-              <div style="font-size:11px;color:#64748b;margin-bottom:4px">Group by (Multi-select)</div>
-              <div id="v2v-groupby-options" style="display:flex;gap:8px;flex-wrap:wrap">
-                <!-- Dynamic based on table -->
-              </div>
-            </div>
-            <div>
-              <div style="font-size:11px;color:#64748b;margin-bottom:4px">Granularity</div>
-              <div class="v2v-granularity-toggle" id="v2v-output-granularity">
-                <button data-granularity="monthly">Month</button>
-                <button data-granularity="week" class="active">Week</button>
-                <button data-granularity="day">Daily</button>
-                <button data-granularity="shift">Shift</button>
-              </div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-size:11px"><input type="checkbox" id="v2v-only-diff" checked> Only Diff</label>
-              <label style="font-size:11px"><input type="checkbox" id="v2v-cum" checked> Cum (Cumulative) - Prioritize cum comparison</label>
-              <label style="font-size:11px">Threshold Abs: <input type="number" id="v2v-threshold-abs" value="0" style="width:70px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>
-            </div>
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-sm" onclick="applyV2VOutputQuery()">▶ Apply</button>
-              <button class="btn btn-sm" style="background:#f1f5f9" onclick="resetV2VOutputQuery()">Reset</button>
-            </div>
-          </div>
-          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-            <span style="font-size:11px;color:#64748b">Quick:</span>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_week')">Line Weekly</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('sku_week')">SKU Weekly</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_sku_week')">Line+SKU Weekly</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('item_week')">Item Weekly (BOH)</button>
-          </div>
-        </div>
-
-        <!-- Plan Output Detailed Matrix (New - Default FG SKU Daily View) -->
-        <div id="v2v-plan-output-detailed" class="v2v-section" style="margin:0 0 16px 0;padding:12px;background:#fff;border:2px solid #0f172a;display:none">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <div>
-              <div style="font-weight:700;font-size:14px">📋 Plan Output Detailed - FG SKU Daily (Default) + Weekly/Monthly + Cum</div>
-              <div style="font-size:11px;color:#64748b">Rows: SKU (Default FG SK-*) | Columns: Daily grouped by Sun-Sat weeks | Values: A/B/Diff + Cum | Priority: Cum comparison</div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <label style="font-size:12px">SKU Filter: 
-                <select id="v2v-po-sku-prefix" class="v2v-select" style="width:120px">
-                  <option value="SK" selected>FG (SK-*)</option>
-                  <option value="GB">GB (GB-*)</option>
-                  <option value="LT">LT (LT-*)</option>
-                  <option value="FR">FR (FR-*)</option>
-                  <option value="RT">RT (RT-*)</option>
-                  <option value="SK,GB">FG+GB</option>
-                  <option value="SK,GB,LT,FR,RT">All (SK,GB,LT,FR,RT)</option>
-                </select>
-              </label>
-              <label style="font-size:12px">Line: <input type="text" id="v2v-po-line-filter" placeholder="e.g. AL6-Frame or PKG" class="v2v-select" style="width:120px"></label>
-              <label style="font-size:12px">Exact SKU: <input type="text" id="v2v-po-exact-sku" placeholder="e.g. GB-Rec M-BLACK" class="v2v-select" style="width:150px"></label>
-              <label style="font-size:12px">Granularity:
-                <select id="v2v-po-granularity" class="v2v-select" style="width:100px">
-                  <option value="monthly">Month</option>
-                  <option value="week" selected>Week</option>
-                  <option value="day">Daily</option>
-                  <option value="shift">Shift</option>
-                </select>
-              </label>
-              <label style="font-size:12px"><input type="checkbox" id="v2v-po-cum" checked> Cum (Prioritize)</label>
-              <button class="btn btn-sm" onclick="loadPlanOutputMatrix()" style="background:#0f172a;color:white">▶ Load Matrix</button>
-            </div>
-          </div>
-          <div id="v2v-po-matrix-status" style="font-size:12px;color:#64748b;margin-bottom:8px"></div>
-          <div id="v2v-po-matrix-wrapper" class="v2v-table-wrapper" style="max-height:500px">
-            <div style="padding:20px;text-align:center;color:#94a3b8">Click "Load Matrix" to display FG SKU daily view with weekly grouping (Sun-Sat) and cum comparison. Default shows FG SKUs, you can switch to LT/GB intermediate SKUs and drill down to Line/Shift.</div>
-          </div>
-        </div>
-
         <div class="v2v-toolbar">
-          <div class="v2v-toolbar-left">
+          <div class="v2v-toolbar-left" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
             <label style="font-size:12px">Change Type:
               <select id="v2v-filter-changetype" class="v2v-select" style="width:120px">
                 <option value="ALL">All</option>
-                <option value="ADD">Added</option>
-                <option value="DEL">Deleted</option>
+                <option value="ADDED">Added</option>
+                <option value="DELETED">Deleted</option>
                 <option value="MODIFY">Modified</option>
-                <option value="INCONSISTENT">Inconsistent</option>
               </select>
             </label>
-            <input type="text" id="v2v-search" placeholder="Search PN/Line..." class="v2v-select" style="width:180px">
-          </div>
-          <div class="v2v-toolbar-right" style="display:flex;gap:8px;align-items:center">
-            <button id="v2v-btn-download" class="btn btn-sm" style="background:#0f172a;color:white">📥 Download Current View</button>
-            <button id="v2v-btn-export-html" class="btn btn-sm" style="background:#2563eb;color:white">📄 Export HTML Report</button>
-            <span style="font-size:11px;color:#64748b">Click row for drill-down | Export HTML for sharing</span>
           </div>
         </div>
 
@@ -392,8 +314,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="/static/global/app.js?v=20260721_05"></script>
-<script src="/static/modules/plan_merge/app.js?v=20260721_05"></script>
-<script src="/static/modules/v2v/app.js?v=20260721_05"></script>
+<script src="/static/global/app.js?v=20260721_16"></script>
+<script src="/static/modules/plan_merge/app.js?v=20260721_16"></script>
+<script src="/static/modules/v2v/app.js?v=20260721_16"></script>
 </body>
 </html>
