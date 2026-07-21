@@ -248,8 +248,8 @@
         <div id="v2v-breadcrumb" class="v2v-breadcrumb"></div>
         <div class="v2v-detail-tabs" id="v2v-detail-tabs"></div>
 
-        <!-- Output Table Dimension Builder (Phase3 Refined) -->
-        <div id="v2v-output-builder" class="v2v-section" style="margin:0 0 12px 0;padding:12px;background:#f8fafc;display:none">
+        <!-- Output Table Dimension Builder - Hidden per user request, BOH is SKU level only, dimension switching at top -->
+        <div id="v2v-output-builder" class="v2v-section" style="margin:0 0 12px 0;padding:12px;background:#f8fafc;display:none !important">
           <div style="font-weight:600;font-size:13px;margin-bottom:8px">Dimension Builder (On-demand aggregation)</div>
           <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end">
             <div>
@@ -282,7 +282,7 @@
             <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_week')">Line Weekly</button>
             <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('sku_week')">SKU Weekly</button>
             <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('line_sku_week')">Line+SKU Weekly</button>
-            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('item_week')">Item Weekly (Balance)</button>
+            <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="setV2VQuickQuery('item_week')">Item Weekly (BOH)</button>
           </div>
         </div>
 

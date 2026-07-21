@@ -12,7 +12,7 @@ const V2V_TABLE_DEFS = {
   plan_config: {name: 'Plan Config', cat: 'input'},
   plan_input: {name: 'Plan Input', cat: 'output'},
   plan_output: {name: 'Plan Output', cat: 'output'},
-  balance: {name: 'Balance', cat: 'output'},
+  balance: {name: 'BOH', cat: 'output'},
 };
 
 let v2vState = {
@@ -775,40 +775,15 @@ function updateV2VBuilderForTable(tableName) {
   const builder = document.getElementById('v2v-output-builder');
   const detailedSection = document.getElementById('v2v-plan-output-detailed');
   if (!builder) return;
-  if (tableName === 'plan_output' || tableName === 'balance' || tableName === 'plan_input') {
-    builder.style.display = 'block';
-    if (detailedSection && tableName === 'plan_output') {
+  // Per user request 2026-07-21: Dimension Builder looks messy for BOH, dimension switching already at top, so always hide builder
+  builder.style.display = 'none';
+  // Only show detailed matrix for plan_output, hide for others
+  if (detailedSection) {
+    if (tableName === 'plan_output') {
       detailedSection.style.display = 'block';
-    } else if (detailedSection) {
+    } else {
       detailedSection.style.display = 'none';
     }
-    // Populate groupby options
-    const optionsEl = document.getElementById('v2v-groupby-options');
-    if (optionsEl) {
-      let opts = [];
-      if (tableName === 'plan_output') {
-        opts = [
-          {val: 'LINE_CODE', label: 'LINE_CODE'},
-          {val: 'SKU', label: 'SKU'},
-          {val: 'PLAN_ITEM', label: 'PLAN_ITEM'},
-          {val: 'PLAN_TYPE', label: 'PLAN_TYPE'}
-        ];
-      } else if (tableName === 'plan_input') {
-        opts = [
-          {val: 'PN_CODE', label: 'PN_CODE / SKU'},
-          {val: 'WEEK', label: 'WEEK'}
-        ];
-      } else {
-        opts = [
-          {val: 'ITEM_CODE', label: 'ITEM_CODE'},
-          {val: 'SHIFT_NAME', label: 'SHIFT'}
-        ];
-      }
-      optionsEl.innerHTML = opts.map(o=>`<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="v2v-groupby-cb" value="${o.val}" checked> ${o.label}</label>`).join('');
-    }
-  } else {
-    builder.style.display = 'none';
-    if (detailedSection) detailedSection.style.display = 'none';
   }
 }
 

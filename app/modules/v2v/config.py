@@ -100,8 +100,8 @@ TABLE_DEFS = {
         "supports_granularity": True
     },
     "balance": {
-        "keywords": ["balance", "wip", "onhand", "inventory"],
-        "display_name": "Balance / WIP",
+        "keywords": ["balance", "boh", "wip", "onhand", "inventory"],
+        "display_name": "BOH",
         "category": "output",
         "key_fields": ["ITEM_CODE", "PLAN_DATE", "SHIFT_NAME"],
         "compare_fields": ["BALANCE_QTY", "SHIFT_OUT_QTY", "PRE_INPUT_QTY"],

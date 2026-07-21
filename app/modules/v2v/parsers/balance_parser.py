@@ -23,8 +23,8 @@ def normalize_dates(df):
     df["_DATE"] = df["_DATE_DT"].dt.strftime("%Y-%m-%d")
     df["_WEEK_DT"] = df["_DATE_DT"].apply(lambda x: to_saturday(x) if pd.notna(x) else None)
     df["_WEEK"] = df["_WEEK_DT"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notna(x) and hasattr(x, 'strftime') else None)
+    df["_MONTH"] = df["_DATE_DT"].dt.strftime("%Y-%m")
     # Shift order for last value: white=1, night=2
-    # Use SHIFT_CODE if available, else SHIFT_NAME
     if "SHIFT_CODE" in df.columns:
         df["_SHIFT_ORDER"] = df["SHIFT_CODE"]
     else:
@@ -66,6 +66,8 @@ def get_group_keys(group_by, granularity):
         time_cols = ["_WEEK"]
     elif granularity == "day":
         time_cols = ["_DATE"]
+    elif granularity in ["monthly", "month"]:
+        time_cols = ["_MONTH"]
     else:
         time_cols = ["_DATE", "SHIFT_NAME"]
         time_cols = [c for c in time_cols if c not in clean_gb]
