@@ -103,11 +103,6 @@
           </div>
         </div>
 
-        <div class="dim-tabs">
-          <button class="dim-tab ${currentMode==='day'?'active':''}" data-mode="day">Day</button>
-          <button class="dim-tab ${currentMode==='shift'?'active':''}" data-mode="shift">Shift</button>
-        </div>
-
         <div class="toolbar" style="border:none;padding:8px 0">
           <div class="panels-row">
             <div class="panel panel-filter">
@@ -135,6 +130,16 @@
                   <label>&nbsp;</label>
                   <button class="util-btn" id="btn-apply-pivot">Apply</button>
                 </div>
+              </div>
+            </div>
+            <div class="panel panel-cols">
+              <div class="panel-label">📋 Columns <span style="font-weight:400;text-transform:none;color:#94a3b8"> — Column dimension: Day / Shift like I/O Report</span></div>
+              <div class="cols-row" style="align-items:center">
+                <div class="util-toggle-group">
+                  <button id="btn-mode-day" class="${currentMode==='day'?'active':''}">Day</button>
+                  <button id="btn-mode-shift" class="${currentMode==='shift'?'active':''}">Shift</button>
+                </div>
+                <span style="font-size:11px;color:#64748b;margin-left:8px">Switches date columns between daily aggregated and per-shift</span>
               </div>
             </div>
           </div>
@@ -463,14 +468,19 @@
       }catch(e){ if(msg) msg.textContent='❌ '+e.message; }
     });
 
-    document.querySelectorAll('#utilization-section .dim-tab').forEach(btn=>{
+    // Column dimension toggle (Day / Shift) like I/O Report
+    const bindModeToggle = (id)=>{
+      const btn = document.getElementById(id);
+      if(!btn) return;
       btn.addEventListener('click', ()=>{
-        document.querySelectorAll('#utilization-section .dim-tab').forEach(b=>b.classList.remove('active'));
+        document.querySelectorAll('#utilization-section .util-toggle-group button').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
-        currentMode = btn.dataset.mode;
+        currentMode = id.includes('day') ? 'day' : 'shift';
         applyPivot();
       });
-    });
+    };
+    bindModeToggle('btn-mode-day');
+    bindModeToggle('btn-mode-shift');
 
     document.getElementById('btn-apply-pivot')?.addEventListener('click', applyPivot);
     document.getElementById('util-filter-from')?.addEventListener('change', applyPivot);
