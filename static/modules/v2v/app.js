@@ -1116,19 +1116,19 @@ function renderV2VTableDetail(data, tableName) {
     const key = rec.key || {};
     if (tableName === 'bom') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
-      html += `<td>${esc(key.PARENT_PN_CODE||'')}</td>`;
-      html += `<td>${esc(key.ITEM_NO||'')}</td>`;
+      html += `<td>${esc(key.PARENT_PN_CODE||rec.PARENT_PN_CODE||'')}</td>`;
+      html += `<td>${esc(key.ITEM_NO||rec.ITEM_NO||'')}</td>`;
       html += `<td>${esc(rec.field||'')}</td>`;
-      html += `<td>${esc(rec.value_a||'')}</td>`;
-      html += `<td>${esc(rec.value_b||'')}</td>`;
+      html += `<td>${esc(rec.value_a||rec.UNIT_NUM_A||'')}</td>`;
+      html += `<td>${esc(rec.value_b||rec.UNIT_NUM_B||'')}</td>`;
     } else if (tableName === 'fcst') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
-      html += `<td>${esc(key.PN_CODE||'')}</td>`;
-      html += `<td>${esc(key.WEEK||'')}</td>`;
-      html += `<td>${esc(rec.field||'')}</td>`;
-      html += `<td>${rec.value_a||0}</td>`;
-      html += `<td>${rec.value_b||0}</td>`;
-      html += `<td style="${(rec.delta||0)>0?'color:#16a34a':(rec.delta||0)<0?'color:#dc2626':''}">${rec.delta||''}</td>`;
+      html += `<td>${esc(key.PN_CODE||rec.PN_CODE||rec.SKU||'')}</td>`;
+      html += `<td>${esc(key.WEEK||rec.WEEK||rec.ACTUALFIRSTDAYOFWEEK||'')}</td>`;
+      html += `<td>${esc(rec.field||'ACTUALWEEKVALUE')}</td>`;
+      html += `<td>${rec.value_a||rec.ACTUALWEEKVALUE_A||0}</td>`;
+      html += `<td>${rec.value_b||rec.ACTUALWEEKVALUE_B||0}</td>`;
+      html += `<td style="${(rec.delta||rec.diff||0)>0?'color:#16a34a':(rec.delta||rec.diff||0)<0?'color:#dc2626':''}">${rec.delta||rec.diff||''}</td>`;
     } else if (tableName === 'plan_config') {
       html += `<td>${esc(rec.field||'')}</td>`;
       html += `<td>${esc(rec.value_a||'')}</td>`;
@@ -1136,41 +1136,41 @@ function renderV2VTableDetail(data, tableName) {
       html += `<td><span class="v2v-change-badge mod">MODIFY</span></td>`;
     } else if (tableName === 'actual_io') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
-      html += `<td>${esc(key.LINE_CODE||'')}</td>`;
-      html += `<td>${esc(key.SKU||'')}</td>`;
-      html += `<td>${esc(key.PLAN_DATE||key._MERGE_DATE||'')}</td>`;
-      html += `<td>${esc(key.SHIFT_NAME||'')}</td>`;
+      html += `<td>${esc(key.LINE_CODE||rec.LINE_CODE||'')}</td>`;
+      html += `<td>${esc(key.SKU||rec.SKU||'')}</td>`;
+      html += `<td>${esc(key.PLAN_DATE||key._MERGE_DATE||rec.PLAN_DATE||rec._MERGE_DATE||'')}</td>`;
+      html += `<td>${esc(key.SHIFT_NAME||rec.SHIFT_NAME||'')}</td>`;
       html += `<td>${esc(rec.field||'')}</td>`;
-      html += `<td>${rec.value_a||''}</td>`;
-      html += `<td>${rec.value_b||''}</td>`;
-      html += `<td style="${(rec.delta||0)>0?'color:#16a34a':(rec.delta||0)<0?'color:#dc2626':''}">${rec.delta||''}</td>`;
+      html += `<td>${rec.value_a||rec.PLAN_VALUE_A||''}</td>`;
+      html += `<td>${rec.value_b||rec.PLAN_VALUE_B||''}</td>`;
+      html += `<td style="${(rec.delta||rec.diff||0)>0?'color:#16a34a':(rec.delta||rec.diff||0)<0?'color:#dc2626':''}">${rec.delta||rec.diff||''}</td>`;
     } else if (tableName === 'supply') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
-      html += `<td>${esc(key.PN_CODE||'')}</td>`;
-      html += `<td>${esc(key.KITTING_DATE||key.WEEK||key._MERGE_DATE||'')}<br><small>${key.GRANULARITY||''}</small></td>`;
-      html += `<td>${esc(rec.field||'')}</td>`;
-      html += `<td>${rec.value_a||''}</td>`;
-      html += `<td>${rec.value_b||''}</td>`;
-      html += `<td style="${(rec.delta||0)>0?'color:#16a34a':(rec.delta||0)<0?'color:#dc2626':''}">${rec.delta||''}</td>`;
+      html += `<td>${esc(key.PN_CODE||rec.PN_CODE||'')}</td>`;
+      html += `<td>${esc(key.KITTING_DATE||key.WEEK||key._MERGE_DATE||rec.KITTING_DATE||rec.WEEK||rec.ACTUALFIRSTDAYOFWEEK||'')}<br><small>${key.GRANULARITY||rec.GRANULARITY||''}</small></td>`;
+      html += `<td>${esc(rec.field||'KITTING_VALUE')}</td>`;
+      html += `<td>${rec.value_a||rec.KITTING_VALUE_A||rec.ACTUALWEEKVALUE_A||''}</td>`;
+      html += `<td>${rec.value_b||rec.KITTING_VALUE_B||rec.ACTUALWEEKVALUE_B||''}</td>`;
+      html += `<td style="${(rec.delta||rec.diff||0)>0?'color:#16a34a':(rec.delta||rec.diff||0)<0?'color:#dc2626':''}">${rec.delta||rec.diff||''}</td>`;
     } else if (tableName === 'switch') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
-      html += `<td>${esc(key.LINE_CODE||'')}</td>`;
-      html += `<td>${esc(key.BEFORE_PN_CODE||key.BEFORE||'')}</td>`;
-      html += `<td>${esc(key.AFTER_PN_CODE||key.AFTER||'')}</td>`;
-      html += `<td>${esc(rec.field||'')}</td>`;
-      html += `<td>${rec.value_a||''}</td>`;
-      html += `<td>${rec.value_b||''}</td>`;
-      html += `<td>${rec.delta||''}</td>`;
+      html += `<td>${esc(key.LINE_CODE||rec.LINE_CODE||'')}</td>`;
+      html += `<td>${esc(key.BEFORE_PN_CODE||key.BEFORE||rec.BEFORE_PN_CODE||'')}</td>`;
+      html += `<td>${esc(key.AFTER_PN_CODE||key.AFTER||rec.AFTER_PN_CODE||'')}</td>`;
+      html += `<td>${esc(rec.field||'SWITCH_DURATION')}</td>`;
+      html += `<td>${rec.value_a||rec.SWITCH_DURATION_A||''}</td>`;
+      html += `<td>${rec.value_b||rec.SWITCH_DURATION_B||''}</td>`;
+      html += `<td>${rec.delta||rec.diff||''}</td>`;
     } else if (tableName === 'calendar') {
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
-      html += `<td>${esc(key.LINE_CODE||'')}</td>`;
-      html += `<td>${esc(key.PLAN_TYPE||'')}</td>`;
-      html += `<td>${esc(key.PLAN_DATE||key.WEEK||key._DATE_STR||key._WEEK_STR||'')}</td>`;
-      html += `<td>${esc(key.SHIFT_NAME||'')}</td>`;
-      html += `<td>${esc(key.PLAN_ITEM||'')}</td>`;
-      html += `<td>${rec.value_a||''}</td>`;
-      html += `<td>${rec.value_b||''}</td>`;
-      html += `<td style="${(rec.delta||0)>0?'color:#16a34a':(rec.delta||0)<0?'color:#dc2626':''}">${rec.delta||''}</td>`;
+      html += `<td>${esc(key.LINE_CODE||rec.LINE_CODE||'')}</td>`;
+      html += `<td>${esc(key.PLAN_TYPE||rec.PLAN_TYPE||'')}</td>`;
+      html += `<td>${esc(key.PLAN_DATE||key.WEEK||key._DATE_STR||key._WEEK_STR||rec.PLAN_DATE||rec.WEEK||'')}</td>`;
+      html += `<td>${esc(key.SHIFT_NAME||rec.SHIFT_NAME||'')}</td>`;
+      html += `<td>${esc(key.PLAN_ITEM||rec.PLAN_ITEM||'')}</td>`;
+      html += `<td>${rec.value_a||rec.PLAN_VALUE_A||''}</td>`;
+      html += `<td>${rec.value_b||rec.PLAN_VALUE_B||''}</td>`;
+      html += `<td style="${(rec.delta||rec.diff||0)>0?'color:#16a34a':(rec.delta||rec.diff||0)<0?'color:#dc2626':''}">${rec.delta||rec.diff||''}</td>`;
     } else if (tableName === 'item' || tableName === 'line') {
       const keyName = tableName==='item'?'ITEM_NO':'LINE_CODE';
       html += `<td><span class="v2v-change-badge ${ctLower}">${badge}</span></td>`;
