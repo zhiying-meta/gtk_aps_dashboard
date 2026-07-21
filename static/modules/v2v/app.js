@@ -526,6 +526,7 @@ function renderDetailTabs(data) {
 }
 
 function selectV2VTable(tableName) {
+  console.log('Card clicked:', tableName);
   v2vState.activeTable = tableName;
   v2vState.currentPage = 1;
   v2vState.breadcrumbs = [{label:'All', granularity:v2vState.granularity, filters:{}}];
@@ -536,6 +537,12 @@ function selectV2VTable(tableName) {
   
   // Show/hide output builder for plan_output and balance
   updateV2VBuilderForTable(tableName);
+
+  // Auto scroll to detail section
+  const detailSection = document.getElementById('v2v-detail-section');
+  if (detailSection) {
+    setTimeout(()=> detailSection.scrollIntoView({behavior: 'smooth', block: 'start'}), 100);
+  }
 
   loadV2VDetail(tableName);
 }
@@ -695,8 +702,13 @@ function renderV2VTableDetail(data, tableName) {
     return;
   }
 
-  // Header with actions
-  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:12px;color:#64748b">Showing ${records.length} of ${pagination.total||records.length} records | Page ${pagination.page||1} | Table: ${def.name}</div><div><button class="btn btn-sm" onclick="showV2VChart('${tableName}')">📈 Chart</button></div></div>`;
+  // Header with actions + special note for FCST
+  let extraNote = '';
+  if (tableName === 'fcst' && data.summary && data.summary.note) {
+    extraNote = `<div style="background:#fffbeb;border:1px solid #fde68a;padding:8px;border-radius:4px;margin-bottom:8px;font-size:12px;color:#92400e">💡 ${esc(data.summary.note)}<br>Grouped view shows SKU×Week aggregated (1 detail edit may appear as 2 grouped modifies if 2 SKUs share same MAIN_ID). Raw detail rows changed: ${data.summary.raw_total_a !== undefined ? (data.records.length + ' grouped, raw diff count in backend is ' + (data.summary.modified_raw||'?')) : ''}</div>`;
+  }
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:12px;color:#64748b">Showing ${records.length} of ${pagination.total||records.length} records | Page ${pagination.page||1} | Table: ${def.name} | <span style="cursor:pointer;color:#3b82f6" onclick="document.getElementById('v2v-chart-container').style.display='block'">Click row 📈 for chart, click card for detail</span></div><div><button class="btn btn-sm" onclick="showV2VChart('${tableName}')">📈 Chart</button></div></div>`;
+  html += extraNote;
   html += `<div id="v2v-chart-container" style="margin:12px 0;display:none;padding:12px;background:white;border:1px solid #e2e8f0;border-radius:6px"><canvas id="v2v-chart" style="max-height:300px"></canvas><div style="margin-top:8px;display:flex;gap:8px"><input type="text" id="v2v-chart-key" placeholder="Enter ${tableName==='supply'?'PN_CODE': tableName==='calendar'?'LINE_CODE': tableName==='actual_io'?'LINE_CODE or leave blank': 'Key for chart'}" style="padding:6px;border:1px solid #cbd5e1;border-radius:4px;flex:1"><button class="btn btn-sm" onclick="loadV2VChart('${tableName}')">Load Chart</button></div></div>`;
   html += '<div class="v2v-table-wrapper"><table class="v2v-table"><thead><tr>';
 
