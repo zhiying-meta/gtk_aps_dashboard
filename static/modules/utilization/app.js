@@ -130,10 +130,10 @@
           <div class="section-actions">
             <span id="util-matrix-badge" style="font-size:11px;color:#64748b"></span>
             <span style="font-size:11px;display:flex;gap:6px;align-items:center">
-              <span style="background:#ecfdf5;color:#059669;padding:2px 6px;border-radius:10px">0-50%</span>
-              <span style="background:#fffbeb;color:#d97706;padding:2px 6px;border-radius:10px">50-80%</span>
-              <span style="background:#ffedd5;color:#ea580c;padding:2px 6px;border-radius:10px">80-100%</span>
-              <span style="background:#fef2f2;color:#dc2626;padding:2px 6px;border-radius:10px;border:1px solid #fecaca">Overload</span>
+              <span style="background:transparent;color:#94a3b8;padding:2px 6px;border-radius:10px;border:1px dashed #e2e8f0">0% no color</span>
+              <span style="background:#fef2f2;color:#991b1b;padding:2px 6px;border-radius:10px;border:1px solid #fecaca">0-60% red</span>
+              <span style="background:#fffbeb;color:#92400e;padding:2px 6px;border-radius:10px">60-80% yellow</span>
+              <span style="background:#ecfdf5;color:#065f46;padding:2px 6px;border-radius:10px">80%+ green</span>
             </span>
           </div>
         </div>
@@ -387,18 +387,23 @@
           tbody += `<td class="data-cell" style="background:#f8fafc"></td>`;
         }else{
           const raw = cellDetail ? cellDetail.util_raw : cellVal;
-          const isOver = cellDetail ? cellDetail.util_raw>100 : false;
           const load = cellDetail ? cellDetail.load : '';
           const cap = cellDetail ? cellDetail.capacity : '';
           let cls = '';
-          if(isOver) cls='util-cell-over';
-          else if(cellVal>=80) cls='util-cell-high';
-          else if(cellVal>=50) cls='util-cell-mid';
-          else if(cellVal>0) cls='util-cell-low';
-          else cls='util-cell-zero';
-          let display = cellVal>0 ? `${Math.round(cellVal)}%` : '0%';
-          if(isOver) display = `100%<span style="font-size:8px">(${Math.round(raw)}%)</span>`;
-          tbody += `<td class="data-cell ${cls}" title="Line:${esc(r.line_code)} Ver:${esc(vType)} Date:${esc(col)} Load:${load} Cap:${cap} Raw:${raw}%">${display}</td>`;
+          // New coloring: 0% no color, 0-60% red, 60-80% yellow, 80%+ green
+          if(cellVal===0 || cellVal==null){
+            cls='util-cell-zero';
+          }else if(cellVal<60){
+            cls='util-cell-red';
+          }else if(cellVal<80){
+            cls='util-cell-yellow';
+          }else{
+            cls='util-cell-green';
+          }
+          // No (raw) after 100%, just show capped %
+          let display = `${Math.round(cellVal)}%`;
+          if(cellVal===0) display = '0%';
+          tbody += `<td class="data-cell ${cls}" title="Line:${esc(r.line_code)} Ver:${esc(vType)} Date:${esc(col)} Load:${load} Cap:${cap} Raw:${raw}% (capped at 100%)">${display}</td>`;
         }
       });
       tbody += '</tr>';

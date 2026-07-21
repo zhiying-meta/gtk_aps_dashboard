@@ -44,8 +44,12 @@
 #utilization-section tr.row-new-line td.frozen { border-top:2.5px solid #94a3b8; }
 #utilization-section tr.row-new-line td.divider-col { border-top:2.5px solid #475569 !important; }
 
-/* Utilization heatmap cells */
-.util-cell-zero { background:#f8fafc !important; color:#94a3b8; }
+/* Utilization heatmap cells - new spec: 0% no color, 0-60% red, 60-80% yellow, 80%+ green */
+.util-cell-zero { background:transparent !important; color:#cbd5e1; }
+.util-cell-red { background:#fef2f2 !important; color:#991b1b; border:1px solid #fecaca; }
+.util-cell-yellow { background:#fffbeb !important; color:#92400e; }
+.util-cell-green { background:#ecfdf5 !important; color:#065f46; font-weight:600; }
+/* Legacy aliases for backward compat */
 .util-cell-low { background:#ecfdf5 !important; color:#065f46; }
 .util-cell-mid { background:#fffbeb !important; color:#92400e; }
 .util-cell-high { background:#ffedd5 !important; color:#9a3412; }
