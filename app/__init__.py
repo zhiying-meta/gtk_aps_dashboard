@@ -26,6 +26,13 @@ def create_app():
     except Exception:
         pass
 
+    # Utilization report module
+    try:
+        from app.modules.utilization_report.routes import util_bp
+        app.register_blueprint(util_bp)
+    except Exception as e:
+        print(f"[app] utilization_report not loaded: {e}")
+
     @app.after_request
     def no_cache(resp):
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
