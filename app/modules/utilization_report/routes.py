@@ -241,10 +241,14 @@ def api_pivot():
         else:
             cols = sorted(list(set(r['plan_date'] for r in all_recs)))
 
-        # Limit columns to 200 for performance (keep date range filtering in frontend if needed)
-        max_cols = 200
+        # Limit columns for performance but enough to cover ~1 year
+        # Day mode: ~400 days, Shift mode: ~800 cols (400 days*2), set to 1000 to cover full range
+        max_cols = 1000
+        total_cols_before = len(cols)
+        truncated = False
         if len(cols) > max_cols:
             cols = cols[:max_cols]
+            truncated = True
 
         # Build matrix keyed by (line_code, version_type) -> col -> util
         # Also keep detail
@@ -312,6 +316,8 @@ def api_pivot():
             "lines": sorted(list(lines_set)),
             "total_lines": len(sorted_keys),
             "total_cols": len(cols),
+            "total_cols_before": total_cols_before,
+            "truncated": truncated,
         })
 
     except Exception as e:

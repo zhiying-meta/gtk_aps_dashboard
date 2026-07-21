@@ -408,7 +408,8 @@
 
     const badge = document.getElementById('util-matrix-badge');
     if(badge){
-      badge.textContent = `${pivot.total_lines} rows × ${pivot.total_cols} cols | Thick border per Line`;
+      const truncInfo = pivot.truncated ? ` (showing first ${pivot.total_cols}/${pivot.total_cols_before} cols, use Date filters to see more)` : '';
+      badge.textContent = `${pivot.total_lines} rows × ${pivot.total_cols} cols${truncInfo} | Thick border per Line`;
     }
   }
 
