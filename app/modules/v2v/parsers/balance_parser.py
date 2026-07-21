@@ -92,12 +92,18 @@ def aggregate_balance(df, group_by, granularity, agg_method="last"):
     df = df.sort_values(["_DATE_DT", "_SHIFT_ORDER"])
 
     if granularity == "week":
-        # For weekly balance, take last per week per item
-        # Group and take last
         if agg_method == "last":
-            # For each group, take last row's BALANCE_QTY
-            agg = df.groupby(valid_keys, as_index=False).last()
-            # Keep BALANCE_QTY as last, but for SHIFT_OUT_QTY and PRE_INPUT_QTY sum? For simplicity keep last for all
+            # Only keep valid_keys + compare fields, not internal timestamp columns
+            # Use last for BALANCE_QTY and other compare fields
+            agg_dict = {}
+            # Keep the last of compare fields and any other numeric fields we need
+            for col in ["BALANCE_QTY", "SHIFT_OUT_QTY", "PRE_INPUT_QTY"]:
+                if col in df.columns:
+                    agg_dict[col] = "last"
+            # If valid_keys includes internal, keep them as first
+            agg = df.groupby(valid_keys, as_index=False).agg(agg_dict) if agg_dict else df.groupby(valid_keys, as_index=False).last()
+            # Drop internal timestamp columns if present
+            agg = agg[[c for c in agg.columns if not c.startswith("_") or c in valid_keys]]
         else:
             agg = df.groupby(valid_keys, as_index=False).agg({
                 "BALANCE_QTY": "sum",
@@ -106,21 +112,27 @@ def aggregate_balance(df, group_by, granularity, agg_method="last"):
             })
     elif granularity == "day":
         if agg_method == "last":
-            agg = df.groupby(valid_keys, as_index=False).last()
+            # Only keep valid_keys + compare fields
+            agg_dict = {}
+            for col in ["BALANCE_QTY", "SHIFT_OUT_QTY", "PRE_INPUT_QTY"]:
+                if col in df.columns:
+                    agg_dict[col] = "last"
+            agg = df.groupby(valid_keys, as_index=False).agg(agg_dict) if agg_dict else df.groupby(valid_keys, as_index=False).last()
+            agg = agg[[c for c in agg.columns if not c.startswith("_") or c in valid_keys]]
         else:
             agg = df.groupby(valid_keys, as_index=False).agg({
                 "BALANCE_QTY": "sum",
                 "SHIFT_OUT_QTY": "sum",
                 "PRE_INPUT_QTY": "sum"
             })
-    else:  # shift - no agg needed, just direct
+    else:  # shift
         agg = df.groupby(valid_keys, as_index=False).agg({
             "BALANCE_QTY": "last",
             "SHIFT_OUT_QTY": "sum",
             "PRE_INPUT_QTY": "sum"
         }) if not df.empty else df
+        agg = agg[[c for c in agg.columns if not c.startswith("_") or c in valid_keys]]
 
-    # Ensure columns
     return agg, valid_keys
 
 def diff_balance(df_a, df_b, group_by, granularity="week", filters=None, only_diff=True,
@@ -164,8 +176,29 @@ def diff_balance(df_a, df_b, group_by, granularity="week", filters=None, only_di
         if compare_field not in df_a_filt.columns:
             compare_field = "BALANCE_QTY"
 
-        agg_a = df_a_filt.groupby(valid_keys, as_index=False).last() if not df_a_filt.empty else pd.DataFrame(columns=valid_keys + [compare_field])
-        agg_b = df_b_filt.groupby(valid_keys, as_index=False).last() if not df_b_filt.empty else pd.DataFrame(columns=valid_keys + [compare_field])
+        # Only keep valid_keys + compare_field to avoid Timestamp/NaT columns that break JSON
+        def safe_groupby_last(df, keys, field):
+            if df.empty:
+                return pd.DataFrame(columns=keys + [field])
+            # Only aggregate the compare field, keep keys
+            try:
+                # Use last for compare field
+                agg = df.groupby(keys, as_index=False)[field].last()
+                return agg
+            except:
+                # Fallback: use last for all, then filter columns
+                agg = df.groupby(keys, as_index=False).last()
+                # Keep only keys and field
+                keep_cols = keys + [field]
+                # Also keep any other compare fields if present
+                for cf in ["BALANCE_QTY", "SHIFT_OUT_QTY", "PRE_INPUT_QTY"]:
+                    if cf in agg.columns and cf not in keep_cols:
+                        keep_cols.append(cf)
+                agg = agg[[c for c in keep_cols if c in agg.columns]]
+                return agg
+
+        agg_a = safe_groupby_last(df_a_filt, valid_keys, compare_field)
+        agg_b = safe_groupby_last(df_b_filt, valid_keys, compare_field)
 
         # Ensure compare_field exists
         if compare_field not in agg_a.columns:

@@ -21,7 +21,7 @@ UPLOAD_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 os.makedirs(UPLOAD_ROOT, exist_ok=True)
 
 def sanitize_for_json(obj):
-    """Recursively replace NaN, Infinity, -Infinity with None for valid JSON"""
+    """Recursively replace NaN, Infinity, -Infinity, NaT with None for valid JSON, and convert datetime to string"""
     if isinstance(obj, dict):
         return {k: sanitize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
@@ -31,7 +31,49 @@ def sanitize_for_json(obj):
             return None
         return obj
     else:
-        # Check for numpy NaN
+        # Check for datetime, Timestamp, NaT
+        try:
+            import pandas as pd
+            import datetime as dt
+            # Handle NaT
+            if pd.isna(obj):
+                # Check if it's NaT specifically
+                try:
+                    if isinstance(obj, pd._libs.tslibs.nattype.NaTType):
+                        return None
+                except:
+                    pass
+                # For NaT in general, return None
+                # pd.isna returns True for NaT, None, NaN
+                if obj is None:
+                    return None
+                # If it's float NaN, already handled above, but check again
+                try:
+                    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+                        return None
+                except:
+                    pass
+                # For other NaT-like, return None
+                # Check if it's NaT by trying to convert to string and seeing if it's 'NaT'
+                if str(obj) == 'NaT':
+                    return None
+            # Handle datetime and Timestamp
+            if isinstance(obj, (dt.datetime, dt.date, pd.Timestamp)):
+                # For NaT, pd.isna already returned True and we returned None above? Actually NaT is instance of NaTType, not datetime, but we check isna
+                # For valid datetime, convert to string
+                try:
+                    if pd.isna(obj):
+                        return None
+                except:
+                    pass
+                try:
+                    return obj.isoformat()
+                except:
+                    return str(obj)
+        except:
+            pass
+
+        # Check for numpy
         try:
             import numpy as np
             if isinstance(obj, (np.floating, np.integer)):
@@ -40,12 +82,20 @@ def sanitize_for_json(obj):
                 return float(obj) if isinstance(obj, np.floating) else int(obj)
             if obj is None or isinstance(obj, (str, int, bool)):
                 return obj
-            # For numpy arrays
             if hasattr(obj, 'item'):
                 try:
                     val = obj.item()
                     if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
                         return None
+                    # Check if val is datetime
+                    try:
+                        import pandas as pd
+                        if pd.isna(val):
+                            return None
+                        if isinstance(val, pd.Timestamp):
+                            return val.isoformat()
+                    except:
+                        pass
                     return val
                 except:
                     pass
