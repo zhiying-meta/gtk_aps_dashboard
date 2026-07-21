@@ -13,11 +13,45 @@ from . import v2v_bp
 from .config import TABLE_DEFS, SUPPORTED_GRANULARITIES, DEFAULT_GRANULARITY
 from .utils import scan_folder_for_tables, parse_folder_data, clean_version_name, identify_table_type
 from .diff_engine import compare_two_versions, get_detailed_diff
+import math
 
 # In-memory job store (MVP) - maps job_id to {folder_a, folder_b, result}
 JOB_STORE = {}
 UPLOAD_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'uploads', 'v2v')
 os.makedirs(UPLOAD_ROOT, exist_ok=True)
+
+def sanitize_for_json(obj):
+    """Recursively replace NaN, Infinity, -Infinity with None for valid JSON"""
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    else:
+        # Check for numpy NaN
+        try:
+            import numpy as np
+            if isinstance(obj, (np.floating, np.integer)):
+                if np.isnan(obj) or np.isinf(obj):
+                    return None
+                return float(obj) if isinstance(obj, np.floating) else int(obj)
+            if obj is None or isinstance(obj, (str, int, bool)):
+                return obj
+            # For numpy arrays
+            if hasattr(obj, 'item'):
+                try:
+                    val = obj.item()
+                    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                        return None
+                    return val
+                except:
+                    pass
+        except:
+            pass
+        return obj
 
 def _save_uploaded_files(files, job_id, version_label):
     """
@@ -198,7 +232,7 @@ def list_versions():
     # Note: Python sort ascending, so reverse=True
     candidates.sort(key=lambda x: (parse_date_version(x["name"])[0], parse_date_version(x["name"])[1], x["recognized"]), reverse=True)
 
-    return jsonify({"versions": candidates, "scanned_at": __import__('datetime').datetime.now().isoformat()})
+    return jsonify(sanitize_for_json({"versions": candidates, "scanned_at": __import__('datetime').datetime.now().isoformat()}))
 
 
 @v2v_bp.route('/v2v/api/scan', methods=['POST'])
@@ -241,7 +275,7 @@ def scan_upload():
         # Cleanup
         shutil.rmtree(os.path.join(UPLOAD_ROOT, job_id), ignore_errors=True)
 
-        return jsonify({"job_id": job_id, "folders": results})
+        return jsonify(sanitize_for_json({"job_id": job_id, "folders": results}))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -356,7 +390,7 @@ def compare():
         # If folder_a was temp uploaded, keep it for job lifetime (cleanup after 1 hour could be implemented)
         # For server path mode, don't delete
 
-        return jsonify(result)
+        return jsonify(sanitize_for_json(result))
 
     except Exception as e:
         import traceback
@@ -413,7 +447,7 @@ def diff_detail(table_name):
         detail["version_a_name"] = job.get("version_a_name")
         detail["version_b_name"] = job.get("version_b_name")
 
-        return jsonify(detail)
+        return jsonify(sanitize_for_json(detail))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -424,7 +458,7 @@ def diff_detail(table_name):
 def get_job(job_id):
     if job_id not in JOB_STORE:
         return jsonify({"error": "Job not found"}), 404
-    return jsonify(JOB_STORE[job_id]["result"])
+    return jsonify(sanitize_for_json(JOB_STORE[job_id]["result"]))
 
 
 @v2v_bp.route('/v2v/api/chart/<table_name>', methods=['GET'])
@@ -451,7 +485,7 @@ def get_chart(table_name):
         data = get_chart_data(job["folder_a"], job["folder_b"], table_name, **kwargs)
         data["job_id"] = job_id
         data["table"] = table_name
-        return jsonify(data)
+        return jsonify(sanitize_for_json(data))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -811,7 +845,7 @@ def get_bom_children_api():
         deleted = list(set_a - set_b)
         common = list(set_a & set_b)
 
-        return jsonify({
+        return jsonify(sanitize_for_json({
             "job_id": job_id,
             "parent": pn_code,
             "recursive": recursive,
@@ -822,7 +856,7 @@ def get_bom_children_api():
             "common": common,
             "total_a": len(children_a),
             "total_b": len(children_b)
-        })
+        }))
 
     except Exception as e:
         import traceback
@@ -859,7 +893,7 @@ def get_plan_output_breakdown():
 
         result = get_breakdown_by_line_shift(df_a, df_b, sku=sku, date=date, granularity=granularity)
         result["job_id"] = job_id
-        return jsonify(result)
+        return jsonify(sanitize_for_json(result))
 
     except Exception as e:
         import traceback
@@ -906,7 +940,7 @@ def get_plan_output_matrix():
             "cum": cum,
             "exact_sku": exact_sku
         }
-        return jsonify(matrix)
+        return jsonify(sanitize_for_json(matrix))
     except Exception as e:
         import traceback
         traceback.print_exc()
