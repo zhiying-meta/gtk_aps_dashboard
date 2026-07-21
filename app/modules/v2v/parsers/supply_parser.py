@@ -39,33 +39,34 @@ def diff_supply(df_a, df_b, granularity="day"):
         df_b["_KITTING_DATE_DT"] = pd.to_datetime(df_b["KITTING_DATE"], errors='coerce')
 
         if granularity == "week":
-            # Aggregate to week (Saturday)
-            # For simplicity, group by PN_CODE and week ending Saturday
-            # We need to compute Saturday for each KITTING_DATE
             def to_saturday(dt):
                 if pd.isna(dt):
                     return None
-                # weekday Mon=0...Sun=6, Sat=5
                 dow = dt.weekday()
                 delta = (5 - dow) % 7
-                # For Sun (6), delta=6 -> next Saturday, but for week Sun-Sat, that is correct
                 from datetime import timedelta
                 return dt + timedelta(days=delta)
 
             df_a["_WEEK"] = df_a["_KITTING_DATE_DT"].apply(to_saturday)
             df_b["_WEEK"] = df_b["_KITTING_DATE_DT"].apply(to_saturday)
 
-            # For week granularity, sum compare fields grouped by PN + WEEK
             agg_fields = {field: "sum" for field in compare_fields if field in df_a.columns}
             df_a_agg = df_a.groupby(["PN_CODE", "_WEEK"], as_index=False).agg(agg_fields)
             df_b_agg = df_b.groupby(["PN_CODE", "_WEEK"], as_index=False).agg(agg_fields)
 
-            # Use _WEEK as key
             merge_key = ["PN_CODE", "_WEEK"]
             df_a_use = df_a_agg
             df_b_use = df_b_agg
-            df_a_use["_MERGE_KEY"] = df_a_use["PN_CODE"].astype(str) + "_" + df_a_use["_WEEK"].astype(str)
-            df_b_use["_MERGE_KEY"] = df_b_use["PN_CODE"].astype(str) + "_" + df_b_use["_WEEK"].astype(str)
+        elif granularity in ["monthly", "month"]:
+            # Monthly: YYYY-MM
+            df_a["_MONTH"] = df_a["_KITTING_DATE_DT"].dt.strftime("%Y-%m")
+            df_b["_MONTH"] = df_b["_KITTING_DATE_DT"].dt.strftime("%Y-%m")
+            agg_fields = {field: "sum" for field in compare_fields if field in df_a.columns}
+            df_a_agg = df_a.groupby(["PN_CODE", "_MONTH"], as_index=False).agg(agg_fields)
+            df_b_agg = df_b.groupby(["PN_CODE", "_MONTH"], as_index=False).agg(agg_fields)
+            merge_key = ["PN_CODE", "_MONTH"]
+            df_a_use = df_a_agg
+            df_b_use = df_b_agg
         else:
             # Day granularity - direct merge on PN + Date
             df_a_use = df_a

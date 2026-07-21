@@ -41,18 +41,23 @@ def diff_calendar(df_a, df_b, granularity="day"):
                 return dt + timedelta(days=delta)
             df_a["_WEEK"] = df_a["_DATE_DT"].apply(to_saturday)
             df_b["_WEEK"] = df_b["_DATE_DT"].apply(to_saturday)
-            # For week, we need to decide aggregation: average? Keep last? For UPH curve, average or latest.
-            # Use mean for PLAN_VALUE when aggregated to week
             merge_keys = ["LINE_CODE", "PLAN_TYPE", "_WEEK", "SHIFT_NAME", "PLAN_ITEM"]
             df_a["_MERGE_WEEK"] = df_a["_WEEK"].astype(str)
             df_b["_MERGE_WEEK"] = df_b["_WEEK"].astype(str)
-            # Aggregate
             agg_a = df_a.groupby(merge_keys, as_index=False)["PLAN_VALUE"].mean()
             agg_b = df_b.groupby(merge_keys, as_index=False)["PLAN_VALUE"].mean()
-            # For merge, use string week
             agg_a["_WEEK_STR"] = agg_a["_WEEK"].astype(str)
             agg_b["_WEEK_STR"] = agg_b["_WEEK"].astype(str)
             merge_on = ["LINE_CODE", "PLAN_TYPE", "_WEEK_STR", "SHIFT_NAME", "PLAN_ITEM"]
+            df_a_use = agg_a
+            df_b_use = agg_b
+        elif granularity in ["monthly", "month"]:
+            df_a["_MONTH"] = df_a["_DATE_DT"].dt.strftime("%Y-%m")
+            df_b["_MONTH"] = df_b["_DATE_DT"].dt.strftime("%Y-%m")
+            merge_keys = ["LINE_CODE", "PLAN_TYPE", "_MONTH", "SHIFT_NAME", "PLAN_ITEM"]
+            agg_a = df_a.groupby(merge_keys, as_index=False)["PLAN_VALUE"].mean()
+            agg_b = df_b.groupby(merge_keys, as_index=False)["PLAN_VALUE"].mean()
+            merge_on = ["LINE_CODE", "PLAN_TYPE", "_MONTH", "SHIFT_NAME", "PLAN_ITEM"]
             df_a_use = agg_a
             df_b_use = agg_b
         else:

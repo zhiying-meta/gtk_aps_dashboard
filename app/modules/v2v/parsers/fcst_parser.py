@@ -51,14 +51,33 @@ def build_fcst_raw_detail(main_df, detail_df):
         return pd.DataFrame()
 
 
-def diff_fcst(main_a, detail_a, main_b, detail_b, mode="grouped"):
+def diff_fcst(main_a, detail_a, main_b, detail_b, mode="grouped", granularity="week"):
     """
     mode: grouped (default, by PN+Week sum) or raw (by ID+YEAR+MONTH+WEEK exact)
+    granularity: week, day, monthly - for time grouping
     For user who edits 1 detail row, grouped may show 2 modifies because 2 SKUs share same MAIN_ID
     """
     try:
         joined_a = build_fcst_joined(main_a, detail_a)
         joined_b = build_fcst_joined(main_b, detail_b)
+
+        # Handle monthly granularity: convert Week to Month
+        if granularity in ["monthly", "month"]:
+            # Convert ACTUALFIRSTDAYOFWEEK to YYYY-MM
+            def week_to_month(df):
+                if df.empty:
+                    return df
+                df = df.copy()
+                try:
+                    df["_MONTH"] = pd.to_datetime(df["ACTUALFIRSTDAYOFWEEK"], errors='coerce').dt.strftime("%Y-%m")
+                    # Group by PN_CODE + _MONTH sum
+                    df = df.groupby(["PN_CODE", "_MONTH"], as_index=False)["ACTUALWEEKVALUE"].sum()
+                    df.rename(columns={"_MONTH": "ACTUALFIRSTDAYOFWEEK"}, inplace=True)
+                except Exception as e:
+                    print(f"Month conversion error: {e}")
+                return df
+            joined_a = week_to_month(joined_a)
+            joined_b = week_to_month(joined_b)
 
         if joined_a.empty and joined_b.empty:
             return {
