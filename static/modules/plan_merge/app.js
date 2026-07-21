@@ -173,9 +173,9 @@ function initStaticUI(){
   banner.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div>
-        <div style="font-size:14px;font-weight:700;color:#1e40af">📦 Offline Static Mode - Full 功能已就绪</div>
+        <div style="font-size:14px;font-weight:700;color:#1e40af">📦 Offline Static Mode — Fully Ready</div>
         <div style="font-size:11px;color:#475569;margin-top:2px">
-          ${genAt ? `Generated: ${genAt} | ` : ''}${_staticVersions.length} version(s) embedded | 上传/配置/报表 均可在浏览器完成，无需服务器
+          ${genAt ? `Generated: ${genAt} | ` : ''}${_staticVersions.length} version(s) embedded | Upload / Config / Report all in browser, no server needed
           ${meta.note ? `<br>${esc(meta.note)}` : ''}
         </div>
       </div>
@@ -276,7 +276,7 @@ function loadStaticVersion(idx){
   pivotExpanded=new Set();
   setupDropdowns(); applyFilters(); render();
   const statusEl=document.getElementById('upload-status');
-  if(statusEl) statusEl.textContent=`📦 Offline loaded: ${v.name} (可继续上传新文件，客户端引擎已就绪)`;
+  if(statusEl) statusEl.textContent=`📦 Offline loaded: ${v.name} (you can still upload new files, client engine ready)`;
 }
 function loadStaticMultiVersions(){
   const selected=Array.from(_staticSelectedIdx).map(i=> _staticVersions[i]).filter(Boolean);

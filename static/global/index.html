@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,17 +20,42 @@
       </div>
       <button class="sidebar-toggle" id="sidebar-toggle" title="Collapse">‹</button>
     </div>
-    <div class="sidebar-nav-label">Report</div>
+    <div class="sidebar-nav-label">Menu</div>
     <nav class="sidebar-nav">
-      <div class="nav-category">Multiple Versions</div>
-      <a href="#" class="nav-item active" data-module="plan-merge">
-        <span class="nav-icon">📊</span>
-        <span class="nav-text">Gated/Ungated/CTB</span>
-      </a>
-      <div class="nav-category">Single Version</div>
-      <a href="#" class="nav-item" data-module="io-report">
+      <!-- Current Week -->
+      <div class="nav-category">Current Week</div>
+
+      <div class="nav-subcategory">Single</div>
+      <a href="#" class="nav-item active" data-module="io-report">
         <span class="nav-icon">📈</span>
         <span class="nav-text">I/O Report</span>
+      </a>
+      <a href="#" class="nav-item" data-module="idle">
+        <span class="nav-icon">⏸️</span>
+        <span class="nav-text">Line Idle Analysis</span>
+        <span class="nav-badge nav-badge-soon">Soon</span>
+      </a>
+
+      <div class="nav-subcategory">Compare · Gated · Ungated</div>
+      <a href="#" class="nav-item" data-module="packout">
+        <span class="nav-icon">📦</span>
+        <span class="nav-text">ExF vs ETD vs Packout vs CTB</span>
+      </a>
+      <a href="#" class="nav-item" data-module="utilization">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-text">Line Utilization</span>
+        <span class="nav-badge nav-badge-soon">Soon</span>
+      </a>
+
+      <!-- Cross Week -->
+      <div class="nav-category" style="margin-top:18px">Cross Week</div>
+      <a href="#" class="nav-item" data-module="version-compare">
+        <span class="nav-icon">🔀</span>
+        <span class="nav-text">Version Compare</span>
+      </a>
+      <!-- Legacy route mapping -->
+      <a href="#" class="nav-item" data-module="plan-merge" style="display:none">
+        <span class="nav-text">Legacy: Packout</span>
       </a>
     </nav>
     <div class="sidebar-footer">
@@ -128,7 +153,7 @@
     <!-- ===== Report Section ===== -->
     <div class="section" id="report-section" style="display:none">
       <div class="section-header">
-        <span class="section-title">📊 3. Report</span>
+        <span class="section-title">📊 3. ExF vs ETD vs Packout vs CTB</span>
         <div class="section-actions">
           <button id="btn-dl-excel" class="btn btn-sm">📥 Download Excel</button>
           <span id="report-status" class="status-msg"></span>
@@ -201,10 +226,82 @@
       </div>
     </div>
 
-    <!-- ===== I/O Report Section (Ported from Go aps-report) ===== -->
+    <!-- ===== I/O Report Section ===== -->
     <div id="io-report-section" style="display:none">
-      <!-- Content rendered by static/modules/io_report/app.js -->
       <div style="text-align:center;padding:40px;color:#94a3b8">Loading I/O Report...</div>
+    </div>
+
+    <!-- ===== Utilization ===== -->
+    <div id="utilization-section" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">⚙️ Line Utilization</span>
+          <span class="status-msg" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px">Coming Soon</span>
+        </div>
+        <div style="padding:24px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:12px 0">
+          <h3 style="font-size:14px;margin-bottom:8px">Design</h3>
+          <ul style="line-height:1.8;color:#475569;font-size:13px;margin-left:18px">
+            <li><b>Group:</b> Current Week → Compare (Gated / Ungated)</li>
+            <li>Both Gated+Ungated uploaded → show Δ Utilization = Gated - Ungated (material impact)</li>
+            <li>Single version only → fallback to single view (no delta)</li>
+            <li>Metrics: Utilization % = Load / Capacity</li>
+            <li>Dims: Line / Work Center / Day / Week</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Idle ===== -->
+    <div id="idle-section" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">⏸️ Line Idle Analysis</span>
+          <span class="status-msg" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px">Coming Soon</span>
+        </div>
+        <div style="padding:24px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:12px 0">
+          <h3 style="font-size:14px;margin-bottom:8px">Design</h3>
+          <ul style="line-height:1.8;color:#475569;font-size:13px;margin-left:18px">
+            <li><b>Group:</b> Current Week → Single (standalone)</li>
+            <li>Requires only one version (Gated or Ungated)</li>
+            <li>Shows idle time buckets / reason per line</li>
+            <li>Future: optional Gated - Ungated = material-caused idle</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Version Compare ===== -->
+    <div id="version-compare-section" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">🔀 Version Compare — Cross-Week (True Multi-Version)</span>
+          <span class="status-msg" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:2px 8px;border-radius:12px">True Multi-Version</span>
+        </div>
+        <div style="padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:12px 0">
+          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
+            <div style="flex:1;min-width:260px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;padding:12px">
+              <div style="font-weight:600;font-size:13px;margin-bottom:6px">Definition</div>
+              <div style="font-size:12px;color:#475569;line-height:1.6">
+                <div>• Gated/Ungated are two modes of the same week, not multi-version</div>
+                <div>• True Multi-Version = cross-week: e.g. W29 Gated vs W30 Gated</div>
+                <div>• Reuse same 4 views: Packout, I/O, Utilization, Idle</div>
+              </div>
+            </div>
+            <div style="flex:1;min-width:260px;background:#f0fdf4;border:1px dashed #86efac;border-radius:6px;padding:12px">
+              <div style="font-weight:600;font-size:13px;margin-bottom:6px">Current Impl</div>
+              <div style="font-size:12px;color:#475569;line-height:1.6">
+                <div>• Offline <code>export_static.py</code> supports multi-xlsx → STATIC_DB.versions[]</div>
+                <div>• Frontend has <code>Compare multi</code>: union weeks, rows + PlanVersion field</div>
+                <div>• Next: Base vs Compare selector + diff (Δ Qty, Δ Week)</div>
+              </div>
+            </div>
+          </div>
+          <div id="version-compare-hint" style="text-align:center;padding:20px;color:#94a3b8;border:1px dashed #e2e8f0;border-radius:6px">
+            No offline data. Run <code>export_static.py</code> to build multi-version pack, or use Packout page "Compare multi" for early preview.
+          </div>
+          <div id="version-compare-content"></div>
+        </div>
+      </div>
     </div>
 
     <div id="loading" class="loading" style="display:none">
@@ -227,12 +324,13 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="/static/modules/plan_merge/engine.js?v=20260717_2"></script>
-<script src="/static/modules/io_report/engine.js?v=20260717_2"></script>
-<script src="/static/global/app.js?v=20260717_2"></script>
-<script src="/static/modules/plan_merge/app.js?v=20260717_2"></script>
-<script src="/static/modules/io_report/app.js?v=20260717_2"></script>
-<link rel="stylesheet" href="/static/modules/io_report/style.css?v=20260717_1">
-<link rel="stylesheet" href="/static/modules/plan_merge/style.css?v=20260717_1">
+<script src="/static/modules/plan_merge/engine.js?v=20260722_4"></script>
+<script src="/static/modules/io_report/engine.js?v=20260722_4"></script>
+<script src="/static/global/app.js?v=20260722_4"></script>
+<script src="/static/modules/plan_merge/app.js?v=20260722_4"></script>
+<script src="/static/modules/io_report/app.js?v=20260722_4"></script>
+<link rel="stylesheet" href="/static/modules/io_report/style.css?v=20260722_4">
+<link rel="stylesheet" href="/static/modules/plan_merge/style.css?v=20260722_4">
+<link rel="stylesheet" href="/static/global/style.css?v=20260722_4">
 </body>
 </html>
