@@ -208,7 +208,7 @@ def compare_two_versions(folder_a: str, folder_b: str, granularity: str = "week"
     try:
         if "fcst" in data_a_small and "fcst_detail" in data_a_small and "fcst" in data_b_small and "fcst_detail" in data_b_small:
             if data_a_small["fcst"] is not None and data_a_small["fcst_detail"] is not None and data_b_small["fcst"] is not None and data_b_small["fcst_detail"] is not None:
-                diff = diff_fcst(data_a_small["fcst"], data_a_small["fcst_detail"], data_b_small["fcst"], data_b_small["fcst_detail"])
+                diff = diff_fcst(data_a_small["fcst"], data_a_small["fcst_detail"], data_b_small["fcst"], data_b_small["fcst_detail"], granularity=granularity)
                 result["diffs"]["fcst"] = diff
                 result["summary"]["fcst"] = {
                     "total_a": diff.get("total_a", 0),
@@ -439,7 +439,7 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
     elif table_name == "fcst":
         if not all(k in data_a and k in data_b for k in ["fcst", "fcst_detail"]) or any(data_a[k] is None or data_b[k] is None for k in ["fcst", "fcst_detail"]):
             return {"error": "FCST missing"}
-        diff = diff_fcst(data_a["fcst"], data_a["fcst_detail"], data_b["fcst"], data_b["fcst_detail"])
+        diff = diff_fcst(data_a["fcst"], data_a["fcst_detail"], data_b["fcst"], data_b["fcst_detail"], granularity=granularity)
         all_records = []
         if "records" in diff and isinstance(diff["records"], dict):
             for rec in diff["records"].get("added", []):
