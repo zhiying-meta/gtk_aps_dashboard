@@ -916,10 +916,9 @@ function renderV2VTableDetail(data, tableName) {
     // Will be removed per user request, but keep placeholder
     html += '<th>Change</th><th>Line</th><th>SKU</th><th>Date</th><th>Shift</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'supply') {
-    // Time horizontal: PN_CODE rows, Date columns
     const horiz = renderTimeHorizontal(records, tableName, 
-      rec => rec.key ? rec.key.PN_CODE : 'Unknown',
-      rec => rec.key ? (rec.key.WEEK || rec.key.KITTING_DATE || rec.key._MERGE_DATE || '') : '',
+      rec => (rec.key && rec.key.PN_CODE) ? rec.key.PN_CODE : rec.PN_CODE || 'Unknown',
+      rec => (rec.key && (rec.key.WEEK || rec.key.KITTING_DATE || rec.key._MERGE_DATE)) ? (rec.key.WEEK || rec.key.KITTING_DATE || rec.key._MERGE_DATE) : (rec.WEEK || rec.KITTING_DATE || rec._MERGE_DATE || rec.ACTUALFIRSTDAYOFWEEK || ''),
       rec => rec
     );
     if (horiz) { wrapper.innerHTML = horiz; return; }
@@ -928,8 +927,14 @@ function renderV2VTableDetail(data, tableName) {
     html += '<th>Change</th><th>Line</th><th>Before PN</th><th>After PN</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'calendar') {
     const horiz = renderTimeHorizontal(records, tableName,
-      rec => rec.key ? `${rec.key.LINE_CODE||''} | ${rec.key.PLAN_TYPE||''} | ${rec.key.SHIFT_NAME||''}` : 'Unknown',
-      rec => rec.key ? (rec.key.PLAN_DATE || rec.key.WEEK || rec.key._DATE_STR || '') : '',
+      rec => {
+        const k = rec.key || {};
+        return `${k.LINE_CODE||rec.LINE_CODE||''} | ${k.PLAN_TYPE||rec.PLAN_TYPE||''} | ${k.SHIFT_NAME||rec.SHIFT_NAME||''}`.replace(/^\s*\|\s*|\s*\|\s*$/g,'').trim() || 'Unknown';
+      },
+      rec => {
+        const k = rec.key || {};
+        return k.PLAN_DATE || k.WEEK || k._DATE_STR || rec.PLAN_DATE || rec.WEEK || rec._DATE_STR || '';
+      },
       rec => rec
     );
     if (horiz) { wrapper.innerHTML = horiz; return; }
@@ -942,33 +947,37 @@ function renderV2VTableDetail(data, tableName) {
     const horiz = renderTimeHorizontal(records, tableName,
       rec => {
         const gv = rec._group_values || rec.key || {};
-        return Object.values(gv).filter(v=>v).join(' | ') || rec.LINE_CODE || rec.SKU || 'Unknown';
+        return Object.values(gv).filter(v=>v).join(' | ') || rec.LINE_CODE || rec.SKU || rec.PN_CODE || 'Unknown';
       },
-      rec => rec._WEEK || rec._DATE || rec.WEEK || '',
+      rec => rec._WEEK || rec._DATE || rec.WEEK || rec.ACTUALFIRSTDAYOFWEEK || '',
       rec => rec
     );
     if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Time</th><th>Group</th><th>A Total</th><th>B Total</th><th>Diff</th><th>Diff%</th><th>Drill</th>';
   } else if (tableName === 'balance') {
     const horiz = renderTimeHorizontal(records, tableName,
-      rec => rec._group_values ? Object.values(rec._group_values).filter(v=>v).join(' | ') : (rec.ITEM_CODE || rec.key?.ITEM_CODE || 'Unknown'),
-      rec => rec._WEEK || rec._DATE || '',
+      rec => {
+        const gv = rec._group_values || {};
+        const k = rec.key || {};
+        return Object.values(gv).filter(v=>v).join(' | ') || k.ITEM_CODE || rec.ITEM_CODE || k.PN_CODE || 'Unknown';
+      },
+      rec => rec._WEEK || rec._DATE || rec.WEEK || (rec.key && rec.key.WEEK) || '',
       rec => rec
     );
     if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Time</th><th>Group</th><th>A Balance</th><th>B Balance</th><th>Diff</th><th>Diff%/Neg</th><th>Drill</th>';
   } else if (tableName === 'plan_input') {
     const horiz = renderTimeHorizontal(records, tableName,
-      rec => rec.key ? (rec.key.PN_CODE || rec.PN_CODE || 'Unknown') : 'Unknown',
-      rec => rec.key ? (rec.key.WEEK || '') : '',
+      rec => (rec.key && rec.key.PN_CODE) ? rec.key.PN_CODE : rec.PN_CODE || 'Unknown',
+      rec => (rec.key && rec.key.WEEK) ? rec.key.WEEK : rec.WEEK || rec.ACTUALFIRSTDAYOFWEEK || '',
       rec => rec
     );
     if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Time</th><th>SKU/PN</th><th>A FCST</th><th>B FCST</th><th>Diff</th><th>Diff%</th><th>Drill</th>';
   } else if (tableName === 'fcst') {
     const horiz = renderTimeHorizontal(records, tableName,
-      rec => rec.key ? rec.key.PN_CODE : 'Unknown',
-      rec => rec.key ? rec.key.WEEK : '',
+      rec => (rec.key && rec.key.PN_CODE) ? rec.key.PN_CODE : rec.PN_CODE || rec.SKU || 'Unknown',
+      rec => (rec.key && rec.key.WEEK) ? rec.key.WEEK : rec.WEEK || rec.ACTUALFIRSTDAYOFWEEK || '',
       rec => rec
     );
     if (horiz) { wrapper.innerHTML = horiz; return; }
