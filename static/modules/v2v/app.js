@@ -2,18 +2,17 @@
 // Handles folder upload, compare, summary cards, detail tabs with drill-down
 
 const V2V_TABLE_DEFS = {
-  bom: {icon: '📦', name: 'BOM Snapshot', cat: 'input'},
-  fcst: {icon: '📊', name: 'FCST', cat: 'input'},
-  actual_io: {icon: '🏭', name: 'Actual I/O', cat: 'input'},
-  supply: {icon: '🚚', name: 'Supply', cat: 'input'},
-  switch: {icon: '🔀', name: 'Switch Matrix', cat: 'input'},
-  item: {icon: '🏷️', name: 'Item Master', cat: 'input'},
-  line: {icon: '🧵', name: 'Line Master', cat: 'input'},
-  calendar: {icon: '📅', name: 'Line Calendar', cat: 'input'},
-  plan_config: {icon: '⚙️', name: 'Plan Config', cat: 'input'},
-  plan_input: {icon: '📥', name: 'Plan Input', cat: 'input'},
-  plan_output: {icon: '📋', name: 'Plan Output', cat: 'output'},
-  balance: {icon: '📦', name: 'Balance', cat: 'output'},
+  bom: {name: 'BOM Snapshot', cat: 'input'},
+  fcst: {name: 'FCST', cat: 'input'},
+  supply: {name: 'Supply', cat: 'input'},
+  switch: {name: 'Switch Matrix', cat: 'input'},
+  item: {name: 'Item Master', cat: 'input'},
+  line: {name: 'Line Master', cat: 'input'},
+  calendar: {name: 'Line Calendar', cat: 'input'},
+  plan_config: {name: 'Plan Config', cat: 'input'},
+  plan_input: {name: 'Plan Input', cat: 'input'},
+  plan_output: {name: 'Plan Output', cat: 'output'},
+  balance: {name: 'Balance', cat: 'output'},
 };
 
 let v2vState = {
@@ -528,13 +527,40 @@ function renderDetailTabs(data) {
   if (!tabsEl) return;
   
   const summary = data.summary || {};
-  let html = '';
+  // Group by Input/Output
+  const groups = {input: [], output: []};
   for (const [key, s] of Object.entries(summary)) {
-    const def = V2V_TABLE_DEFS[key] || {icon:'📄', name:key};
-    const totalDiff = (s.added||0)+(s.deleted||0)+(s.modified||0);
-    const hasDiff = totalDiff>0;
-    html += `<button class="v2v-detail-tab ${v2vState.activeTable===key?'active':''} ${hasDiff?'has-diff':''}" data-table="${key}" onclick="selectV2VTable('${key}')">${def.icon} ${def.name} <span class="count-badge">${totalDiff}</span></button>`;
+    if (key === 'actual_io') continue; // removed
+    const def = V2V_TABLE_DEFS[key] || {name:key, cat:'input'};
+    const cat = def.cat || 'input';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push([key, s]);
   }
+
+  let html = '';
+
+  // Input group
+  if (groups.input && groups.input.length > 0) {
+    html += '<span style="font-size:12px;font-weight:600;color:#0f172a;margin-right:8px;padding:6px 0">Input:</span>';
+    for (const [key, s] of groups.input) {
+      const def = V2V_TABLE_DEFS[key] || {name:key};
+      const totalDiff = (s.added||0)+(s.deleted||0)+(s.modified||0)+(s.inconsistent||0);
+      const hasDiff = totalDiff>0;
+      html += `<button class="v2v-detail-tab ${v2vState.activeTable===key?'active':''} ${hasDiff?'has-diff':''}" data-table="${key}" onclick="selectV2VTable('${key}')">${def.name} <span class="count-badge">${totalDiff}</span></button>`;
+    }
+  }
+
+  // Output group
+  if (groups.output && groups.output.length > 0) {
+    html += '<span style="font-size:12px;font-weight:600;color:#0f172a;margin-left:16px;margin-right:8px;padding:6px 0">Output:</span>';
+    for (const [key, s] of groups.output) {
+      const def = V2V_TABLE_DEFS[key] || {name:key};
+      const totalDiff = (s.added||0)+(s.deleted||0)+(s.modified||0);
+      const hasDiff = totalDiff>0;
+      html += `<button class="v2v-detail-tab ${v2vState.activeTable===key?'active':''} ${hasDiff?'has-diff':''}" data-table="${key}" onclick="selectV2VTable('${key}')">${def.name} <span class="count-badge">${totalDiff}</span></button>`;
+    }
+  }
+
   tabsEl.innerHTML = html;
 }
 
@@ -707,6 +733,67 @@ async function loadV2VDetail(tableName) {
   }
 }
 
+function renderTimeHorizontal(records, tableName, rowKeyFn, timeKeyFn, valueFn) {
+  // Generic time-horizontal renderer: rows = rowKey, cols = time, cell = diff
+  try {
+    const allTimesSet = new Set();
+    const rowsMap = new Map(); // rowKey -> Map(time -> rec)
+
+    for (const rec of records) {
+      const rowKey = rowKeyFn(rec) || 'Unknown';
+      const timeKey = timeKeyFn(rec) || '';
+      if (!timeKey) continue;
+      allTimesSet.add(timeKey);
+      if (!rowsMap.has(rowKey)) rowsMap.set(rowKey, new Map());
+      rowsMap.get(rowKey).set(timeKey, rec);
+    }
+
+    const allTimes = Array.from(allTimesSet).sort();
+    const rowKeys = Array.from(rowsMap.keys()).sort();
+
+    if (rowKeys.length === 0 || allTimes.length === 0) {
+      // Fallback to vertical if cannot pivot
+      return null;
+    }
+
+    let html = `<div style="font-size:12px;color:#64748b;margin-bottom:8px">Time Horizontal: ${rowKeys.length} rows × ${allTimes.length} time buckets | Rows: ${tableName} key | Columns: Time (Month→Week→Daily→Shift order) | Values: Diff (A/B)</div>`;
+    html += '<div class="v2v-table-wrapper" style="max-height:500px"><table class="v2v-table"><thead><tr>';
+    html += '<th style="min-width:180px;left:0;position:sticky;z-index:20;background:#1e293b">Row / Time</th>';
+    for (const t of allTimes) {
+      html += `<th style="min-width:100px;font-size:11px">${esc(t.slice(0,10))}</th>`;
+    }
+    html += '</tr></thead><tbody>';
+
+    for (const rowKey of rowKeys.slice(0,200)) { // limit 200 rows
+      html += `<tr><td style="left:0;position:sticky;background:white;z-index:10;font-weight:600;min-width:180px" class="frozen">${esc(rowKey)}</td>`;
+      const timeMap = rowsMap.get(rowKey);
+      for (const t of allTimes) {
+        const rec = timeMap.get(t);
+        if (!rec) {
+          html += '<td style="background:#f8fafc"></td>';
+        } else {
+          const diff = rec.diff || rec.delta || 0;
+          const a = rec.value_a || rec.PLAN_VALUE_A || rec.ACTUALWEEKVALUE_A || rec.BALANCE_QTY_A || 0;
+          const b = rec.value_b || rec.PLAN_VALUE_B || rec.ACTUALWEEKVALUE_B || rec.BALANCE_QTY_B || 0;
+          const cls = diff > 0 ? 'num-pos' : diff < 0 ? 'num-neg' : '';
+          html += `<td class="data-cell ${cls}" style="font-size:11px;text-align:center;min-width:100px">${a}/${b}<br><small style="color:${diff>0?'#16a34a':diff<0?'#dc2626':'#64748b'}">${diff>0?'+':''}${diff}</small></td>`;
+        }
+      }
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+    if (rowKeys.length > 200) {
+      html += `<div style="margin-top:8px;font-size:11px;color:#64748b">Showing first 200 of ${rowKeys.length} rows. Use search to filter.</div>`;
+    }
+
+    return html;
+  } catch(e) {
+    console.error('renderTimeHorizontal error', e);
+    return null;
+  }
+}
+
 function renderV2VTableDetail(data, tableName) {
   const wrapper = document.getElementById('v2v-detail-content');
   if (!wrapper) return;
@@ -724,8 +811,6 @@ function renderV2VTableDetail(data, tableName) {
       <div class="v2v-status success">✅ ${msg}</div>
       ${data.coverage ? `<div style="padding:8px;background:#f8fafc;border-radius:4px;margin:8px 0;font-size:12px">Coverage: A ${data.coverage.date_range_a} | B ${data.coverage.date_range_b} | Extra in B dates: ${data.coverage.extra_dates_in_b||0} | Missing: ${data.coverage.missing_dates_in_b||0}</div>` : ''}
       <div style="padding:12px;font-size:12px;color:#64748b">Summary: ${JSON.stringify(data.summary||{}, null, 2)}</div>
-      <div style="margin-top:12px"><button class="btn btn-sm" onclick="showV2VChart('${tableName}')">📈 Show Chart (if applicable)</button></div>
-      <div id="v2v-chart-container" style="margin-top:16px;display:none"><canvas id="v2v-chart"></canvas></div>
     `;
     return;
   }
@@ -747,23 +832,66 @@ function renderV2VTableDetail(data, tableName) {
   } else if (tableName === 'plan_config') {
     html += '<th>Field</th><th>A</th><th>B</th><th>Change</th>';
   } else if (tableName === 'actual_io') {
+    // Will be removed per user request, but keep placeholder
     html += '<th>Change</th><th>Line</th><th>SKU</th><th>Date</th><th>Shift</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'supply') {
+    // Time horizontal: PN_CODE rows, Date columns
+    const horiz = renderTimeHorizontal(records, tableName, 
+      rec => rec.key ? rec.key.PN_CODE : 'Unknown',
+      rec => rec.key ? (rec.key.WEEK || rec.key.KITTING_DATE || rec.key._MERGE_DATE || '') : '',
+      rec => rec
+    );
+    if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Change</th><th>PN_CODE</th><th>Date/Week</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'switch') {
     html += '<th>Change</th><th>Line</th><th>Before PN</th><th>After PN</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'calendar') {
+    const horiz = renderTimeHorizontal(records, tableName,
+      rec => rec.key ? `${rec.key.LINE_CODE||''} | ${rec.key.PLAN_TYPE||''} | ${rec.key.SHIFT_NAME||''}` : 'Unknown',
+      rec => rec.key ? (rec.key.PLAN_DATE || rec.key.WEEK || rec.key._DATE_STR || '') : '',
+      rec => rec
+    );
+    if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Change</th><th>Line</th><th>Type</th><th>Date</th><th>Shift</th><th>Item</th><th>A</th><th>B</th><th>Delta</th>';
   } else if (tableName === 'item') {
     html += '<th>Change</th><th>Item No</th><th>Field</th><th>A</th><th>B</th>';
   } else if (tableName === 'line') {
     html += '<th>Change</th><th>Line Code</th><th>Field</th><th>A</th><th>B</th>';
   } else if (tableName === 'plan_output') {
+    const horiz = renderTimeHorizontal(records, tableName,
+      rec => {
+        const gv = rec._group_values || rec.key || {};
+        return Object.values(gv).filter(v=>v).join(' | ') || rec.LINE_CODE || rec.SKU || 'Unknown';
+      },
+      rec => rec._WEEK || rec._DATE || rec.WEEK || '',
+      rec => rec
+    );
+    if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Time</th><th>Group</th><th>A Total</th><th>B Total</th><th>Diff</th><th>Diff%</th><th>Drill</th>';
   } else if (tableName === 'balance') {
+    const horiz = renderTimeHorizontal(records, tableName,
+      rec => rec._group_values ? Object.values(rec._group_values).filter(v=>v).join(' | ') : (rec.ITEM_CODE || rec.key?.ITEM_CODE || 'Unknown'),
+      rec => rec._WEEK || rec._DATE || '',
+      rec => rec
+    );
+    if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Time</th><th>Group</th><th>A Balance</th><th>B Balance</th><th>Diff</th><th>Diff%/Neg</th><th>Drill</th>';
   } else if (tableName === 'plan_input') {
+    const horiz = renderTimeHorizontal(records, tableName,
+      rec => rec.key ? (rec.key.PN_CODE || rec.PN_CODE || 'Unknown') : 'Unknown',
+      rec => rec.key ? (rec.key.WEEK || '') : '',
+      rec => rec
+    );
+    if (horiz) { wrapper.innerHTML = horiz; return; }
     html += '<th>Time</th><th>SKU/PN</th><th>A FCST</th><th>B FCST</th><th>Diff</th><th>Diff%</th><th>Drill</th>';
+  } else if (tableName === 'fcst') {
+    const horiz = renderTimeHorizontal(records, tableName,
+      rec => rec.key ? rec.key.PN_CODE : 'Unknown',
+      rec => rec.key ? rec.key.WEEK : '',
+      rec => rec
+    );
+    if (horiz) { wrapper.innerHTML = horiz; return; }
+    html += '<th>Change</th><th>SKU</th><th>Week</th><th>Field</th><th>A</th><th>B</th><th>Delta</th>';
   } else {
     const first = records[0];
     const keys = Object.keys(first).slice(0,8);

@@ -110,7 +110,7 @@ def compare_two_versions(folder_a: str, folder_b: str, granularity: str = "week"
 
     # For small tables, load full data and diff immediately
     small_tables = ["bom", "fcst", "fcst_detail", "plan_config", "switch", "item", "line"]
-    large_tables = ["actual_io", "supply", "calendar", "plan_output", "balance"]
+    large_tables = ["supply", "calendar", "plan_output", "balance", "plan_input"]  # actual_io removed per user request
 
     data_a_small = {}
     data_b_small = {}

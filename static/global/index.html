@@ -33,14 +33,6 @@
         <span class="nav-text">V2V Comparison</span>
       </a>
     </nav>
-    <div class="sidebar-nav-label">Analysis</div>
-    <nav class="sidebar-nav">
-      <div class="nav-category">APS Snapshot</div>
-      <a href="#" class="nav-item" data-module="v2v">
-        <span class="nav-icon">📊</span>
-        <span class="nav-text">Version to Version</span>
-      </a>
-    </nav>
     <div class="sidebar-footer">
       <div class="sidebar-footer-text">Production Plan Review</div>
     </div>
@@ -217,88 +209,35 @@
       <!-- Version Loader Section -->
       <div class="v2v-section" id="v2v-upload-section">
         <div class="v2v-section-header">
-          <span class="v2v-section-title">📁 1. Upload Versions (Folder to Folder)</span>
-          <span style="font-size:12px;color:#64748b">Folder name will be used as version label, each folder must contain the same 12 xlsx files</span>
+          <span class="v2v-section-title">Select Version</span>
+          <span style="font-size:12px;color:#64748b">Select two versions to compare (auto-scan Ivy-* folders)</span>
         </div>
 
-        <!-- Server-side version selector -->
-        <div class="v2v-section" style="margin:0 0 16px 0; padding:12px; background:#f8fafc">
-          <div style="font-weight:600;font-size:13px;margin-bottom:8px">🖥️ Server-side Versions (Auto-scan Ivy-* folders in project root)</div>
-          <div class="v2v-server-selector">
-            <div class="config-item">
-              <label style="font-size:12px">Version A (Server)</label>
-              <select id="v2v-server-a" class="v2v-select"><option>Loading...</option></select>
-            </div>
-            <div class="config-item">
-              <label style="font-size:12px">Version B (Server)</label>
-              <select id="v2v-server-b" class="v2v-select"><option>Loading...</option></select>
-            </div>
-            <button id="v2v-btn-load-server" class="btn btn-sm" style="height:36px">▶ Compare Server Versions</button>
+        <div class="v2v-server-selector">
+          <div class="config-item">
+            <label style="font-size:12px">Version A</label>
+            <select id="v2v-server-a" class="v2v-select"><option>Loading...</option></select>
           </div>
-        </div>
-
-        <div style="text-align:center;margin:12px 0;color:#94a3b8;font-size:12px">— OR —</div>
-
-        <div class="v2v-upload-grid">
-          <div class="v2v-version-card" id="v2v-card-a" style="cursor:pointer">
-            <div class="v2v-version-header">
-              <span class="v2v-version-label">Version A (Folder Upload)</span>
-              <span class="v2v-version-badge" id="v2v-badge-a">No files</span>
-            </div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-a">Click to select folder, folder name will be used as version label (Recommend Server mode above, more stable)</div>
-            <input type="file" id="v2v-files-a" class="v2v-file-input" webkitdirectory directory multiple style="display:none">
-            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-a').click()" style="margin-bottom:8px">📁 Select Folder A</button>
-            <div class="v2v-file-list" id="v2v-list-a" style="margin-top:8px">
-              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>Must include 12 xlsx files</small></div>
-            </div>
+          <div class="config-item">
+            <label style="font-size:12px">Version B</label>
+            <select id="v2v-server-b" class="v2v-select"><option>Loading...</option></select>
           </div>
-          <div class="v2v-version-card" id="v2v-card-b" style="cursor:pointer">
-            <div class="v2v-version-header">
-              <span class="v2v-version-label">Version B (Folder Upload)</span>
-              <span class="v2v-version-badge" id="v2v-badge-b">No files</span>
-            </div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:8px" id="v2v-name-b">Click to select folder, folder name will be used as version label</div>
-            <input type="file" id="v2v-files-b" class="v2v-file-input" webkitdirectory directory multiple style="display:none">
-            <button class="btn btn-sm" onclick="document.getElementById('v2v-files-b').click()" style="margin-bottom:8px">📁 Select Folder B</button>
-            <div class="v2v-file-list" id="v2v-list-b" style="margin-top:8px">
-              <div style="color:#94a3b8;text-align:center;padding:20px">No folder selected<br><small>Must include 12 xlsx files</small></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="v2v-compare-actions">
-          <div class="v2v-granularity-toggle">
-            <button data-granularity="week" class="active">Week</button>
-            <button data-granularity="day">Day</button>
-            <button data-granularity="shift">Shift</button>
-            <button data-granularity="monthly">Month</button>
-          </div>
-          <button id="v2v-btn-compare" class="btn btn-lg" disabled>▶ Compare (Need A & B)</button>
-          <span style="font-size:11px;color:#64748b">Drill-down: Week → Day → Shift → Month, Cum default</span>
+          <button id="v2v-btn-load-server" class="btn btn-lg" style="height:36px;background:#0f172a;color:white">▶ Compare</button>
         </div>
 
         <div id="v2v-status" style="margin-top:12px"></div>
       </div>
 
-      <!-- Summary Section -->
-      <div class="v2v-section" id="v2v-summary-section" style="display:none">
-        <div class="v2v-section-header">
-          <span class="v2v-section-title">📊 2. Summary Dashboard</span>
-          <span style="font-size:12px;color:#64748b">Click card to see details | Yellow means diff</span>
-        </div>
-        <div class="v2v-summary-grid" id="v2v-summary-grid"></div>
-      </div>
-
       <!-- Detail Section -->
       <div class="v2v-section" id="v2v-detail-section" style="display:none">
         <div class="v2v-section-header">
-          <span class="v2v-section-title">🔍 3. Detail Comparison</span>
+          <span class="v2v-section-title">Detail Comparison</span>
           <div style="display:flex;gap:8px;align-items:center">
             <div class="v2v-granularity-toggle">
-              <button data-granularity="week" class="active">Week</button>
-              <button data-granularity="day">Day</button>
-              <button data-granularity="shift">Shift</button>
               <button data-granularity="monthly">Month</button>
+              <button data-granularity="week" class="active">Week</button>
+              <button data-granularity="day">Daily</button>
+              <button data-granularity="shift">Shift</button>
             </div>
           </div>
         </div>
@@ -308,7 +247,7 @@
 
         <!-- Output Table Dimension Builder (Phase3 Refined) -->
         <div id="v2v-output-builder" class="v2v-section" style="margin:0 0 12px 0;padding:12px;background:#f8fafc;display:none">
-          <div style="font-weight:600;font-size:13px;margin-bottom:8px">🔧 Dimension Builder (On-demand aggregation, small data exploration)</div>
+          <div style="font-weight:600;font-size:13px;margin-bottom:8px">Dimension Builder (On-demand aggregation)</div>
           <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:end">
             <div>
               <div style="font-size:11px;color:#64748b;margin-bottom:4px">Group by (Multi-select)</div>
@@ -319,10 +258,10 @@
             <div>
               <div style="font-size:11px;color:#64748b;margin-bottom:4px">Granularity</div>
               <div class="v2v-granularity-toggle" id="v2v-output-granularity">
-                <button data-granularity="week" class="active">Week</button>
-                <button data-granularity="day">Day</button>
-                <button data-granularity="shift">Shift</button>
                 <button data-granularity="monthly">Month</button>
+                <button data-granularity="week" class="active">Week</button>
+                <button data-granularity="day">Daily</button>
+                <button data-granularity="shift">Shift</button>
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:4px">
@@ -366,10 +305,11 @@
               <label style="font-size:12px">Line: <input type="text" id="v2v-po-line-filter" placeholder="e.g. AL6-Frame or PKG" class="v2v-select" style="width:120px"></label>
               <label style="font-size:12px">Exact SKU: <input type="text" id="v2v-po-exact-sku" placeholder="e.g. GB-Rec M-BLACK" class="v2v-select" style="width:150px"></label>
               <label style="font-size:12px">Granularity:
-                <select id="v2v-po-granularity" class="v2v-select" style="width:90px">
-                  <option value="day" selected>Daily</option>
-                  <option value="week">Weekly</option>
-                  <option value="monthly">Monthly</option>
+                <select id="v2v-po-granularity" class="v2v-select" style="width:100px">
+                  <option value="monthly">Month</option>
+                  <option value="week" selected>Week</option>
+                  <option value="day">Daily</option>
+                  <option value="shift">Shift</option>
                 </select>
               </label>
               <label style="font-size:12px"><input type="checkbox" id="v2v-po-cum" checked> Cum (Prioritize)</label>

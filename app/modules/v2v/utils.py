@@ -120,8 +120,9 @@ def identify_table_type(filename: str) -> Optional[str]:
         return "fcst"
     if "fcst明细" in fname_lower or ("fcst" in fname_lower and "明细" in fname_lower):
         return "fcst_detail"
-    if "实际值" in fname_lower or "actual" in fname_lower:
-        return "actual_io"
+    # actual_io removed per user request 2026-07-21 - no longer compared
+    # if "实际值" in fname_lower or "actual" in fname_lower:
+    #     return "actual_io"
     if "supply" in fname_lower or "供应" in fname_lower:
         return "supply"
     if "切换矩阵" in fname_lower or "switch" in fname_lower:

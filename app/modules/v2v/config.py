@@ -32,14 +32,15 @@ TABLE_DEFS = {
         "compare_fields": ["ACTUALWEEKVALUE"],
         "icon": "📈"
     },
-    "actual_io": {
-        "keywords": ["actual_io", "io_actual", "actual"],
-        "display_name": "Actual I/O",
-        "category": "input",
-        "key_fields": ["LINE_CODE", "SKU", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM"],
-        "compare_fields": ["PLAN_VALUE"],
-        "icon": "🏭"
-    },
+    # actual_io removed per user request 2026-07-21 - no longer compared
+    # "actual_io": {
+    #     "keywords": ["actual_io", "io_actual", "actual"],
+    #     "display_name": "Actual I/O",
+    #     "category": "input",
+    #     "key_fields": ["LINE_CODE", "SKU", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM"],
+    #     "compare_fields": ["PLAN_VALUE"],
+    #     "icon": "🏭"
+    # },
     "supply": {
         "keywords": ["supply", "kitting", "CTB"],
         "display_name": "Supply / Kitting",
