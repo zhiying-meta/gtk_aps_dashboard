@@ -160,116 +160,150 @@ def api_reports():
 @util_bp.route("/api/utilization/pivot", methods=["GET"])
 def api_pivot():
     """
-    Pivot table for gantt-like matrix:
-    mode=shift -> columns = date + shift (e.g. 2026-06-02|白班)
+    Pivot table for utilization matrix like Packout report.
+    Supports version_type per row: Gated / Ungated
+    mode=shift -> columns = date + shift
     mode=day -> columns = date
-    Returns:
-      lines: [line_code...]
-      columns: [col_label...] sorted
-      data: {line_code: {col_label: utilization_pct, ...}, ...}
-      Also returns detailed records for tooltip: load/capacity
+    Returns rows with line_code + version_type, plus columns for dates.
+    Includes color coding, thick line separation by line_code.
     """
     try:
         caches = get_all_caches(DEFAULT_DATA_DIR)
         if not caches:
             return _json_error("No data. Upload first.", 404)
 
-        mode = request.args.get("mode", "day")  # day is default for matrix, shift for detailed
-        version = request.args.get("version", "gated")
+        mode = request.args.get("mode", "day")
+        version_param = request.args.get("version", "all")  # gated, ungated, all, compare
+        version_filter = request.args.get("version_type", "")  # optional filter Gated/Ungated
         line_filter = request.args.get("line_code", "") or request.args.get("line", "")
         date_from = request.args.get("date_from", "")
         date_to = request.args.get("date_to", "")
 
-        # Get cache
-        cache = caches.get(version)
-        if not cache:
-            cache = list(caches.values())[0]
-
-        # Build filtered records
         from app.modules.utilization_report.engine import build_report
 
-        if mode == "shift":
-            recs = build_report(cache, mode="shift", line_filter=line_filter, date_from=date_from, date_to=date_to)
-            # Columns = sorted unique date+shift
-            cols_set = set()
+        # Determine which versions to include
+        versions_to_include = []
+        if version_param == "all" or version_param == "compare" or "," in version_param:
+            # Include all available caches
+            if version_param == "all" or version_param == "compare":
+                versions_to_include = list(caches.keys())
+            else:
+                versions_to_include = [v.strip() for v in version_param.split(",") if v.strip() in caches]
+        else:
+            # Single version
+            if version_param in caches:
+                versions_to_include = [version_param]
+            else:
+                # fallback to first available
+                versions_to_include = [list(caches.keys())[0]]
+
+        # If version_type filter provided, further filter
+        if version_filter:
+            vt_low = version_filter.lower()
+            # Map Gated/Ungated to cache keys
+            filtered = []
+            for ver in versions_to_include:
+                if vt_low in ver.lower() or vt_low in ver:
+                    filtered.append(ver)
+            if filtered:
+                versions_to_include = filtered
+
+        # Collect records per version
+        all_recs = []  # list of dict with extra version_type
+        for ver in versions_to_include:
+            cache = caches.get(ver)
+            if not cache:
+                continue
+            recs = build_report(cache, mode=mode, line_filter=line_filter, date_from=date_from, date_to=date_to)
             for r in recs:
+                nr = dict(r)
+                nr['version_type'] = ver.capitalize()  # Gated / Ungated
+                nr['version_key'] = ver
+                all_recs.append(nr)
+
+        if not all_recs:
+            return jsonify({"mode": mode, "columns": [], "rows": [], "detail": {}, "lines": [], "total_lines": 0, "total_cols": 0})
+
+        # Build columns
+        if mode == "shift":
+            cols_set = set()
+            for r in all_recs:
                 col = f"{r['plan_date']}|{r['shift_name']}"
                 cols_set.add(col)
             cols = sorted(list(cols_set))
-            # Build matrix: line -> col -> utilization
-            matrix = {}
-            detail = {}  # line -> col -> {load, cap, uph, eff, wh, util}
-            for r in recs:
-                line = r['line_code']
-                col = f"{r['plan_date']}|{r['shift_name']}"
-                if line not in matrix:
-                    matrix[line] = {}
-                    detail[line] = {}
-                # Cap utilization at 100 for display? Keep raw but also capped
-                util_pct = r['utilization_pct']
-                # Cap at 100 for theoretical range, but keep raw for tooltip
-                capped = min(100.0, util_pct) if util_pct is not None else 0
-                matrix[line][col] = capped
-                detail[line][col] = {
-                    'util_raw': util_pct,
-                    'util_capped': capped,
-                    'load': r['load'],
-                    'capacity': r['capacity'],
-                    'uph': r['uph'],
-                    'efficiency': r['efficiency'],
-                    'working_hours': r['working_hours'],
-                }
         else:
-            # day mode
-            recs = build_report(cache, mode="day", line_filter=line_filter, date_from=date_from, date_to=date_to)
-            cols = sorted(list(set(r['plan_date'] for r in recs)))
-            matrix = {}
-            detail = {}
-            for r in recs:
-                line = r['line_code']
-                col = r['plan_date']
-                if line not in matrix:
-                    matrix[line] = {}
-                    detail[line] = {}
-                util_pct = r['utilization_pct']
-                capped = min(100.0, util_pct) if util_pct is not None else 0
-                matrix[line][col] = capped
-                detail[line][col] = {
-                    'util_raw': util_pct,
-                    'util_capped': capped,
-                    'load': r['load'],
-                    'capacity': r['capacity'],
-                    'uph': r['uph'],
-                    'efficiency': r['efficiency'],
-                    'working_hours': r['working_hours'],
-                }
+            cols = sorted(list(set(r['plan_date'] for r in all_recs)))
 
-        # Sort lines
-        lines = sorted(list(matrix.keys()))
-
-        # Limit columns for performance: if too many, slice by date range already filtered
-        # But also limit to 200 columns max for initial load
+        # Limit columns to 200 for performance (keep date range filtering in frontend if needed)
         max_cols = 200
         if len(cols) > max_cols:
-            # Keep first max_cols
             cols = cols[:max_cols]
 
-        # Build rows array for frontend
+        # Build matrix keyed by (line_code, version_type) -> col -> util
+        # Also keep detail
+        from collections import defaultdict
+        matrix = {}  # key = (line, version_type) -> dict col->util
+        detail = {}  # key = (line, version_type) -> col -> detail
+        lines_set = set()
+        for r in all_recs:
+            key = (r['line_code'], r['version_type'])
+            lines_set.add(r['line_code'])
+            if key not in matrix:
+                matrix[key] = {}
+                detail[key] = {}
+            col = f"{r['plan_date']}|{r['shift_name']}" if mode == "shift" else r['plan_date']
+            if col not in cols:
+                continue
+            util_pct = r.get('utilization_pct', 0)
+            capped = min(100.0, util_pct) if util_pct is not None else 0
+            matrix[key][col] = capped
+            detail[key][col] = {
+                'util_raw': util_pct,
+                'util_capped': capped,
+                'load': r['load'],
+                'capacity': r['capacity'],
+                'uph': r['uph'],
+                'efficiency': r['efficiency'],
+                'working_hours': r['working_hours'],
+                'is_overload': r.get('is_overload', False),
+            }
+
+        # Sort keys by line_code, then version_type (Gated before Ungated for consistency)
+        def sort_key(k):
+            line, vtype = k
+            # Gated first
+            order = 0 if vtype.lower() == 'gated' else 1
+            return (line, order, vtype)
+        sorted_keys = sorted(matrix.keys(), key=sort_key)
+
+        # Build rows for frontend with version_type field and thick border flag
         rows = []
-        for line in lines:
-            row = {'line_code': line}
+        last_line = None
+        for (line, vtype) in sorted_keys:
+            row = {
+                'line_code': line,
+                'version_type': vtype,
+                'is_new_line': line != last_line,
+            }
+            last_line = line
             for col in cols:
-                row[col] = matrix[line].get(col, None)
+                row[col] = matrix[(line, vtype)].get(col, None)
             rows.append(row)
+
+        # Convert detail to string keys for JSON (line|version_type)
+        detail_json = {}
+        for (line, vtype), col_map in detail.items():
+            key_str = f"{line}||{vtype}"
+            detail_json[key_str] = col_map
 
         return jsonify({
             "mode": mode,
-            "version": cache.version,
+            "versions": versions_to_include,
             "columns": cols,
-            "lines": lines,
             "rows": rows,
-            "detail": detail,
-            "total_lines": len(lines),
+            "detail": detail_json,
+            "lines": sorted(list(lines_set)),
+            "total_lines": len(sorted_keys),
             "total_cols": len(cols),
         })
 

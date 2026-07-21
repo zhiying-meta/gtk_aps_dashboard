@@ -313,23 +313,22 @@ def get_cache_for_version(base_dir: str, version: str) -> UtilizationCache:
 
 def get_all_caches(base_dir: str) -> Dict[str, UtilizationCache]:
     """
-    Try to load gated and ungated if available. Uses _CACHES for fast path.
+    Try to load gated and ungated if available. Uses _CACHES for fast path, but also checks filesystem for missing versions.
     """
     global _CACHES
-    # Fast path: return cached if we have any for this base_dir
-    cached = {}
-    for k, v in _CACHES.items():
-        if k.startswith(base_dir + "::"):
-            ver = k.split("::")[-1]
-            cached[ver] = v
-    if cached:
-        return cached
-
     result = {}
     base_path = pathlib.Path(base_dir)
 
-    # First, try explicit utilization folders
+    # Check cache first
+    for k, v in _CACHES.items():
+        if k.startswith(base_dir + "::"):
+            ver = k.split("::")[-1]
+            result[ver] = v
+
+    # Check explicit utilization folders for any missing versions
     for ver in ['gated', 'ungated']:
+        if ver in result:
+            continue
         util_dir = base_path / "utilization" / ver
         if util_dir.exists():
             try:
@@ -348,6 +347,9 @@ def get_all_caches(base_dir: str) -> Dict[str, UtilizationCache]:
                         pass
             except Exception:
                 continue
+
+    if result:
+        return result
 
     if not result:
         # Try generic search: look for data/IVY*Gated folder as gated only
