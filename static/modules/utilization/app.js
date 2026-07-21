@@ -137,17 +137,6 @@
                 </div>
               </div>
             </div>
-            <div class="panel panel-cols">
-              <div class="panel-label">📋 Columns <span style="font-weight:400;text-transform:none;color:#94a3b8"> — Column dimensions</span></div>
-              <div class="cols-row">
-                <label class="toggle-label"><input type="checkbox" id="col-uph"> UPH</label>
-                <label class="toggle-label"><input type="checkbox" id="col-eff"> Eff</label>
-                <label class="toggle-label"><input type="checkbox" id="col-wh"> WH</label>
-                <label class="toggle-label"><input type="checkbox" id="col-cap" checked> Capacity</label>
-                <label class="toggle-label"><input type="checkbox" id="col-load" checked> Load</label>
-                <span id="util-col-count" style="font-size:11px;color:#64748b;margin-left:8px"></span>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -300,24 +289,11 @@
       return;
     }
 
-    const showUPH = document.getElementById('col-uph')?.checked;
-    const showEff = document.getElementById('col-eff')?.checked;
-    const showWH = document.getElementById('col-wh')?.checked;
-    const showCap = document.getElementById('col-cap')?.checked;
-    const showLoad = document.getElementById('col-load')?.checked;
-
     const frozenCols = [
       {key:'line_code', label:'Line', width:130},
       {key:'version_type', label:'Version Type', width:110},
     ];
-    const extraCols = [];
-    if(showUPH) extraCols.push({key:'_uph', label:'UPH', width:70});
-    if(showEff) extraCols.push({key:'_eff', label:'Eff', width:60});
-    if(showWH) extraCols.push({key:'_wh', label:'WH', width:60});
-    if(showCap) extraCols.push({key:'_cap', label:'Capacity', width:80});
-    if(showLoad) extraCols.push({key:'_load', label:'Load', width:80});
-
-    const allFrozen = [...frozenCols, ...extraCols];
+    const allFrozen = frozenCols;
     let left = 0;
     allFrozen.forEach(c=>{ c._left = left; left+=c.width; });
     const dividerLeft = left;
@@ -360,18 +336,6 @@
         let val = '';
         if(c.key==='line_code') val = esc(r.line_code);
         else if(c.key==='version_type') val = `<span class="type-badge type-${esc(vType)}">${esc(vType)}</span>`;
-        else{
-          const firstCol = cols[0];
-          const keyStr = `${r.line_code}||${vType}`;
-          const det = detail[keyStr] && detail[keyStr][firstCol];
-          if(det){
-            if(c.key==='_uph') val = det.uph ? det.uph.toFixed(0) : '';
-            else if(c.key==='_eff') val = det.efficiency ? det.efficiency.toFixed(2) : '';
-            else if(c.key==='_wh') val = det.working_hours || '';
-            else if(c.key==='_cap') val = det.capacity ? Math.round(det.capacity).toLocaleString() : '';
-            else if(c.key==='_load') val = det.load ? Math.round(det.load).toLocaleString() : '';
-          }
-        }
         tbody += `<td class="frozen data-cell${extraCls}" style="left:${c._left}px;min-width:${c.width}px">${val}</td>`;
       });
       tbody += `<td class="divider-col frozen" style="left:${dividerLeft}px"></td>`;
@@ -506,10 +470,6 @@
         currentMode = btn.dataset.mode;
         applyPivot();
       });
-    });
-
-    ['col-uph','col-eff','col-wh','col-cap','col-load'].forEach(id=>{
-      document.getElementById(id)?.addEventListener('change', applyPivot);
     });
 
     document.getElementById('btn-apply-pivot')?.addEventListener('click', applyPivot);
