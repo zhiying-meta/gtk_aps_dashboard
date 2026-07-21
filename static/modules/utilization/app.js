@@ -12,12 +12,11 @@
   const API_DEMO = '/api/utilization/demo/load';
 
   let meta = null;
-  let currentMode = 'day'; // day or shift
-  let currentVersion = 'all'; // all = gated+ungated, or gated, ungated
+  let currentMode = 'day';
+  let currentVersion = 'all';
   let pivotCache = null;
-  let selectedVersionTypes = new Set(['Gated','Ungated']); // for filter
-  let selectedLines = new Set(); // empty = all
-  let colToggles = { uph: false, eff: false, wh: false, cap: true, load: true };
+  let selectedVersionTypes = new Set(['Gated','Ungated']);
+  let selectedLines = new Set();
 
   function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
   function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
@@ -58,7 +57,7 @@
           <span id="util-status-badge">${statusBadgeHTML(status)}</span>
         </div>
         <div style="padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#475569;margin-bottom:12px">
-          <b>Formula:</b> <code>Capacity = UPH × Efficiency × WorkingHours</code> (calendar INPUT) | <code>Load = Σ schedule INPUT</code> | <code>Util% = Load / Capacity</code> capped at 100% (raw in tooltip)
+          <b>Formula:</b> <code>Capacity = UPH × Efficiency × WorkingHours</code> | <code>Load = Σ INPUT</code> | <code>Util% = Load / Capacity</code> capped at 100%
         </div>
         <div class="util-upload-grid">
           <div class="util-upload-card">
@@ -72,7 +71,7 @@
           </div>
           <div class="util-upload-card">
             <div class="util-upload-label">Ungated (optional)</div>
-            <div class="util-upload-hint">For Gated vs Ungated compare</div>
+            <div class="util-upload-hint">For compare</div>
             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
               <div><label style="font-size:11px">Calendar</label><br><input type="file" id="file-ungated-cal" accept=".xlsx"></div>
               <div><label style="font-size:11px">Schedule</label><br><input type="file" id="file-ungated-sched" accept=".xlsx"></div>
@@ -159,40 +158,50 @@
     `;
   }
 
-  // ---- Dropdown helpers similar to Packout ----
   function setupVersionTypeDropdown(){
     const btn = document.getElementById('util-vtype-btn');
     const menu = document.getElementById('util-vtype-menu');
     const cnt = document.getElementById('util-vtype-count');
     if(!btn||!menu) return;
     const allTypes = ['Gated','Ungated'];
-    function render(){
-      const selectedCount = selectedVersionTypes.size;
-      cnt.textContent = selectedCount < allTypes.length ? `${selectedCount}` : '';
-      btn.textContent = selectedCount===allTypes.length ? `All ${allTypes.length}` : selectedCount===0 ? '(none)' : `${selectedCount} selected`;
-      let h = `<div class="dropdown-all"><label><input type="checkbox" id="vtype-all" ${selectedCount===allTypes.length?'checked':''}> All (${allTypes.length})</label></div>`;
+    function renderMenu(){
+      const total = allTypes.length;
+      const selected = selectedVersionTypes.size;
+      const isAll = selected===total;
+      cnt.textContent = isAll ? '' : `${selected}`;
+      btn.textContent = isAll ? `All ${total}` : (selected===0?'(none)':`${selected} selected`);
+      let html = `<div class="dropdown-all"><label><input type="checkbox" id="vtype-all" ${isAll?'checked':''}> All (${total})</label></div>`;
       allTypes.forEach(v=>{
-        h+=`<label><input type="checkbox" data-val="${escAttr(v)}" ${selectedVersionTypes.has(v)?'checked':''}> <span class="type-badge type-${v}">${esc(v)}</span></label>`;
+        const checked = selectedVersionTypes.has(v);
+        html += `<label><input type="checkbox" data-val="${escAttr(v)}" ${checked?'checked':''}> <span class="type-badge type-${esc(v)}">${esc(v)}</span></label>`;
       });
-      menu.innerHTML = h;
-      menu.querySelector('#vtype-all')?.addEventListener('change', (e)=>{
-        if(e.target.checked){ allTypes.forEach(v=>selectedVersionTypes.add(v)); }
-        else { selectedVersionTypes.clear(); }
-        render(); applyPivot();
-      });
+      menu.innerHTML = html;
+      const allCb = menu.querySelector('#vtype-all');
+      if(allCb){
+        allCb.addEventListener('change', (e)=>{
+          if(e.target.checked){
+            selectedVersionTypes = new Set(allTypes);
+          }else{
+            selectedVersionTypes.clear();
+          }
+          renderMenu();
+          applyPivot();
+        });
+      }
       menu.querySelectorAll('input[data-val]').forEach(cb=>{
         cb.addEventListener('change', (e)=>{
           const v = e.target.dataset.val;
-          if(e.target.checked) selectedVersionTypes.add(v); else selectedVersionTypes.delete(v);
-          render();
+          if(e.target.checked) selectedVersionTypes.add(v);
+          else selectedVersionTypes.delete(v);
+          renderMenu();
           applyPivot();
         });
       });
     }
-    btn.onclick = (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); };
+    btn.onclick = (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); renderMenu(); };
     document.addEventListener('click', ()=> menu.classList.remove('open'));
     menu.onclick = (e)=> e.stopPropagation();
-    render();
+    renderMenu();
   }
 
   function setupLineDropdown(lines){
@@ -201,105 +210,88 @@
     const cnt = document.getElementById('util-line-count');
     if(!btn||!menu) return;
     const allLines = lines || [];
-    function render(){
+    let searchTerm = '';
+
+    function renderMenu(){
       const total = allLines.length;
-      const selectedCount = selectedLines.size===0 ? total : selectedLines.size;
-      // cnt shows selected when not all
-      const isAll = selectedLines.size===0 || selectedLines.size===total;
+      const isAll = selectedLines.size===0;
       cnt.textContent = isAll ? '' : `${selectedLines.size}`;
       btn.textContent = isAll ? `All ${total}` : `${selectedLines.size} selected`;
-      let h = `<div class="dropdown-search"><input type="text" id="util-line-search" placeholder="Search line..."></div>`;
-      h+=`<div class="dropdown-all"><label><input type="checkbox" id="line-all" ${isAll?'checked':''}> All (${total})</label></div>`;
-      // Filter by search term
-      const searchInput = document.getElementById('util-line-search');
-      const term = (searchInput?.value || '').toLowerCase();
-      const filtered = term ? allLines.filter(l=> l.toLowerCase().includes(term)) : allLines;
+      const filtered = searchTerm ? allLines.filter(l=> l.toLowerCase().includes(searchTerm.toLowerCase())) : allLines;
+      let html = `<div class="dropdown-search"><input type="text" id="util-line-search" placeholder="Search line..." value="${escAttr(searchTerm)}"></div>`;
+      html += `<div class="dropdown-all"><label><input type="checkbox" id="line-all" ${isAll?'checked':''}> All (${total})</label></div>`;
       filtered.forEach(l=>{
-        const checked = selectedLines.size===0 || selectedLines.has(l);
-        h+=`<label><input type="checkbox" data-val="${escAttr(l)}" ${checked?'checked':''}> ${esc(l)}</label>`;
+        const checked = isAll || selectedLines.has(l);
+        html += `<label><input type="checkbox" data-val="${escAttr(l)}" ${checked?'checked':''}> ${esc(l)}</label>`;
       });
-      if(filtered.length===0) h+=`<div style="padding:8px;color:#94a3b8;font-size:12px">No match</div>`;
-      menu.innerHTML = h;
+      if(filtered.length===0) html += `<div style="padding:8px;color:#94a3b8;font-size:12px">No match</div>`;
+      menu.innerHTML = html;
+
       const sInput = menu.querySelector('#util-line-search');
       if(sInput){
         sInput.focus();
-        sInput.oninput = ()=> render();
-        sInput.onclick = (e)=> e.stopPropagation();
-        // Keep term
-        if(term) sInput.value = term;
+        sInput.addEventListener('input', (e)=>{
+          searchTerm = e.target.value;
+          renderMenu();
+        });
+        sInput.addEventListener('click', (e)=> e.stopPropagation());
       }
-      menu.querySelector('#line-all')?.addEventListener('change', (e)=>{
-        if(e.target.checked) selectedLines.clear();
-        else {
-          // If unchecking all, select none? For UX, unchecking all means clear? We'll clear to represent none
-          // Actually to represent none, we need all unchecked, but we treat empty as all, so we need to check logic
-          // Simplify: checking all = clear set (means all), unchecking = select none? We'll set to all lines selected to represent none? Let's just clear for checked, and for unchecked select none = all lines individually? That would be confusing.
-          // Better: checking all = clear set, unchecking all = set with all lines (so none displayed? hmm)
-          // We'll implement: checked => clear (all), unchecked => select all lines one by one (means none displayed? Actually we want unchecked all to show none)
-          // For simplicity, checked = clear (all), unchecked = empty? We'll just clear for checked, and for unchecked we add all lines to set then clear? Let's just for unchecked, select all lines into set then immediately clear? Hmm.
-          // Simpler: we treat selectedLines empty = all. So "All" checkbox checked means empty set. Unchecked means we want to allow individual selection, but if user unchecks All, we should keep current individual selections? We'll just clear and not render individual.
-          if(!e.target.checked){
-            // Unchecking All -> keep none selected? We'll set selectedLines to have all lines, then user can uncheck individually to exclude? Actually to show none, set would need to be all? Wait.
-            // Let's define: selectedLines contains excluded? No.
-            // For simplicity, unchecking All will select all lines into selectedLines (meaning all individually checked) which still shows all? So to show none, we need different logic.
-            // We'll just if unchecking, set selectedLines to all lines (still all), but UI will show all checked? Confusing.
-            // Workaround: if user unchecks All, we set selectedLines to all lines (so filtered still shows all) but then they can uncheck individual to exclude.
-            // Actually we want All unchecked to mean show none, but that's rare. So for now, unchecking All will set selectedLines to have all lines (so that individual checkboxes are all checked, but our logic of empty==all breaks). Let's handle differently: keep a flag _lineAllChecked.
+
+      const allCb = menu.querySelector('#line-all');
+      if(allCb){
+        allCb.addEventListener('change', (e)=>{
+          if(e.target.checked){
+            selectedLines.clear();
+          }else{
+            // Uncheck all -> keep existing selection? For simplicity, select all individually (still means all, but we will treat as all)
+            // To show none, user can uncheck all individually
+            selectedLines = new Set(allLines);
           }
-        });
-        // Actually rebind simpler: handle individual
-        menu.querySelectorAll('input[data-val]').forEach(cb=>{
-          cb.addEventListener('change', (e)=>{
-            const v = e.target.dataset.val;
-            if(e.target.checked){
-              // If we are in "all" state (empty), we need to convert to set of all except this? Complex.
-              // Simplify: if selectedLines empty (means all), then on first uncheck we need to populate set with all except this one
-              if(selectedLines.size===0){
-                allLines.forEach(l=>{ if(l!==v) selectedLines.add(l); });
-                // If this was the only one unchecked, set will have all-1
-              }else{
-                selectedLines.add(v);
-              }
-            }else{
-              if(selectedLines.size===0){
-                // Was all, now unchecking one -> need to have all except this
-                allLines.forEach(l=> selectedLines.add(l));
-                selectedLines.delete(v);
-              }else{
-                selectedLines.delete(v);
-              }
-            }
-            // If back to all selected, clear set to represent all
-            if(selectedLines.size===allLines.length) selectedLines.clear();
-            render();
-            applyPivot();
-          });
+          renderMenu();
+          applyPivot();
         });
       }
+
+      menu.querySelectorAll('input[data-val]').forEach(cb=>{
+        cb.addEventListener('change', (e)=>{
+          const v = e.target.dataset.val;
+          if(e.target.checked){
+            if(selectedLines.size===0){
+              // Was all, now we need to create set of all except those not checked
+              // Actually if was all (empty), and user checks one (which already checked), we need to convert to set containing all except unchecked ones
+              // Simpler: when was all and user unchecks one, we want to have all except that one
+              // But this handler is for checking, so if was all, checking does nothing (already all)
+              // So for checking when was all, do nothing
+            }else{
+              selectedLines.add(v);
+              if(selectedLines.size===allLines.length) selectedLines.clear();
+            }
+          }else{
+            if(selectedLines.size===0){
+              // Was all, now unchecking one -> set = all except this
+              selectedLines = new Set(allLines);
+              selectedLines.delete(v);
+            }else{
+              selectedLines.delete(v);
+            }
+          }
+          renderMenu();
+          applyPivot();
+        });
+      });
     }
-    btn.onclick = (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); if(menu.classList.contains('open')) render(); };
+
+    btn.onclick = (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); if(menu.classList.contains('open')) renderMenu(); };
     document.addEventListener('click', ()=> menu.classList.remove('open'));
     menu.onclick = (e)=> e.stopPropagation();
-    render();
+    renderMenu();
   }
 
-  function getVersionTypeArray(){
-    if(selectedVersionTypes.size===0) return [];
-    return Array.from(selectedVersionTypes);
-  }
-
-  function getLineArray(){
-    if(selectedLines.size===0) return null; // null = all
-    return Array.from(selectedLines);
-  }
-
-  // ---- Matrix rendering ----
   function renderMatrix(pivot){
     pivotCache = pivot;
     const cols = pivot.columns || [];
     const rows = pivot.rows || [];
     const detail = pivot.detail || {};
-
     const wrapper = document.getElementById('util-matrix-wrapper');
     if(!wrapper) return;
 
@@ -308,19 +300,16 @@
       return;
     }
 
-    // Column visibility toggles
     const showUPH = document.getElementById('col-uph')?.checked;
     const showEff = document.getElementById('col-eff')?.checked;
     const showWH = document.getElementById('col-wh')?.checked;
     const showCap = document.getElementById('col-cap')?.checked;
     const showLoad = document.getElementById('col-load')?.checked;
 
-    // Build frozen columns definition
     const frozenCols = [
       {key:'line_code', label:'Line', width:130},
       {key:'version_type', label:'Version Type', width:110},
     ];
-    // Extra info columns toggled
     const extraCols = [];
     if(showUPH) extraCols.push({key:'_uph', label:'UPH', width:70});
     if(showEff) extraCols.push({key:'_eff', label:'Eff', width:60});
@@ -329,19 +318,15 @@
     if(showLoad) extraCols.push({key:'_load', label:'Load', width:80});
 
     const allFrozen = [...frozenCols, ...extraCols];
-
-    // Compute left offsets
     let left = 0;
     allFrozen.forEach(c=>{ c._left = left; left+=c.width; });
     const dividerLeft = left;
-    const DIVIDER = {width:5};
 
-    // Header
     let thead = '<tr>';
     allFrozen.forEach(c=>{
-      thead+=`<th class="frozen" style="left:${c._left}px;min-width:${c.width}px">${esc(c.label)}</th>`;
+      thead += `<th class="frozen" style="left:${c._left}px;min-width:${c.width}px">${esc(c.label)}</th>`;
     });
-    thead+=`<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:${DIVIDER.width}px"></th>`;
+    thead += `<th class="frozen divider-col" style="left:${dividerLeft}px;min-width:5px"></th>`;
     cols.forEach(col=>{
       let label = col;
       let sub = '';
@@ -352,34 +337,30 @@
         try{
           const d = new Date(label);
           if(!isNaN(d)) label = `${d.getMonth()+1}/${d.getDate()}`;
-        }catch{}
+        }catch(e){}
       }else{
         try{
           const d = new Date(col);
           if(!isNaN(d)) label = `${d.getMonth()+1}/${d.getDate()}`;
-        }catch{}
+        }catch(e){}
       }
-      thead+=`<th style="min-width:68px;text-align:center" title="${esc(col)}">${esc(label)}${sub?`<br><span style="font-size:9px;color:#cbd5e1">${esc(sub)}</span>`:''}</th>`;
+      thead += `<th style="min-width:68px;text-align:center" title="${esc(col)}">${esc(label)}${sub?`<br><span style="font-size:9px;color:#cbd5e1">${esc(sub)}</span>`:''}</th>`;
     });
-    thead+='</tr>';
+    thead += '</tr>';
 
-    // Body with thick border per line change
     let tbody = '';
-    let lastLine = null;
     rows.forEach(r=>{
       const isNewLine = r.is_new_line;
       const vType = r.version_type||'';
-      const rowClass = `row-${vType} ${isNewLine?'row-new-line':''}`;
-      tbody+=`<tr class="${rowClass}">`;
+      const rowClass = `row-${esc(vType)} ${isNewLine?'row-new-line':''}`;
+      tbody += `<tr class="${rowClass}">`;
       allFrozen.forEach(c=>{
         const isLast = c===allFrozen[allFrozen.length-1];
-        const cls = isLast ? ' frozen-last' : '';
+        const extraCls = isLast ? ' frozen-last' : '';
         let val = '';
         if(c.key==='line_code') val = esc(r.line_code);
         else if(c.key==='version_type') val = `<span class="type-badge type-${esc(vType)}">${esc(vType)}</span>`;
-        else if(c.key==='_uph' || c.key==='_eff' || c.key==='_wh' || c.key==='_cap' || c.key==='_load'){
-          // For extra cols, we need to show avg? For simplicity show empty or from first detail column
-          // We'll compute from detail for first col if available
+        else{
           const firstCol = cols[0];
           const keyStr = `${r.line_code}||${vType}`;
           const det = detail[keyStr] && detail[keyStr][firstCol];
@@ -391,32 +372,32 @@
             else if(c.key==='_load') val = det.load ? Math.round(det.load).toLocaleString() : '';
           }
         }
-        tbody+=`<td class="frozen data-cell${cls}" style="left:${c._left}px;min-width:${c.width}px">${val}</td>`;
+        tbody += `<td class="frozen data-cell${extraCls}" style="left:${c._left}px;min-width:${c.width}px">${val}</td>`;
       });
-      tbody+=`<td class="divider-col frozen" style="left:${dividerLeft}px"></td>`;
+      tbody += `<td class="divider-col frozen" style="left:${dividerLeft}px"></td>`;
       cols.forEach(col=>{
         const keyStr = `${r.line_code}||${vType}`;
         const cellDetail = detail[keyStr] && detail[keyStr][col];
-        const val = r[col];
-        if(val==null){
-          tbody+=`<td class="data-cell" style="background:#f8fafc"></td>`;
+        const cellVal = r[col];
+        if(cellVal==null){
+          tbody += `<td class="data-cell" style="background:#f8fafc"></td>`;
         }else{
-          const raw = cellDetail ? cellDetail.util_raw : val;
+          const raw = cellDetail ? cellDetail.util_raw : cellVal;
           const isOver = cellDetail ? cellDetail.util_raw>100 : false;
           const load = cellDetail ? cellDetail.load : '';
           const cap = cellDetail ? cellDetail.capacity : '';
           let cls = '';
           if(isOver) cls='util-cell-over';
-          else if(val>=80) cls='util-cell-high';
-          else if(val>=50) cls='util-cell-mid';
-          else if(val>0) cls='util-cell-low';
+          else if(cellVal>=80) cls='util-cell-high';
+          else if(cellVal>=50) cls='util-cell-mid';
+          else if(cellVal>0) cls='util-cell-low';
           else cls='util-cell-zero';
-          let display = val>0? `${Math.round(val)}%` : '0%';
+          let display = cellVal>0 ? `${Math.round(cellVal)}%` : '0%';
           if(isOver) display = `100%<span style="font-size:8px">(${Math.round(raw)}%)</span>`;
-          tbody+=`<td class="data-cell ${cls}" title="Line:${esc(r.line_code)} Ver:${esc(vType)} Date:${esc(col)} Load:${load} Cap:${cap} Raw:${raw}% (capped)">{__DISPLAY__}</td>`.replace('{__DISPLAY__}', display);
+          tbody += `<td class="data-cell ${cls}" title="Line:${esc(r.line_code)} Ver:${esc(vType)} Date:${esc(col)} Load:${load} Cap:${cap} Raw:${raw}%">${display}</td>`;
         }
       });
-      tbody+='</tr>';
+      tbody += '</tr>';
     });
 
     wrapper.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
@@ -428,19 +409,19 @@
   }
 
   async function applyPivot(){
-    const lineInput = document.getElementById('util-filter-line');
-    // line filter from selectedLines set, but also support text input if any? We'll use selectedLines
-    const lineParam = selectedLines.size===0 ? '' : Array.from(selectedLines).join(',');
     const from = document.getElementById('util-filter-from')?.value || '';
     const to = document.getElementById('util-filter-to')?.value || '';
-    // version param: if selectedVersionTypes has both, use all
     let versionParam = 'all';
     if(selectedVersionTypes.size===1){
       versionParam = Array.from(selectedVersionTypes)[0].toLowerCase();
     }else if(selectedVersionTypes.size===0){
-      // none selected -> show none, but we return empty
       document.getElementById('util-matrix-wrapper').innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8">No version type selected</div>`;
       return;
+    }
+
+    let lineParam = '';
+    if(selectedLines.size>0){
+      lineParam = Array.from(selectedLines).join(',');
     }
 
     const params = new URLSearchParams({
@@ -456,13 +437,6 @@
 
     try{
       const res = await fetchJSON(`${API_PIVOT}?${params.toString()}`);
-      // Filter rows by version_type if needed (backend already does but we also have selectedVersionTypes)
-      let filteredRows = res.rows;
-      if(selectedVersionTypes.size>0 && selectedVersionTypes.size<2){
-        filteredRows = res.rows.filter(r=> selectedVersionTypes.has(r.version_type));
-      }
-      // If lineParam was comma-separated, backend already filtered, but we also have selectedLines logic
-      res.rows = filteredRows;
       renderMatrix(res);
     }catch(e){
       if(wrapper) wrapper.innerHTML = `<div style="color:#dc2626;padding:12px">Error: ${esc(e.message)}</div>`;
@@ -478,62 +452,53 @@
     html += buildMatrixSection();
     root.innerHTML = html;
 
-    // Setup dropdowns after HTML inserted
     await loadMeta();
     const lines = (meta && meta.lines) ? meta.lines : [];
+
     setupVersionTypeDropdown();
     setupLineDropdown(lines);
 
-    // Bind upload
-    document.getElementById('btn-upload-gated')?.addEventListener('click', async ()=>{
-      const cal = document.getElementById('file-gated-cal').files[0];
-      const sched = document.getElementById('file-gated-sched').files[0];
-      if(!cal || !sched){ alert('Select both calendar and schedule for gated'); return; }
-      const fd = new FormData();
-      fd.append('version','gated');
-      fd.append('calendar', cal);
-      fd.append('schedule', sched);
-      const msg = document.getElementById('msg-gated');
-      msg.textContent='Uploading...';
-      try{
-        const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
-        const j = await r.json();
-        if(!r.ok) throw new Error(j.error||'upload failed');
-        msg.textContent=`✅ ${j.lines} lines`;
-        setTimeout(()=> location.reload(), 800);
-      }catch(e){ msg.textContent='❌ '+e.message; }
-    });
-    document.getElementById('btn-upload-ungated')?.addEventListener('click', async ()=>{
-      const cal = document.getElementById('file-ungated-cal').files[0];
-      const sched = document.getElementById('file-ungated-sched').files[0];
-      if(!cal || !sched){ alert('Select both for ungated'); return; }
-      const fd = new FormData();
-      fd.append('version','ungated');
-      fd.append('calendar', cal);
-      fd.append('schedule', sched);
-      const msg = document.getElementById('msg-ungated');
-      msg.textContent='Uploading...';
-      try{
-        const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
-        const j = await r.json();
-        if(!r.ok) throw new Error(j.error||'upload failed');
-        msg.textContent=`✅ ${j.lines} lines`;
-        setTimeout(()=> location.reload(), 800);
-      }catch(e){ msg.textContent='❌ '+e.message; }
-    });
+    // Upload handlers
+    const bindUpload = (gated)=>{
+      const calId = gated ? 'file-gated-cal' : 'file-ungated-cal';
+      const schedId = gated ? 'file-gated-sched' : 'file-ungated-sched';
+      const btnId = gated ? 'btn-upload-gated' : 'btn-upload-ungated';
+      const msgId = gated ? 'msg-gated' : 'msg-ungated';
+      const ver = gated ? 'gated' : 'ungated';
+      document.getElementById(btnId)?.addEventListener('click', async ()=>{
+        const cal = document.getElementById(calId).files[0];
+        const sched = document.getElementById(schedId).files[0];
+        if(!cal || !sched){ alert('Select both calendar and schedule'); return; }
+        const fd = new FormData();
+        fd.append('version', ver);
+        fd.append('calendar', cal);
+        fd.append('schedule', sched);
+        const msg = document.getElementById(msgId);
+        if(msg) msg.textContent='Uploading...';
+        try{
+          const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
+          const j = await r.json();
+          if(!r.ok) throw new Error(j.error||'upload failed');
+          if(msg) msg.textContent=`✅ ${j.lines} lines`;
+          setTimeout(()=> location.reload(), 800);
+        }catch(e){ if(msg) msg.textContent='❌ '+e.message; }
+      });
+    };
+    bindUpload(true);
+    bindUpload(false);
+
     document.getElementById('btn-load-demo')?.addEventListener('click', async ()=>{
       const msg = document.getElementById('msg-demo');
-      msg.textContent='Loading demo...';
+      if(msg) msg.textContent='Loading demo...';
       try{
         const r = await fetch(API_DEMO, {method:'POST'});
         const j = await r.json();
         if(!r.ok) throw new Error(j.error||'failed');
-        msg.textContent=`✅ Demo loaded: ${j.lines} lines`;
+        if(msg) msg.textContent=`✅ Demo loaded: ${j.lines} lines`;
         setTimeout(async ()=>{ await loadMeta(); setupLineDropdown(meta.lines); applyPivot(); }, 800);
-      }catch(e){ msg.textContent='❌ '+e.message; }
+      }catch(e){ if(msg) msg.textContent='❌ '+e.message; }
     });
 
-    // Mode tabs
     document.querySelectorAll('#utilization-section .dim-tab').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         document.querySelectorAll('#utilization-section .dim-tab').forEach(b=>b.classList.remove('active'));
@@ -543,22 +508,20 @@
       });
     });
 
-    // Column toggles
     ['col-uph','col-eff','col-wh','col-cap','col-load'].forEach(id=>{
       document.getElementById(id)?.addEventListener('change', applyPivot);
     });
 
-    // Date filters
     document.getElementById('btn-apply-pivot')?.addEventListener('click', applyPivot);
     document.getElementById('util-filter-from')?.addEventListener('change', applyPivot);
     document.getElementById('util-filter-to')?.addEventListener('change', applyPivot);
-
-    // Clear filters
     document.getElementById('btn-clear-util-filters')?.addEventListener('click', ()=>{
       selectedVersionTypes = new Set(['Gated','Ungated']);
       selectedLines.clear();
-      document.getElementById('util-filter-from').value='';
-      document.getElementById('util-filter-to').value='';
+      const fromEl = document.getElementById('util-filter-from');
+      const toEl = document.getElementById('util-filter-to');
+      if(fromEl) fromEl.value='';
+      if(toEl) toEl.value='';
       setupVersionTypeDropdown();
       setupLineDropdown(lines);
       applyPivot();
