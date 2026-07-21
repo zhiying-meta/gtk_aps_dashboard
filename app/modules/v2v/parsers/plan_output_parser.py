@@ -282,6 +282,62 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
         }
 
 
+def get_breakdown_by_line_shift(df_a, df_b, sku, date, granularity="day"):
+    """
+    For a given SKU and date, breakdown by LINE_CODE and SHIFT_NAME
+    Shows A, B, Diff per line per shift
+    """
+    try:
+        # Normalize
+        df_a_norm = normalize_dates(df_a)
+        df_b_norm = normalize_dates(df_b)
+
+        # Filter by SKU and date
+        # Date can be YYYY-MM-DD
+        df_a_filt = df_a_norm[df_a_norm["SKU"] == sku] if sku else df_a_norm
+        df_b_filt = df_b_norm[df_b_norm["SKU"] == sku] if sku else df_b_norm
+
+        if date:
+            # Date filter: match _DATE
+            df_a_filt = df_a_filt[df_a_filt["_DATE"] == date]
+            df_b_filt = df_b_filt[df_b_filt["_DATE"] == date]
+
+        if df_a_filt.empty and df_b_filt.empty:
+            return {"sku": sku, "date": date, "breakdown": [], "total_a": 0, "total_b": 0}
+
+        # Group by LINE_CODE, SHIFT_NAME, PLAN_ITEM
+        group_cols = ["LINE_CODE", "SHIFT_NAME", "PLAN_ITEM"]
+        valid_a = [c for c in group_cols if c in df_a_filt.columns]
+        valid_b = [c for c in group_cols if c in df_b_filt.columns]
+        valid = list(set(valid_a) & set(valid_b))
+        if not valid:
+            valid = ["LINE_CODE", "SHIFT_NAME"]
+
+        agg_a = df_a_filt.groupby(valid, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else pd.DataFrame(columns=valid + ["PLAN_VALUE"])
+        agg_b = df_b_filt.groupby(valid, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else pd.DataFrame(columns=valid + ["PLAN_VALUE"])
+
+        merged = pd.merge(agg_a, agg_b, on=valid, how="outer", suffixes=("_A", "_B"))
+        merged["PLAN_VALUE_A"] = merged["PLAN_VALUE_A"].fillna(0)
+        merged["PLAN_VALUE_B"] = merged["PLAN_VALUE_B"].fillna(0)
+        merged["diff"] = merged["PLAN_VALUE_B"] - merged["PLAN_VALUE_A"]
+        merged["abs_diff"] = merged["diff"].abs()
+        merged = merged.sort_values("abs_diff", ascending=False)
+
+        return {
+            "sku": sku,
+            "date": date,
+            "granularity": granularity,
+            "total_a": float(agg_a["PLAN_VALUE"].sum()) if not agg_a.empty else 0,
+            "total_b": float(agg_b["PLAN_VALUE"].sum()) if not agg_b.empty else 0,
+            "breakdown": merged.to_dict(orient="records"),
+            "count": len(merged)
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "sku": sku, "date": date, "breakdown": []}
+
+
 def get_chart_data_plan_output(df_a, df_b, group_by=None, filters=None, granularity="day", line_code=None, sku=None):
     """
     Get time series for chart

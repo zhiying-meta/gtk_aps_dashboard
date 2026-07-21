@@ -1198,14 +1198,25 @@ async function loadPlanOutputMatrix() {
     // For performance, only show first 100 SKUs initially
     const displaySkus = skuList.slice(0, 100);
     for (const sku of displaySkus) {
-      html += `<tr><td style="left:0;position:sticky;background:white;z-index:10;font-weight:600;min-width:150px" class="frozen">${esc(sku)}</td>`;
+      // Action buttons for drill-down: BOM children (FG -> GB/LT/FR/RT) and Line/Shift breakdown
+      const skuEsc = esc(sku).replace(/'/g, "\\'");
+      html += `<tr><td style="left:0;position:sticky;background:white;z-index:10;font-weight:600;min-width:220px" class="frozen">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span>${esc(sku)}</span>
+          <div style="display:flex;gap:2px;flex-wrap:wrap">
+            <button class="v2v-drill-btn" style="font-size:10px;padding:2px 6px" onclick="showBOMChildren('${skuEsc}')" title="Show BOM children: FG -> GB -> FR/LT/RT">🔍 BOM</button>
+            <button class="v2v-drill-btn" style="font-size:10px;padding:2px 6px" onclick="showBreakdown('${skuEsc}', '')" title="Breakdown by Line/Shift">📊 Line/Shift</button>
+            <button class="v2v-drill-btn" style="font-size:10px;padding:2px 6px" onclick="handleV2VRowChart('plan_output', {SKU:'${skuEsc}'})">📈 Chart</button>
+          </div>
+        </div>
+      </td>`;
       if (granularity === 'day') {
         for (const d of dates) {
           const cell = matrixData[sku] && matrixData[sku][d] ? matrixData[sku][d] : {a:0,b:0,diff:0,cum_a:0,cum_b:0,cum_diff:0};
           const val = cum ? cell.cum_diff : cell.diff;
           const cls = val > 0 ? 'num-pos' : val < 0 ? 'num-neg' : '';
           const displayVal = cum ? `${cell.cum_a.toFixed(0)}/${cell.cum_b.toFixed(0)}<br><small style="color:${val>0?'#16a34a':val<0?'#dc2626':'#64748b'}">${val>0?'+':''}${val.toFixed(0)}</small>` : `${cell.a.toFixed(0)}/${cell.b.toFixed(0)}<br><small style="color:${val>0?'#16a34a':val<0?'#dc2626':'#64748b'}">${val>0?'+':''}${cell.diff.toFixed(0)}</small>`;
-          html += `<td class="data-cell ${cls}" style="font-size:11px;text-align:center;min-width:80px">${displayVal}<br><button class="v2v-drill-btn" style="font-size:10px;padding:1px 4px" onclick="handleV2VRowChart('plan_output', {SKU:'${esc(sku)}'})">📈</button></td>`;
+          html += `<td class="data-cell ${cls}" style="font-size:11px;text-align:center;min-width:80px;cursor:pointer" onclick="showBreakdown('${skuEsc}', '${d}')" title="Click to see Line/Shift breakdown for ${esc(sku)} on ${d}">${displayVal}</td>`;
         }
       } else if (granularity === 'week') {
         // Weekly data
@@ -1214,7 +1225,7 @@ async function loadPlanOutputMatrix() {
           const wkData = weeklyData[sku] && weeklyData[sku][wk.week_start_sunday] ? weeklyData[sku][wk.week_start_sunday] : {a:0,b:0,diff:0,cum_a:0,cum_b:0,cum_diff:0};
           const val = cum ? wkData.cum_diff : wkData.diff;
           const displayVal = cum ? `${wkData.cum_a.toFixed(0)}/${wkData.cum_b.toFixed(0)}<br><small>${val>0?'+':''}${val.toFixed(0)}</small>` : `${wkData.a.toFixed(0)}/${wkData.b.toFixed(0)}<br><small>${wkData.diff.toFixed(0)}</small>`;
-          html += `<td style="text-align:center;min-width:90px">${displayVal}</td>`;
+          html += `<td style="text-align:center;min-width:90px;cursor:pointer" onclick="showBreakdown('${esc(sku).replace(/'/g, "\\'")}', '${wk.week_start_sunday}')" title="Click to see Line/Shift breakdown for ${esc(sku)} week ${wk.week_start_sunday}">${displayVal}</td>`;
         }
       } else if (granularity === 'monthly' || granularity === 'month') {
         const monthlyData = data.monthly_data || {};
@@ -1222,7 +1233,7 @@ async function loadPlanOutputMatrix() {
           const moData = monthlyData[sku] && monthlyData[sku][mo.month] ? monthlyData[sku][mo.month] : {a:0,b:0,diff:0};
           const val = cum ? moData.cum_diff : moData.diff;
           const displayVal = `${moData.a.toFixed(0)}/${moData.b.toFixed(0)}<br><small>${val>0?'+':''}${val.toFixed(0)}</small>`;
-          html += `<td style="text-align:center">${displayVal}</td>`;
+          html += `<td style="text-align:center;cursor:pointer" onclick="showBreakdown('${esc(sku).replace(/'/g, "\\'")}', '${mo.month}-01')" title="Monthly breakdown">${displayVal}</td>`;
         }
       }
       html += '</tr>';
@@ -1241,6 +1252,94 @@ async function loadPlanOutputMatrix() {
     console.error('Matrix load failed', e);
     wrapper.innerHTML = `<div class="v2v-status error">❌ Failed to load matrix: ${e.message}</div>`;
     if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+  }
+}
+
+async function showBOMChildren(parentPn) {
+  const modal = document.getElementById('v2v-bom-modal');
+  const titleEl = document.getElementById('v2v-bom-title');
+  const bodyEl = document.getElementById('v2v-bom-body');
+  if (!modal || !titleEl || !bodyEl) return;
+
+  titleEl.textContent = `BOM Children for ${parentPn}`;
+  bodyEl.innerHTML = '<div class="v2v-loading"><div class="v2v-spinner"></div>Loading BOM children...</div>';
+  modal.style.display = 'flex';
+
+  try {
+    const params = new URLSearchParams({job_id: v2vState.jobId, pn_code: parentPn, recursive: 'true', max_depth: '2'});
+    const resp = await fetch(`/v2v/api/bom/children?${params}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    let html = `<div style="margin-bottom:12px;font-size:12px;color:#64748b">Parent: <b>${esc(parentPn)}</b> | Children A: ${data.total_a} | Children B: ${data.total_b} | Added: ${data.added.length} | Deleted: ${data.deleted.length}</div>`;
+
+    if (data.added.length > 0) {
+      html += `<div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:8px;border-radius:4px;margin-bottom:8px"><b>Added in B:</b> ${data.added.map(esc).join(', ')}</div>`;
+    }
+    if (data.deleted.length > 0) {
+      html += `<div style="background:#fef2f2;border:1px solid #fecaca;padding:8px;border-radius:4px;margin-bottom:8px"><b>Deleted in B:</b> ${data.deleted.map(esc).join(', ')}</div>`;
+    }
+
+    html += '<table class="v2v-table"><thead><tr><th>Level</th><th>Child PN</th><th>Type</th><th>Unit Num</th><th>Loss Rate</th><th>Parent Chain</th><th>Action</th></tr></thead><tbody>';
+
+    const allChildren = [...(data.children_a || []), ...(data.children_b || [])];
+    // Deduplicate by child
+    const seen = new Set();
+    for (const child of allChildren) {
+      const childPn = child.child;
+      if (seen.has(childPn)) continue;
+      seen.add(childPn);
+      const isAdded = data.added.includes(childPn);
+      const isDeleted = data.deleted.includes(childPn);
+      const rowClass = isAdded ? 'diff-add' : isDeleted ? 'diff-del' : '';
+      html += `<tr class="${rowClass}"><td>${child.level}</td><td style="font-weight:600">${esc(child.child)}</td><td><span class="v2v-change-badge ${child.type==='GB'?'add':''}">${esc(child.type)}</span></td><td>${child.unit_num||''}</td><td>${child.loss_rate||''}</td><td style="font-size:11px;color:#64748b">${esc(child.parent_chain||child.parent||'')}</td><td><button class="v2v-drill-btn" onclick="handleV2VRowChart('plan_output', {SKU:'${esc(child.child)}'}); document.getElementById('v2v-bom-modal').style.display='none';">📈 View Plan</button> <button class="v2v-drill-btn" onclick="showBOMChildren('${esc(child.child)}')">▶ Children</button></td></tr>`;
+    }
+
+    html += '</tbody></table>';
+    html += `<div style="margin-top:12px;font-size:11px;color:#64748b">💡 Click "Children" to drill down further (e.g., SK → GB → FR/LT/RT). Click "View Plan" to see plan output for that intermediate SKU.</div>`;
+
+    bodyEl.innerHTML = html;
+
+  } catch(e) {
+    bodyEl.innerHTML = `<div class="v2v-status error">Failed to load BOM children: ${e.message}</div>`;
+  }
+}
+
+async function showBreakdown(sku, date) {
+  const modal = document.getElementById('v2v-breakdown-modal');
+  const titleEl = document.getElementById('v2v-breakdown-title');
+  const bodyEl = document.getElementById('v2v-breakdown-body');
+  if (!modal || !titleEl || !bodyEl) return;
+
+  titleEl.textContent = `Breakdown by Line/Shift for ${sku} on ${date||'All dates'}`;
+  bodyEl.innerHTML = '<div class="v2v-loading"><div class="v2v-spinner"></div>Loading breakdown...</div>';
+  modal.style.display = 'flex';
+
+  try {
+    const params = new URLSearchParams({job_id: v2vState.jobId, sku: sku});
+    if (date) params.append('date', date);
+    const resp = await fetch(`/v2v/api/plan_output/breakdown?${params}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    let html = `<div style="margin-bottom:12px;font-size:12px;color:#64748b">SKU: <b>${esc(sku)}</b> | Date: <b>${esc(date||'All')}</b> | Total A: ${data.total_a} | Total B: ${data.total_b} | Breakdown rows: ${data.count}</div>`;
+    html += '<table class="v2v-table"><thead><tr><th>Line</th><th>Shift</th><th>Plan Item</th><th>A</th><th>B</th><th>Diff</th></tr></thead><tbody>';
+
+    for (const row of (data.breakdown||[]).slice(0,100)) {
+      const diff = row.diff || 0;
+      const cls = diff > 0 ? 'num-pos' : diff < 0 ? 'num-neg' : '';
+      html += `<tr><td>${esc(row.LINE_CODE||'')}</td><td>${esc(row.SHIFT_NAME||'')}</td><td>${esc(row.PLAN_ITEM||'')}</td><td>${row.PLAN_VALUE_A||0}</td><td>${row.PLAN_VALUE_B||0}</td><td class="${cls}" style="font-weight:600">${diff>0?'+':''}${diff}</td></tr>`;
+    }
+
+    html += '</tbody></table>';
+    if (data.count > 100) {
+      html += `<div style="margin-top:8px;font-size:11px;color:#64748b">Showing first 100 of ${data.count} breakdown rows</div>`;
+    }
+
+    bodyEl.innerHTML = html;
+
+  } catch(e) {
+    bodyEl.innerHTML = `<div class="v2v-status error">Failed to load breakdown: ${e.message}</div>`;
   }
 }
 
@@ -1265,6 +1364,8 @@ window.setV2VQuickQuery = setV2VQuickQuery;
 window.updateV2VBuilderForTable = updateV2VBuilderForTable;
 window.downloadV2VCurrentView = downloadV2VCurrentView;
 window.loadPlanOutputMatrix = loadPlanOutputMatrix;
+window.showBOMChildren = showBOMChildren;
+window.showBreakdown = showBreakdown;
 
 // Auto init if on V2V page
 if (document.readyState === 'loading') {

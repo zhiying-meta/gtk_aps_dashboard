@@ -458,6 +458,99 @@ def download_current_view():
         return jsonify({"error": str(e)}), 500
 
 
+@v2v_bp.route('/v2v/api/bom/children', methods=['GET'])
+def get_bom_children_api():
+    """
+    Get BOM children for a given parent PN
+    Query: job_id, pn_code, recursive (true/false), max_depth
+    """
+    try:
+        job_id = request.args.get('job_id')
+        pn_code = request.args.get('pn_code') or request.args.get('parent')
+        recursive = request.args.get('recursive', 'false').lower() in ['true', '1', 'yes']
+        max_depth = int(request.args.get('max_depth', 2))
+
+        if not job_id or job_id not in JOB_STORE:
+            return jsonify({"error": "Invalid job_id"}), 400
+        if not pn_code:
+            return jsonify({"error": "Missing pn_code"}), 400
+
+        job = JOB_STORE[job_id]
+        from .diff_engine import load_single_table
+        from .parsers.bom_parser import get_bom_children, get_bom_tree
+
+        df_a = load_single_table(job["folder_a"], "bom")
+        df_b = load_single_table(job["folder_b"], "bom")
+
+        # Use version A BOM for structure, but also check B for diff
+        children_a = get_bom_children(df_a, pn_code, recursive=recursive, max_depth=max_depth) if df_a is not None else []
+        children_b = get_bom_children(df_b, pn_code, recursive=recursive, max_depth=max_depth) if df_b is not None else []
+
+        # Merge to show diff
+        # For simplicity, return A children and B children separate, and also diff of children list
+        # Find added/deleted children
+        set_a = set([c["child"] for c in children_a])
+        set_b = set([c["child"] for c in children_b])
+        added = list(set_b - set_a)
+        deleted = list(set_a - set_b)
+        common = list(set_a & set_b)
+
+        return jsonify({
+            "job_id": job_id,
+            "parent": pn_code,
+            "recursive": recursive,
+            "children_a": children_a,
+            "children_b": children_b,
+            "added": added,
+            "deleted": deleted,
+            "common": common,
+            "total_a": len(children_a),
+            "total_b": len(children_b)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@v2v_bp.route('/v2v/api/plan_output/breakdown', methods=['GET'])
+def get_plan_output_breakdown():
+    """
+    Breakdown by line/shift for a given SKU and date
+    Query: job_id, sku, date (YYYY-MM-DD), granularity
+    """
+    try:
+        job_id = request.args.get('job_id')
+        sku = request.args.get('sku')
+        date = request.args.get('date')
+        granularity = request.args.get('granularity', 'day')
+
+        if not job_id or job_id not in JOB_STORE:
+            return jsonify({"error": "Invalid job_id"}), 400
+        if not sku:
+            return jsonify({"error": "Missing sku"}), 400
+
+        job = JOB_STORE[job_id]
+        from .diff_engine import load_single_table
+        from .parsers.plan_output_parser import get_breakdown_by_line_shift
+
+        df_a = load_single_table(job["folder_a"], "plan_output")
+        df_b = load_single_table(job["folder_b"], "plan_output")
+
+        if df_a is None or df_b is None:
+            return jsonify({"error": "Missing plan_output"}), 400
+
+        result = get_breakdown_by_line_shift(df_a, df_b, sku=sku, date=date, granularity=granularity)
+        result["job_id"] = job_id
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @v2v_bp.route('/v2v/api/plan_output/matrix', methods=['GET'])
 def get_plan_output_matrix():
     """

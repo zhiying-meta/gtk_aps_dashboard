@@ -14,6 +14,75 @@ def parse_bom(file_path: str):
         raise e
 
 
+def get_bom_children(df, parent_pn, recursive=False, max_depth=3):
+    """
+    Get children for a given parent PN from BOM
+    If recursive, also get grandchildren
+    Returns list of dicts with child info and level
+    """
+    try:
+        if df is None or df.empty:
+            return []
+
+        # Direct children
+        direct = df[df["PARENT_PN_CODE"] == parent_pn].copy()
+        result = []
+        for _, row in direct.iterrows():
+            child = {
+                "parent": parent_pn,
+                "child": row.get("ITEM_NO"),
+                "unit_num": row.get("UNIT_NUM"),
+                "loss_rate": row.get("LOSS_RATE"),
+                "process_lt": row.get("PROCESS_LT"),
+                "level": 1,
+                "type": "GB" if str(row.get("ITEM_NO")).startswith("GB-") else "FR" if str(row.get("ITEM_NO")).startswith("FR-") else "LT" if str(row.get("ITEM_NO")).startswith("LT-") else "RT" if str(row.get("ITEM_NO")).startswith("RT-") else "SK" if str(row.get("ITEM_NO")).startswith("SK-") else "OTHER"
+            }
+            result.append(child)
+
+        if recursive and max_depth > 1:
+            # For each child that is GB, get its children
+            for child in direct.to_dict(orient="records"):
+                child_pn = child.get("ITEM_NO")
+                if child_pn and str(child_pn).startswith("GB-"):
+                    grandchildren = get_bom_children(df, child_pn, recursive=False, max_depth=max_depth-1)
+                    for gc in grandchildren:
+                        gc["level"] = 2
+                        gc["parent_chain"] = f"{parent_pn} -> {child_pn}"
+                        result.append(gc)
+
+        return result
+    except Exception as e:
+        print(f"BOM children error: {e}")
+        return []
+
+
+def get_bom_tree(df, root_pn, max_depth=3):
+    """
+    Get full BOM tree for a root PN up to max_depth
+    Returns dict with parent and children recursively
+    """
+    try:
+        tree = {
+            "pn": root_pn,
+            "level": 0,
+            "children": []
+        }
+        children = get_bom_children(df, root_pn, recursive=False)
+        for child in children:
+            child_pn = child["child"]
+            # Get grandchildren if GB
+            if child["type"] == "GB" and max_depth > 1:
+                grandchildren = get_bom_children(df, child_pn, recursive=False)
+                child["children"] = grandchildren
+            else:
+                child["children"] = []
+            tree["children"].append(child)
+        return tree
+    except Exception as e:
+        print(f"BOM tree error: {e}")
+        return {"pn": root_pn, "children": [], "error": str(e)}
+
+
 def diff_bom(df_a, df_b):
     try:
         import pandas as pd

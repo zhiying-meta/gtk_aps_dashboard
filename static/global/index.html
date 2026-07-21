@@ -420,6 +420,29 @@
         <div class="modal-body" id="schema-body"></div>
       </div>
     </div>
+
+    <!-- ===== V2V Drill-down Modals ===== -->
+    <div id="v2v-bom-modal" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="document.getElementById('v2v-bom-modal').style.display='none'"></div>
+      <div class="modal-content" style="max-width:800px;width:90%">
+        <div class="modal-header">
+          <span class="modal-title" id="v2v-bom-title">BOM Children</span>
+          <button class="modal-close" onclick="document.getElementById('v2v-bom-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="v2v-bom-body"></div>
+      </div>
+    </div>
+
+    <div id="v2v-breakdown-modal" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="document.getElementById('v2v-breakdown-modal').style.display='none'"></div>
+      <div class="modal-content" style="max-width:900px;width:90%">
+        <div class="modal-header">
+          <span class="modal-title" id="v2v-breakdown-title">Line/Shift Breakdown</span>
+          <button class="modal-close" onclick="document.getElementById('v2v-breakdown-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="v2v-breakdown-body"></div>
+      </div>
+    </div>
   </main>
 </div>
 
