@@ -168,6 +168,10 @@ def _compute_records(version: str, calendar_path: str, schedule_path: str) -> Ut
         load = load_map.get(key, 0.0)
         util = load / capacity if capacity > 0 else 0.0
 
+        # Raw utilization (may exceed 1.0 if overloaded)
+        util_pct_raw = round(util*100, 2)
+        # Capped at 100 for theoretical 0-100% range (overload shown as 100% with flag)
+        util_pct_capped = min(100.0, util_pct_raw) if util_pct_raw is not None else 0
         rec = {
             'line_code': line,
             'plan_date': date_norm,
@@ -178,7 +182,9 @@ def _compute_records(version: str, calendar_path: str, schedule_path: str) -> Ut
             'capacity': capacity,
             'load': load,
             'utilization': util,
-            'utilization_pct': round(util*100, 2),
+            'utilization_pct': util_pct_raw,
+            'utilization_pct_capped': util_pct_capped,
+            'is_overload': util_pct_raw > 100.0,
         }
         records_shift.append(rec)
 
@@ -203,17 +209,21 @@ def _compute_records(version: str, calendar_path: str, schedule_path: str) -> Ut
         avg_uph = sum(agg['uphs'])/len(agg['uphs']) if agg['uphs'] else 0
         avg_eff = sum(agg['effs'])/len(agg['effs']) if agg['effs'] else 0
         sum_wh = sum(agg['whs'])
+        util_pct_raw = round(util*100, 2)
+        util_pct_capped = min(100.0, util_pct_raw)
         records_day.append({
             'line_code': line,
             'plan_date': date_norm,
-            'shift_name': 'DAY',  # aggregated
+            'shift_name': 'DAY',
             'uph': avg_uph,
             'efficiency': avg_eff,
             'working_hours': sum_wh,
             'capacity': cap,
             'load': load,
             'utilization': util,
-            'utilization_pct': round(util*100, 2),
+            'utilization_pct': util_pct_raw,
+            'utilization_pct_capped': util_pct_capped,
+            'is_overload': util_pct_raw > 100.0,
             'shift_count': len(agg['shifts']),
         })
 

@@ -157,6 +157,127 @@ def api_reports():
         traceback.print_exc()
         return _json_error(str(e))
 
+@util_bp.route("/api/utilization/pivot", methods=["GET"])
+def api_pivot():
+    """
+    Pivot table for gantt-like matrix:
+    mode=shift -> columns = date + shift (e.g. 2026-06-02|白班)
+    mode=day -> columns = date
+    Returns:
+      lines: [line_code...]
+      columns: [col_label...] sorted
+      data: {line_code: {col_label: utilization_pct, ...}, ...}
+      Also returns detailed records for tooltip: load/capacity
+    """
+    try:
+        caches = get_all_caches(DEFAULT_DATA_DIR)
+        if not caches:
+            return _json_error("No data. Upload first.", 404)
+
+        mode = request.args.get("mode", "day")  # day is default for matrix, shift for detailed
+        version = request.args.get("version", "gated")
+        line_filter = request.args.get("line_code", "") or request.args.get("line", "")
+        date_from = request.args.get("date_from", "")
+        date_to = request.args.get("date_to", "")
+
+        # Get cache
+        cache = caches.get(version)
+        if not cache:
+            cache = list(caches.values())[0]
+
+        # Build filtered records
+        from app.modules.utilization_report.engine import build_report
+
+        if mode == "shift":
+            recs = build_report(cache, mode="shift", line_filter=line_filter, date_from=date_from, date_to=date_to)
+            # Columns = sorted unique date+shift
+            cols_set = set()
+            for r in recs:
+                col = f"{r['plan_date']}|{r['shift_name']}"
+                cols_set.add(col)
+            cols = sorted(list(cols_set))
+            # Build matrix: line -> col -> utilization
+            matrix = {}
+            detail = {}  # line -> col -> {load, cap, uph, eff, wh, util}
+            for r in recs:
+                line = r['line_code']
+                col = f"{r['plan_date']}|{r['shift_name']}"
+                if line not in matrix:
+                    matrix[line] = {}
+                    detail[line] = {}
+                # Cap utilization at 100 for display? Keep raw but also capped
+                util_pct = r['utilization_pct']
+                # Cap at 100 for theoretical range, but keep raw for tooltip
+                capped = min(100.0, util_pct) if util_pct is not None else 0
+                matrix[line][col] = capped
+                detail[line][col] = {
+                    'util_raw': util_pct,
+                    'util_capped': capped,
+                    'load': r['load'],
+                    'capacity': r['capacity'],
+                    'uph': r['uph'],
+                    'efficiency': r['efficiency'],
+                    'working_hours': r['working_hours'],
+                }
+        else:
+            # day mode
+            recs = build_report(cache, mode="day", line_filter=line_filter, date_from=date_from, date_to=date_to)
+            cols = sorted(list(set(r['plan_date'] for r in recs)))
+            matrix = {}
+            detail = {}
+            for r in recs:
+                line = r['line_code']
+                col = r['plan_date']
+                if line not in matrix:
+                    matrix[line] = {}
+                    detail[line] = {}
+                util_pct = r['utilization_pct']
+                capped = min(100.0, util_pct) if util_pct is not None else 0
+                matrix[line][col] = capped
+                detail[line][col] = {
+                    'util_raw': util_pct,
+                    'util_capped': capped,
+                    'load': r['load'],
+                    'capacity': r['capacity'],
+                    'uph': r['uph'],
+                    'efficiency': r['efficiency'],
+                    'working_hours': r['working_hours'],
+                }
+
+        # Sort lines
+        lines = sorted(list(matrix.keys()))
+
+        # Limit columns for performance: if too many, slice by date range already filtered
+        # But also limit to 200 columns max for initial load
+        max_cols = 200
+        if len(cols) > max_cols:
+            # Keep first max_cols
+            cols = cols[:max_cols]
+
+        # Build rows array for frontend
+        rows = []
+        for line in lines:
+            row = {'line_code': line}
+            for col in cols:
+                row[col] = matrix[line].get(col, None)
+            rows.append(row)
+
+        return jsonify({
+            "mode": mode,
+            "version": cache.version,
+            "columns": cols,
+            "lines": lines,
+            "rows": rows,
+            "detail": detail,
+            "total_lines": len(lines),
+            "total_cols": len(cols),
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(str(e))
+
 @util_bp.route("/api/utilization/upload", methods=["POST"])
 def api_upload():
     """

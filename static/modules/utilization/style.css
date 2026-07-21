@@ -18,11 +18,21 @@
 .util-btn-outline:hover { background:#f1f5f9; }
 .util-btn:disabled { opacity:.5; cursor:not-allowed; }
 
-.util-table-wrapper { overflow:auto; max-height:calc(100vh - 260px); border:1px solid #e2e8f0; border-radius:6px; margin-top:12px; }
-.util-table-wrapper table { width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap; }
-.util-table-wrapper th { background:#1e293b; color:#fff; padding:6px 8px; text-align:left; position:sticky; top:0; z-index:10; font-size:11px; }
-.util-table-wrapper td { padding:5px 8px; border-bottom:1px solid #e2e8f0; border-right:1px solid #f1f5f9; }
+.util-table-wrapper { overflow:auto; max-height:calc(100vh - 260px); border:1px solid #e2e8f0; border-radius:6px; margin-top:12px; position:relative; }
+.util-table-wrapper table { border-collapse:collapse; font-size:12px; white-space:nowrap; width:max-content; min-width:100%; }
+.util-table-wrapper th { background:#1e293b; color:#fff; padding:6px 8px; text-align:left; position:sticky; top:0; z-index:10; font-size:11px; border-right:1px solid #334155; }
+.util-table-wrapper th.frozen { position:sticky; left:0; z-index:11; background:#1e293b; }
+.util-table-wrapper td { padding:4px 6px; border-bottom:1px solid #e2e8f0; border-right:1px solid #f1f5f9; min-width:68px; text-align:center; }
+.util-table-wrapper td.frozen { position:sticky; left:0; z-index:5; background:#fff; text-align:left; min-width:130px; font-weight:600; border-right:2px solid #cbd5e1; }
 .util-table-wrapper tr:hover td { background:#f8fafc; }
+.util-table-wrapper tr:hover td.frozen { background:#f1f5f9 !important; }
+
+/* Utilization heatmap cells */
+.util-cell-zero { background:#f8fafc; color:#94a3b8; }
+.util-cell-low { background:#ecfdf5; color:#065f46; }
+.util-cell-mid { background:#fffbeb; color:#92400e; }
+.util-cell-high { background:#ffedd5; color:#9a3412; }
+.util-cell-over { background:#fef2f2; color:#991b1b; border:1px solid #fca5a5; font-weight:700; }
 
 .util-cell-num { text-align:right; font-variant-numeric:tabular-nums; }
 .util-cell-pct { font-weight:600; }

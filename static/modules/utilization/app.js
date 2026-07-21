@@ -1,28 +1,28 @@
 /**
- * Utilization Report - Line Utilization = Load / Capacity
- * Capacity = UPH * efficiency * working_hours (from calendar snapshot INPUT)
- * Load = sum(schedule INPUT)
+ * Utilization Report - Matrix view like I/O Report
+ * Line fixed, dates horizontal, cell = utilization %
+ * Capacity = UPH * Eff * WH, Load = schedule INPUT sum
+ * Capped at 100% for display, raw kept for tooltip (overload >100% means over capacity)
  */
 
 (() => {
   const API_STATUS = '/api/utilization/status';
   const API_META = '/api/utilization/meta';
-  const API_REPORTS = '/api/utilization/reports';
+  const API_PIVOT = '/api/utilization/pivot';
   const API_UPLOAD = '/api/utilization/upload';
   const API_DEMO = '/api/utilization/demo/load';
 
   let meta = null;
-  let currentMode = 'shift'; // shift or day
-  let currentVersion = 'gated'; // gated, ungated, compare
-  let allLines = [];
-  let currentRecords = [];
+  let currentMode = 'day'; // day or shift - day is default for matrix (less columns)
+  let currentVersion = 'gated';
+  let pivotCache = null; // last pivot response
 
   function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 
   function getRoot(){ return document.getElementById('utilization-section'); }
 
-  async function fetchJSON(url){
-    const r = await fetch(url);
+  async function fetchJSON(url, opts){
+    const r = await fetch(url, opts);
     const j = await r.json();
     if(!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     return j;
@@ -40,7 +40,6 @@
   async function loadMeta(){
     try{
       meta = await fetchJSON(API_META);
-      allLines = meta.lines || [];
       return true;
     }catch(e){
       meta = null;
@@ -52,39 +51,41 @@
     if(status && status.loaded){
       const vers = (status.versions||[]).join(', ')||'gated';
       const details = status.details||{};
-      let totalShift = 0, totalDay=0;
-      Object.values(details).forEach(d=>{ totalShift+=d.records_shift||0; totalDay+=d.records_day||0; });
-      return `<span class="util-status-badge ready">✅ Ready: ${vers} | ${totalShift} shift recs / ${totalDay} day recs</span>`;
+      let totalShift = 0;
+      Object.values(details).forEach(d=>{ totalShift+=d.records_shift||0; });
+      // If details empty (fast status), show versions only
+      if(totalShift===0) return `<span class="util-status-badge ready">✅ Ready: ${vers} — click to load matrix</span>`;
+      return `<span class="util-status-badge ready">✅ Ready: ${vers} | ${totalShift} shift recs</span>`;
     }else{
-      return `<span class="util-status-badge empty">No data loaded — upload calendar + schedule or load demo</span>`;
+      return `<span class="util-status-badge empty">No data — upload calendar + schedule or load demo</span>`;
     }
   }
 
-  function buildUploadHTML(){
+  function buildUploadHTML(status){
     return `
       <div class="section">
         <div class="section-header">
           <span class="section-title">⚙️ Line Utilization — Upload</span>
-          <span id="util-status-badge"></span>
+          <span id="util-status-badge">${statusBadgeHTML(status)}</span>
         </div>
         <div style="padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#475569;margin-bottom:12px">
-          <b>Logic:</b> Per line/date/shift: <code>Capacity = UPH × Efficiency × WorkingHours</code> (from calendar snapshot INPUT, PLAN_TYPE=UPH/效率/工时)<br>
-          <code>Load = Σ schedule INPUT qty</code> (from schedule result). <code>Utilization = Load / Capacity</code><br>
-          Supports gated / ungated dual upload — if only one version present, fallback to single view. Gantt similar to I/O Report, switchable shift/day.
+          <b>Formula:</b> Per line/date/shift: <code>Capacity = UPH × Efficiency × WorkingHours</code> (from calendar snapshot INPUT, PLAN_TYPE=UPH/效率/工时)<br>
+          <code>Load = Σ schedule INPUT qty</code> — <code>Util% = Load / Capacity</code> capped at 100% (raw kept in tooltip, >100% = overload)<br>
+          Matrix view like I/O Report: Line fixed, dates horizontal draggable, cell = Util%
         </div>
         <div class="util-upload-grid">
           <div class="util-upload-card" id="card-gated">
             <div class="util-upload-label">Gated Version</div>
-            <div class="util-upload-hint">Upload calendar + schedule for gated</div>
+            <div class="util-upload-hint">Calendar + Schedule (gated)</div>
             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-              <div><label style="font-size:11px">Calendar (工作日历快照.xlsx)</label><br><input type="file" id="file-gated-cal" accept=".xlsx"></div>
-              <div><label style="font-size:11px">Schedule (排产结果表.xlsx)</label><br><input type="file" id="file-gated-sched" accept=".xlsx"></div>
+              <div><label style="font-size:11px">Calendar</label><br><input type="file" id="file-gated-cal" accept=".xlsx"></div>
+              <div><label style="font-size:11px">Schedule</label><br><input type="file" id="file-gated-sched" accept=".xlsx"></div>
             </div>
             <div style="margin-top:8px"><button class="util-btn" id="btn-upload-gated">Upload Gated</button> <span id="msg-gated" style="font-size:11px;color:#64748b"></span></div>
           </div>
           <div class="util-upload-card" id="card-ungated">
-            <div class="util-upload-label">Ungated Version (optional)</div>
-            <div class="util-upload-hint">Optional second version for compare</div>
+            <div class="util-upload-label">Ungated (optional)</div>
+            <div class="util-upload-hint">For compare mode</div>
             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
               <div><label style="font-size:11px">Calendar</label><br><input type="file" id="file-ungated-cal" accept=".xlsx"></div>
               <div><label style="font-size:11px">Schedule</label><br><input type="file" id="file-ungated-sched" accept=".xlsx"></div>
@@ -93,172 +94,166 @@
           </div>
         </div>
         <div style="text-align:center;margin:12px 0">
-          <button class="util-btn util-btn-outline" id="btn-load-demo">📦 Load Demo Data (IVY20260721Gated)</button>
+          <button class="util-btn util-btn-outline" id="btn-load-demo">📦 Load Demo (IVY20260721Gated)</button>
           <span id="msg-demo" style="font-size:11px;margin-left:8px;color:#64748b"></span>
         </div>
       </div>
     `;
   }
 
-  function buildToolbarHTML(){
-    const linesOptions = (allLines||[]).slice(0,200).map(l=>`<option value="${esc(l)}">${esc(l)}</option>`).join('');
+  function buildMatrixToolbar(){
     return `
-      <div class="util-toolbar">
-        <div class="util-filter-group">
-          <label>Mode</label>
-          <div class="util-toggle-group">
-            <button id="btn-mode-shift" class="${currentMode==='shift'?'active':''}">Shift</button>
-            <button id="btn-mode-day" class="${currentMode==='day'?'active':''}">Day</button>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">⚙️ Line Utilization — Matrix (Line fixed, Date horizontal)</span>
+          <span id="util-matrix-badge" style="font-size:11px;color:#64748b"></span>
+        </div>
+        <div class="util-toolbar">
+          <div class="util-filter-group">
+            <label>Mode</label>
+            <div class="util-toggle-group">
+              <button id="btn-mode-day" class="${currentMode==='day'?'active':''}">Day</button>
+              <button id="btn-mode-shift" class="${currentMode==='shift'?'active':''}">Shift</button>
+            </div>
+          </div>
+          <div class="util-filter-group">
+            <label>Version</label>
+            <div class="util-toggle-group">
+              <button id="btn-ver-gated" class="${currentVersion==='gated'?'active':''}">Gated</button>
+              <button id="btn-ver-ungated" class="${currentVersion==='ungated'?'active':''}">Ungated</button>
+            </div>
+          </div>
+          <div class="util-filter-group">
+            <label>Line Filter</label>
+            <input type="text" id="util-filter-line" placeholder="e.g. AL1-PKG">
+          </div>
+          <div class="util-filter-group">
+            <label>Date From</label>
+            <input type="date" id="util-filter-from">
+          </div>
+          <div class="util-filter-group">
+            <label>Date To</label>
+            <input type="date" id="util-filter-to">
+          </div>
+          <div class="util-filter-group">
+            <label>&nbsp;</label>
+            <button class="util-btn" id="btn-apply-pivot">Apply / Reload</button>
+          </div>
+          <div class="util-filter-group">
+            <label>Legend</label>
+            <div style="display:flex;gap:6px;align-items:center;font-size:11px">
+              <span style="background:#ecfdf5;color:#059669;padding:2px 6px;border-radius:10px">0-50%</span>
+              <span style="background:#fffbeb;color:#d97706;padding:2px 6px;border-radius:10px">50-80%</span>
+              <span style="background:#ffedd5;color:#ea580c;padding:2px 6px;border-radius:10px">80-100%</span>
+              <span style="background:#fef2f2;color:#dc2626;padding:2px 6px;border-radius:10px;border:1px solid #fecaca">>100% Overload capped at 100%</span>
+            </div>
           </div>
         </div>
-        <div class="util-filter-group">
-          <label>Version</label>
-          <div class="util-toggle-group">
-            <button id="btn-ver-gated" class="${currentVersion==='gated'?'active':''}">Gated</button>
-            <button id="btn-ver-ungated" class="${currentVersion==='ungated'?'active':''}">Ungated</button>
-            <button id="btn-ver-compare" class="${currentVersion==='compare'?'active':''}">Compare</button>
-          </div>
-        </div>
-        <div class="util-filter-group">
-          <label>Line</label>
-          <select id="util-filter-line"><option value="">All</option>${linesOptions}</select>
-        </div>
-        <div class="util-filter-group">
-          <label>Shift</label>
-          <select id="util-filter-shift"><option value="">All</option><option value="白班">白班 (Day)</option><option value="夜班">夜班 (Night)</option></select>
-        </div>
-        <div class="util-filter-group">
-          <label>Date From</label>
-          <input type="date" id="util-filter-from">
-        </div>
-        <div class="util-filter-group">
-          <label>Date To</label>
-          <input type="date" id="util-filter-to">
-        </div>
-        <div class="util-filter-group">
-          <label>&nbsp;</label>
-          <button class="util-btn" id="btn-apply-filter">Apply</button>
-        </div>
-        <div class="util-filter-group">
-          <label>&nbsp;</label>
-          <span id="util-report-count" style="font-size:12px;color:#64748b"></span>
+        <div id="util-matrix-wrapper" class="util-table-wrapper" style="max-height:calc(100vh - 300px)">
+          <div style="text-align:center;padding:30px;color:#94a3b8">Loading matrix...</div>
         </div>
       </div>
     `;
   }
 
-  function pctClass(pct){
-    const v = parseFloat(pct);
-    if(isNaN(v)) return 'util-pct-low';
-    if(v>100) return 'util-pct-over';
-    if(v>=80) return 'util-pct-high';
-    if(v>=50) return 'util-pct-mid';
-    return 'util-pct-low';
+  function pctColorClass(pct, isOverload){
+    if(isOverload || pct>100) return 'util-cell-over';
+    if(pct>=80) return 'util-cell-high';
+    if(pct>=50) return 'util-cell-mid';
+    if(pct>0) return 'util-cell-low';
+    return 'util-cell-zero';
   }
 
-  function barClass(pct){
-    const v = parseFloat(pct);
-    if(v>100) return 'over';
-    if(v>=80) return 'high';
-    if(v>=50) return 'mid';
-    return 'low';
-  }
+  function renderMatrix(pivot){
+    pivotCache = pivot;
+    const cols = pivot.columns || [];
+    const rows = pivot.rows || [];
+    const detail = pivot.detail || {};
 
-  function renderTable(records){
-    if(!records || records.length===0){
-      return `<div style="text-align:center;padding:30px;color:#94a3b8">No matching records</div>`;
+    if(rows.length===0){
+      document.getElementById('util-matrix-wrapper').innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8">No data for current filter</div>`;
+      return;
     }
-    // Summary cards
-    const avgs = records.reduce((acc,r)=> acc + (r.utilization_pct||r.gated_utilization_pct||0),0) / records.length;
-    const over100 = records.filter(r=> (r.utilization_pct||r.gated_utilization_pct||0) > 100).length;
-    const cards = `
-      <div class="util-card-grid">
-        <div class="util-card"><div class="util-card-title">Avg Utilization</div><div class="util-card-metric">${avgs.toFixed(1)}%</div><div class="util-card-sub">${records.length} records, mode=${currentMode}</div></div>
-        <div class="util-card"><div class="util-card-title">Over 100%</div><div class="util-card-metric" style="color:${over100>0?'#dc2626':'#059669'}">${over100}</div><div class="util-card-sub">Lines exceeding capacity</div></div>
-        <div class="util-card"><div class="util-card-title">Total Load</div><div class="util-card-metric">${records.reduce((s,r)=>s+(r.load||r.gated_load||0),0).toLocaleString()}</div><div class="util-card-sub">Sum qty (INPUT)</div></div>
-      </div>
-    `;
 
-    if(currentVersion==='compare'){
-      let html = cards + `<div class="util-table-wrapper"><table><thead><tr><th>Line</th><th>Date</th><th>Shift</th><th>Gated Load</th><th>Gated Cap</th><th>Gated Util%</th><th>Ungated Load</th><th>Ungated Cap</th><th>Ungated Util%</th><th>Δ Util%</th><th>Δ Load</th></tr></thead><tbody>`;
-      for(const r of records.slice(0,500)){
-        html+=`<tr>
-          <td>${esc(r.line_code)}</td>
-          <td>${esc(r.plan_date)}</td>
-          <td>${esc(r.shift_name)}</td>
-          <td class="util-cell-num">${(r.gated_load||0).toLocaleString()}</td>
-          <td class="util-cell-num">${(r.gated_capacity||0).toLocaleString()}</td>
-          <td><span class="${pctClass(r.gated_utilization_pct)}">${r.gated_utilization_pct!=null?r.gated_utilization_pct+'%':''}</span></td>
-          <td class="util-cell-num">${r.ungated_load!=null? r.ungated_load.toLocaleString():''}</td>
-          <td class="util-cell-num">${r.ungated_capacity!=null? r.ungated_capacity.toLocaleString():''}</td>
-          <td><span class="${r.ungated_utilization_pct!=null? pctClass(r.ungated_utilization_pct):''}">${r.ungated_utilization_pct!=null? r.ungated_utilization_pct+'%':''}</span></td>
-          <td class="util-cell-num" style="color:${(r.delta_utilization||0)>0?'#dc2626':'#059669'}">${r.delta_utilization!=null? r.delta_utilization+'%':''}</td>
-          <td class="util-cell-num">${r.delta_load!=null? r.delta_load.toLocaleString():''}</td>
-        </tr>`;
+    // Build header
+    let thead = `<tr><th class="frozen" style="left:0;min-width:130px;z-index:11">Line</th>`;
+    // For shift mode, columns are like 2026-06-18|白班, we display as two rows? Simplify: show date and shift
+    cols.forEach(col=>{
+      // col for shift mode is date|shift, for day mode just date
+      let label = col;
+      let sub = '';
+      if(col.includes('|')){
+        const parts = col.split('|');
+        label = parts[0];
+        sub = parts[1];
       }
-      html+='</tbody></table></div>';
-      return html;
-    }else{
-      let html = cards + `<div class="util-table-wrapper"><table><thead><tr><th>Line</th><th>Date</th><th>Shift</th><th>UPH</th><th>Eff</th><th>WH</th><th>Capacity</th><th>Load</th><th>Util%</th><th>Gantt</th></tr></thead><tbody>`;
-      for(const r of records.slice(0,500)){
-        const pct = r.utilization_pct||0;
-        const w = Math.min(100, pct);
-        html+=`<tr>
-          <td>${esc(r.line_code)}</td>
-          <td>${esc(r.plan_date)}</td>
-          <td>${esc(r.shift_name)}</td>
-          <td class="util-cell-num">${r.uph||''}</td>
-          <td class="util-cell-num">${r.efficiency||''}</td>
-          <td class="util-cell-num">${r.working_hours||''}</td>
-          <td class="util-cell-num">${(r.capacity||0).toLocaleString()}</td>
-          <td class="util-cell-num">${(r.load||0).toLocaleString()}</td>
-          <td><span class="${pctClass(pct)}">${pct}%</span></td>
-          <td style="min-width:120px"><div style="width:100px;height:12px;background:#f1f5f9;border-radius:6px;overflow:hidden"><div class="util-gantt-bar ${barClass(pct)}" style="width:${w}%;height:100%"></div></div></td>
-        </tr>`;
-      }
-      html+='</tbody></table></div>';
-      return html;
-    }
-  }
-
-  function renderGantt(records){
-    // Group by line, sorted by date
-    const byLine = {};
-    records.forEach(r=>{
-      if(!byLine[r.line_code]) byLine[r.line_code]=[];
-      byLine[r.line_code].push(r);
+      // Shorten date: show MM-DD
+      let short = label;
+      try{
+        const d = new Date(label);
+        if(!isNaN(d)) short = `${d.getMonth()+1}/${d.getDate()}`;
+      }catch{}
+      thead += `<th style="min-width:68px;text-align:center" title="${esc(col)}">${esc(short)}${sub?`<br><span style="font-size:9px;color:#cbd5e1">${esc(sub)}</span>`:''}</th>`;
     });
-    const lines = Object.keys(byLine).sort().slice(0,20); // limit 20 lines for gantt
-    let html = `<div style="margin-top:16px"><div style="font-weight:600;font-size:13px;margin-bottom:8px">Gantt — Utilization by ${currentMode} (top 20 lines)</div>`;
-    for(const line of lines){
-      const recs = byLine[line].sort((a,b)=> a.plan_date.localeCompare(b.plan_date) || (a.shift_name||'').localeCompare(b.shift_name||'')).slice(0,30);
-      html+=`<div style="margin-bottom:10px;border:1px solid #e2e8f0;border-radius:6px;padding:6px"><div style="font-weight:600;font-size:12px;color:#0f172a;margin-bottom:4px">${esc(line)} (${recs.length} points)</div>`;
-      for(const r of recs){
-        const pct = r.utilization_pct || r.gated_utilization_pct || 0;
-        html+=`<div class="util-gantt-row"><div class="util-gantt-date">${esc(r.plan_date)} ${esc(r.shift_name||'')}</div><div class="util-gantt-track"><div class="util-gantt-bar ${barClass(pct)}" style="width:${Math.min(100,pct)}%">${pct}%</div></div><div style="width:50px;font-size:11px;color:#64748b">${(r.load||r.gated_load||0).toLocaleString()}</div></div>`;
-      }
-      html+='</div>';
+    thead += `</tr>`;
+
+    // For second header row showing full date? Keep simple one row
+    let tbody = '';
+    rows.forEach(r=>{
+      const line = r.line_code;
+      tbody += `<tr>`;
+      tbody += `<td class="frozen" style="left:0;background:#fff;z-index:5;font-weight:600;min-width:130px">${esc(line)}</td>`;
+      cols.forEach(col=>{
+        const val = r[col]; // capped %
+        const det = (detail[line] && detail[line][col]) ? detail[line][col] : null;
+        if(val==null){
+          tbody += `<td style="background:#f8fafc"></td>`;
+        }else{
+          const raw = det ? det.util_raw : val;
+          const isOver = det ? det.util_raw > 100 : val>100;
+          const load = det ? det.load : '';
+          const cap = det ? det.capacity : '';
+          const cls = pctColorClass(val, isOver);
+          // Show capped value, but if overload show 100%+ with raw in tooltip
+          let display = `${Math.round(val)}%`;
+          if(isOver) display = `100%<span style="font-size:8px">(${Math.round(raw)}%)</span>`;
+          else if(val===0) display = `0%`;
+          tbody += `<td class="${cls}" title="Line:${esc(line)} Date:${esc(col)} Load:${load} Cap:${cap} Raw:${raw}% (capped at 100%)" style="text-align:center;font-size:11px;font-weight:600;cursor:help">${display}</td>`;
+        }
+      });
+      tbody += `</tr>`;
+    });
+
+    const tableHTML = `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+    document.getElementById('util-matrix-wrapper').innerHTML = tableHTML;
+
+    // Update badge
+    const badge = document.getElementById('util-matrix-badge');
+    if(badge){
+      const overCount = rows.reduce((acc,row)=>{
+        let c=0;
+        cols.forEach(col=>{
+          const d = detail[row.line_code] && detail[row.line_code][col];
+          if(d && d.util_raw>100) c++;
+        });
+        return acc+c;
+      },0);
+      badge.textContent = `${pivot.total_lines} lines × ${pivot.total_cols} dates, ${overCount} overload cells (capped at 100%, raw in tooltip)`;
     }
-    html+='</div>';
-    return html;
   }
 
-  async function loadAndRender(){
+  async function loadPivot(){
     const line = document.getElementById('util-filter-line')?.value || '';
-    const shift = document.getElementById('util-filter-shift')?.value || '';
     const from = document.getElementById('util-filter-from')?.value || '';
     const to = document.getElementById('util-filter-to')?.value || '';
-
-    const params = new URLSearchParams({mode: currentMode, version: currentVersion, line_code: line, shift_name: shift, date_from: from, date_to: to});
+    const params = new URLSearchParams({mode: currentMode, version: currentVersion, line_code: line, date_from: from, date_to: to});
+    const wrapper = document.getElementById('util-matrix-wrapper');
+    if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8">Loading pivot matrix (${currentMode}/${currentVersion})...</div>`;
     try{
-      const res = await fetchJSON(`${API_REPORTS}?${params.toString()}`);
-      currentRecords = res.records || [];
-      document.getElementById('util-report-count').textContent = `${res.total||currentRecords.length} total, showing ${currentRecords.length}`;
-      const tableHTML = renderTable(currentRecords);
-      const ganttHTML = renderGantt(currentRecords);
-      document.getElementById('util-report-area').innerHTML = tableHTML + ganttHTML;
+      const res = await fetchJSON(`${API_PIVOT}?${params.toString()}`);
+      renderMatrix(res);
     }catch(e){
-      document.getElementById('util-report-area').innerHTML = `<div style="color:#dc2626;padding:12px">Error: ${esc(e.message)}</div>`;
+      if(wrapper) wrapper.innerHTML = `<div style="color:#dc2626;padding:12px">Error: ${esc(e.message)}</div>`;
     }
   }
 
@@ -266,61 +261,17 @@
     const root = getRoot();
     if(!root) return;
     const status = await checkStatus();
-    const metaLoaded = await loadMeta();
-
+    // Build page: upload + matrix
     let html = '';
-    html += buildUploadHTML();
-    html += `<div id="util-main-panel" style="${status.loaded?'':'display:none'}">`;
-    html += buildToolbarHTML();
-    html += `<div id="util-report-area" style="min-height:200px;text-align:center;padding:30px;color:#94a3b8">Loading...</div>`;
-    html += `</div>`;
-
+    html += buildUploadHTML(status);
+    html += buildMatrixToolbar();
     root.innerHTML = html;
 
-    // Update badge
-    setTimeout(()=>{
-      const badge = document.getElementById('util-status-badge');
-      if(badge) badge.innerHTML = statusBadgeHTML(status);
-    },0);
-
-    // Bind events
-    document.getElementById('btn-mode-shift')?.addEventListener('click', ()=>{
-      currentMode='shift';
-      document.getElementById('btn-mode-shift').classList.add('active');
-      document.getElementById('btn-mode-day').classList.remove('active');
-      loadAndRender();
-    });
-    document.getElementById('btn-mode-day')?.addEventListener('click', ()=>{
-      currentMode='day';
-      document.getElementById('btn-mode-day').classList.add('active');
-      document.getElementById('btn-mode-shift').classList.remove('active');
-      loadAndRender();
-    });
-    document.getElementById('btn-ver-gated')?.addEventListener('click', ()=>{
-      currentVersion='gated';
-      document.querySelectorAll('[id^=btn-ver-]').forEach(b=>b.classList.remove('active'));
-      document.getElementById('btn-ver-gated').classList.add('active');
-      loadAndRender();
-    });
-    document.getElementById('btn-ver-ungated')?.addEventListener('click', ()=>{
-      currentVersion='ungated';
-      document.querySelectorAll('[id^=btn-ver-]').forEach(b=>b.classList.remove('active'));
-      document.getElementById('btn-ver-ungated').classList.add('active');
-      loadAndRender();
-    });
-    document.getElementById('btn-ver-compare')?.addEventListener('click', ()=>{
-      currentVersion='compare';
-      document.querySelectorAll('[id^=btn-ver-]').forEach(b=>b.classList.remove('active'));
-      document.getElementById('btn-ver-compare').classList.add('active');
-      loadAndRender();
-    });
-    document.getElementById('btn-apply-filter')?.addEventListener('click', loadAndRender);
-
-    // Upload handlers
+    // Bind upload
     document.getElementById('btn-upload-gated')?.addEventListener('click', async ()=>{
       const cal = document.getElementById('file-gated-cal').files[0];
       const sched = document.getElementById('file-gated-sched').files[0];
-      if(!cal || !sched){ alert('Select both calendar and schedule files for gated'); return; }
+      if(!cal || !sched){ alert('Select both calendar and schedule for gated'); return; }
       const fd = new FormData();
       fd.append('version','gated');
       fd.append('calendar', cal);
@@ -331,14 +282,14 @@
         const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
         const j = await r.json();
         if(!r.ok) throw new Error(j.error||'upload failed');
-        msg.textContent=`✅ ${j.lines} lines, ${j.records_shift} shift recs`;
+        msg.textContent=`✅ ${j.lines} lines`;
         setTimeout(()=> location.reload(), 800);
       }catch(e){ msg.textContent='❌ '+e.message; }
     });
     document.getElementById('btn-upload-ungated')?.addEventListener('click', async ()=>{
       const cal = document.getElementById('file-ungated-cal').files[0];
       const sched = document.getElementById('file-ungated-sched').files[0];
-      if(!cal || !sched){ alert('Select both calendar and schedule for ungated'); return; }
+      if(!cal || !sched){ alert('Select both for ungated'); return; }
       const fd = new FormData();
       fd.append('version','ungated');
       fd.append('calendar', cal);
@@ -361,14 +312,41 @@
         const j = await r.json();
         if(!r.ok) throw new Error(j.error||'failed');
         msg.textContent=`✅ Demo loaded: ${j.lines} lines`;
-        setTimeout(()=> location.reload(), 800);
+        setTimeout(async ()=>{ await loadMeta(); await loadPivot(); document.getElementById('util-status-badge').innerHTML = statusBadgeHTML({loaded:true, versions:['gated'], details:{gated:{records_shift:j.records_shift}}}); }, 800);
       }catch(e){ msg.textContent='❌ '+e.message; }
     });
 
+    // Bind toolbar
+    document.getElementById('btn-mode-day')?.addEventListener('click', ()=>{
+      currentMode='day';
+      document.getElementById('btn-mode-day').classList.add('active');
+      document.getElementById('btn-mode-shift').classList.remove('active');
+      loadPivot();
+    });
+    document.getElementById('btn-mode-shift')?.addEventListener('click', ()=>{
+      currentMode='shift';
+      document.getElementById('btn-mode-shift').classList.add('active');
+      document.getElementById('btn-mode-day').classList.remove('active');
+      loadPivot();
+    });
+    document.getElementById('btn-ver-gated')?.addEventListener('click', ()=>{
+      currentVersion='gated';
+      document.querySelectorAll('[id^=btn-ver-]').forEach(b=>b.classList.remove('active'));
+      document.getElementById('btn-ver-gated').classList.add('active');
+      loadPivot();
+    });
+    document.getElementById('btn-ver-ungated')?.addEventListener('click', ()=>{
+      currentVersion='ungated';
+      document.querySelectorAll('[id^=btn-ver-]').forEach(b=>b.classList.remove('active'));
+      document.getElementById('btn-ver-ungated').classList.add('active');
+      loadPivot();
+    });
+    document.getElementById('btn-apply-pivot')?.addEventListener('click', loadPivot);
+
+    // Initial meta + pivot
+    await loadMeta();
     if(status.loaded){
-      await loadAndRender();
-    }else{
-      document.getElementById('util-main-panel').style.display='none';
+      await loadPivot();
     }
   }
 
@@ -379,5 +357,4 @@
   document.addEventListener('module-change', (e)=>{
     if(e.detail.module==='utilization'){ render(); }
   });
-
 })();
