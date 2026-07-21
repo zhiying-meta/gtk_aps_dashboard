@@ -256,6 +256,12 @@ function setupV2VFilters() {
       await downloadV2VCurrentView();
     });
   }
+  const exportHtmlBtn = document.getElementById('v2v-btn-export-html');
+  if (exportHtmlBtn) {
+    exportHtmlBtn.addEventListener('click', async ()=>{
+      await exportV2VHtmlReport();
+    });
+  }
   const cumCb = document.getElementById('v2v-cum');
   if (cumCb) {
     cumCb.addEventListener('change', ()=>{
@@ -324,6 +330,39 @@ async function downloadV2VCurrentView() {
   }
 }
 
+async function exportV2VHtmlReport() {
+  if (!v2vState.jobId) {
+    alert('No comparison job yet, please compare first');
+    return;
+  }
+  const btn = document.getElementById('v2v-btn-export-html');
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting HTML...'; }
+
+  try {
+    const resp = await fetch('/v2v/api/export/html', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({job_id: v2vState.jobId})
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `V2V_Report_${v2vState.jobId.slice(0,6)}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch(e) {
+    alert('Export HTML failed: ' + e.message);
+    console.error(e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText || '📄 Export HTML Report'; }
+  }
+}
+
 async function loadServerVersions() {
   const selA = document.getElementById('v2v-server-a');
   const selB = document.getElementById('v2v-server-b');
@@ -343,8 +382,8 @@ async function loadServerVersions() {
 
     if (scanTimeEl) scanTimeEl.textContent = `${scannedAt} | Found ${versions.length} version folders`;
 
-    selA.innerHTML = '<option value="">Select Version A</option>';
-    selB.innerHTML = '<option value="">Select Version B</option>';
+    selA.innerHTML = '<option value="">Select Previous Version</option>';
+    selB.innerHTML = '<option value="">Select Latest Version</option>';
     versions.forEach(v=>{
       const optA = document.createElement('option');
       optA.value = v.path;
@@ -387,7 +426,7 @@ function setupV2VServerVersions() {
       const aPath = selA.value;
       const bPath = selB.value;
       if (!aPath || !bPath) {
-        alert('Please select both versions');
+        alert('Please select both Previous and Latest versions');
         return;
       }
       if (aPath === bPath) {
@@ -413,12 +452,6 @@ function setupV2VServerVersions() {
 
   // Load on init
   loadServerVersions();
-
-  // Auto-refresh when dropdown gets focus (in case user added folder and then clicks dropdown)
-  const selA = document.getElementById('v2v-server-a');
-  const selB = document.getElementById('v2v-server-b');
-  if (selA) selA.addEventListener('focus', ()=>{ console.log('Version A dropdown focus, auto-refreshing'); loadServerVersions(); });
-  if (selB) selB.addEventListener('focus', ()=>{ console.log('Version B dropdown focus, auto-refreshing'); loadServerVersions(); });
 }
 
 async function compareServerVersions(aPath, bPath) {
@@ -439,7 +472,7 @@ async function compareServerVersions(aPath, bPath) {
   } catch(e) {
     if (statusEl) statusEl.innerHTML = `<div class="v2v-status error">❌ ${e.message}</div>`;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '▶ Compare Server Versions'; }
+    if (btn) { btn.disabled = false; btn.textContent = '▶ Compare'; }
   }
 }
 
@@ -448,7 +481,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if (btnCompare) {
     btnCompare.addEventListener('click', async ()=>{
       if (!v2vState.versionA || !v2vState.versionB) {
-        alert('Please select both Version A and Version B folders');
+        alert('Please select both Previous and Latest version folders');
         return;
       }
       await doV2VCompare();
@@ -553,8 +586,8 @@ function renderSummaryCards(data) {
           <span class="v2v-summary-card-category ${def.cat}">${def.cat}</span>
         </div>
         <div class="v2v-summary-stats">
-          <div class="v2v-stat-row"><span class="v2v-stat-label">Version A</span><span class="v2v-stat-value">${s.total_a||0} rows</span></div>
-          <div class="v2v-stat-row"><span class="v2v-stat-label">Version B</span><span class="v2v-stat-value">${s.total_b||0} rows</span></div>
+          <div class="v2v-stat-row"><span class="v2v-stat-label">Previous Version</span><span class="v2v-stat-value">${s.total_a||0} rows</span></div>
+          <div class="v2v-stat-row"><span class="v2v-stat-label">Latest Version</span><span class="v2v-stat-value">${s.total_b||0} rows</span></div>
           <div style="height:1px;background:#f1f5f9;margin:4px 0"></div>
           <div class="v2v-stat-row"><span class="v2v-stat-label">Added</span><span class="v2v-stat-value add">+${s.added||0}</span></div>
           <div class="v2v-stat-row"><span class="v2v-stat-label">Deleted</span><span class="v2v-stat-value del">-${s.deleted||0}</span></div>
@@ -1177,8 +1210,8 @@ async function loadV2VChart(tableName) {
       data: {
         labels: dates,
         datasets: [
-          {label: 'Version A (' + (v2vState.versionA?.name||'A') + ')', data: aVals, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.1},
-          {label: 'Version B (' + (v2vState.versionB?.name||'B') + ')', data: bVals, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.1}
+          {label: 'Previous (' + (v2vState.versionA?.name||'Prev') + ')', data: aVals, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', tension: 0.1},
+          {label: 'Latest (' + (v2vState.versionB?.name||'Latest') + ')', data: bVals, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', tension: 0.1}
         ]
       },
       options: {
@@ -1534,6 +1567,7 @@ window.resetV2VOutputQuery = resetV2VOutputQuery;
 window.setV2VQuickQuery = setV2VQuickQuery;
 window.updateV2VBuilderForTable = updateV2VBuilderForTable;
 window.downloadV2VCurrentView = downloadV2VCurrentView;
+window.exportV2VHtmlReport = exportV2VHtmlReport;
 window.loadPlanOutputMatrix = loadPlanOutputMatrix;
 window.showBOMChildren = showBOMChildren;
 window.showBreakdown = showBreakdown;

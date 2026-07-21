@@ -108,31 +108,95 @@ def list_versions():
         except Exception as e:
             print(f"Scan error for {base_path}: {e}")
 
-    # Scan multiple locations
-    scan_directory(project_root)
-
-    # Also look in common subfolders
-    for sub in ["v2v_data", "data", "input_files"]:
+    # Scan locations - prioritize input_files as user mentioned all folders are there
+    # Order: input_files first, then v2v_data, data, then project_root
+    # This ensures input_files folders appear first if same sort key
+    for sub in ["input_files", "v2v_data", "data"]:
         sub_path = os.path.join(project_root, sub)
         scan_directory(sub_path)
 
-    # Sort by name descending (newest first) - try to parse date from name
-    def sort_key(item):
-        # Prefer names with 0721, 20260721 etc.
-        name = item["name"]
-        # Extract digits
-        import re
-        nums = re.findall(r'\d+', name)
-        # Use last number as sort key if exists
-        if nums:
+    # Also scan project root (for backward compatibility)
+    scan_directory(project_root)
+
+    # Sort by date (middle time) descending, then version v1/v2 etc.
+    # Folder name format examples:
+    # Ivy-20260716-gated-v2 -> date 20260716, version 2
+    # Ivy-20260721-gated-v1 -> date 20260721, version 1
+    # 0721_test -> date 0721 (as 0721), version 0
+    # 20260721_snapshot -> date 20260721
+    import re
+
+    def parse_date_version(name):
+        """
+        Parse folder name to extract date and version
+        Returns (date_int, version_int)
+        Date: try to find 8-digit YYYYMMDD, fallback to 4-digit MMDD, or 6-digit
+        Version: v1, v2, _v1, -v1, etc.
+        """
+        date_val = 0
+        version_val = 0
+
+        # Find 8-digit date YYYYMMDD
+        m = re.search(r'(20\d{6})', name)  # e.g., 20260716, 20260721
+        if m:
             try:
-                return int(nums[-1])
+                date_val = int(m.group(1))
             except:
                 pass
-        return 0
+        else:
+            # Try 6-digit YYMMDD or MMDDYY?
+            # Try 4-digit MMDD like 0721
+            m = re.search(r'(\d{4})', name)
+            if m:
+                # If it's like 0721, treat as 721, but need to distinguish from version numbers
+                # We'll use the first 4-digit that looks like date (e.g., 0721, 0716, 0723)
+                # For sorting, 0721 > 0716
+                try:
+                    # If name is like "0721_test", 0721 is date
+                    # If name is "Ivy-20260716-gated-v2", we already handled 8-digit, so this won't trigger
+                    # So for remaining, try to find 4-digit that is not version
+                    # Version is usually single digit after v, so 4-digit is likely date
+                    date_val = int(m.group(1))
+                    # If date_val < 100, it's version, not date, set to 0
+                    if date_val < 100:
+                        date_val = 0
+                except:
+                    pass
 
-    # Sort by recognized count descending, then by sort_key descending
-    candidates.sort(key=lambda x: (x["recognized"], sort_key(x)), reverse=True)
+        # Find version: v1, v2, -v1, _v1, etc.
+        m = re.search(r'[vV](\d+)', name)
+        if m:
+            try:
+                version_val = int(m.group(1))
+            except:
+                pass
+        else:
+            # Try to find trailing _1, -1, etc. after date?
+            # e.g., gated-v1, gated-v2
+            m = re.search(r'[-_](\d+)$', name)
+            if m:
+                try:
+                    # If it's at end and small, treat as version
+                    v = int(m.group(1))
+                    if v < 100:
+                        version_val = v
+                except:
+                    pass
+
+        return (date_val, version_val)
+
+    def sort_key(item):
+        name = item["name"]
+        date_val, version_val = parse_date_version(name)
+        # Also consider file modification time as fallback?
+        # For now, use date and version
+        # Return tuple for sorting: (date, version, recognized)
+        # We want newest date first, then version descending if same day
+        return (date_val, version_val, item["recognized"])
+
+    # Sort by date descending, then version descending, then recognized descending
+    # Note: Python sort ascending, so reverse=True
+    candidates.sort(key=lambda x: (parse_date_version(x["name"])[0], parse_date_version(x["name"])[1], x["recognized"]), reverse=True)
 
     return jsonify({"versions": candidates, "scanned_at": __import__('datetime').datetime.now().isoformat()})
 
@@ -504,6 +568,205 @@ def download_current_view():
 
         filename = f"V2V_{table_name}_{job_id[:6]}.xlsx"
         return send_file(output, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@v2v_bp.route('/v2v/api/export/html', methods=['POST', 'GET'])
+def export_html():
+    """
+    Export full V2V comparison as standalone HTML for sharing
+    Query or JSON: job_id
+    Returns HTML file that can be viewed offline, containing latest comparison data
+    """
+    try:
+        if request.is_json:
+            data = request.get_json()
+            job_id = data.get('job_id')
+        else:
+            job_id = request.args.get('job_id') or request.form.get('job_id')
+
+        if not job_id or job_id not in JOB_STORE:
+            return jsonify({"error": "Invalid job_id"}), 400
+
+        job = JOB_STORE[job_id]
+        result = job["result"]
+
+        # Get detailed diffs for all tables (limited to 200 rows each for HTML size)
+        from .diff_engine import get_detailed_diff
+        all_diffs = {}
+        for table_name in result.get("summary", {}).keys():
+            try:
+                # Get up to 200 rows per table
+                detail = get_detailed_diff(job["folder_a"], job["folder_b"], table_name, granularity="week", filters={"only_diff": "true"}, page=1, page_size=200)
+                all_diffs[table_name] = detail
+            except Exception as e:
+                all_diffs[table_name] = {"error": str(e), "records": []}
+
+        # Build HTML
+        from datetime import datetime
+        previous_name = job.get("version_a_name", "Previous Version")
+        latest_name = job.get("version_b_name", "Latest Version")
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V2V Comparison - {previous_name} vs {latest_name}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #0f172a; }}
+.container {{ max-width: 1400px; margin: 0 auto; background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+.header {{ border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 24px; }}
+.header h1 {{ margin: 0; font-size: 24px; }}
+.header .meta {{ color: #64748b; font-size: 13px; margin-top: 8px; }}
+.summary-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }}
+.summary-card {{ border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
+.summary-card h3 {{ margin: 0 0 8px 0; font-size: 14px; }}
+.stat-row {{ display: flex; justify-content: space-between; font-size: 12px; margin: 2px 0; }}
+.stat-label {{ color: #64748b; }}
+.stat-value {{ font-weight: 600; }}
+.add {{ color: #16a34a; }} .del {{ color: #dc2626; }} .mod {{ color: #d97706; }}
+.table-section {{ margin-bottom: 32px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }}
+.table-header {{ background: #0f172a; color: white; padding: 12px 16px; font-weight: 600; display: flex; justify-content: space-between; }}
+.table-wrapper {{ max-height: 400px; overflow: auto; }}
+table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+th {{ background: #1e293b; color: white; padding: 8px 10px; text-align: left; position: sticky; top: 0; }}
+td {{ padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }}
+tr.diff-add td {{ background: #f0fdf4; }}
+tr.diff-del td {{ background: #fef2f2; }}
+tr.diff-mod td {{ background: #fffbeb; }}
+.badge {{ font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }}
+.badge.add {{ background: #dcfce7; color: #166534; }}
+.badge.del {{ background: #fecaca; color: #991b1b; }}
+.badge.mod {{ background: #fef3c7; color: #92400e; }}
+.footer {{ margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+<h1>🔍 V2V Comparison Report</h1>
+<div class="meta">
+<div><b>Previous Version:</b> {previous_name}</div>
+<div><b>Latest Version:</b> {latest_name}</div>
+<div><b>Generated:</b> {generated_at} | <b>Job ID:</b> {job_id}</div>
+<div><b>Overall:</b> Added {result.get('overall', {}).get('total_added', 0)} | Deleted {result.get('overall', {}).get('total_deleted', 0)} | Modified {result.get('overall', {}).get('total_modified', 0)} | Tables: {len(result.get('summary', {}))}</div>
+</div>
+</div>
+
+<h2>Summary Dashboard</h2>
+<div class="summary-grid">
+"""
+
+        for table_key, summary in result.get("summary", {}).items():
+            total_a = summary.get("total_a", 0)
+            total_b = summary.get("total_b", 0)
+            added = summary.get("added", 0)
+            deleted = summary.get("deleted", 0)
+            modified = summary.get("modified", 0)
+            html_content += f"""
+<div class="summary-card">
+<h3>{table_key}</h3>
+<div class="stat-row"><span class="stat-label">Previous</span><span class="stat-value">{total_a} rows</span></div>
+<div class="stat-row"><span class="stat-label">Latest</span><span class="stat-value">{total_b} rows</span></div>
+<div class="stat-row"><span class="stat-label">Added</span><span class="stat-value add">+{added}</span></div>
+<div class="stat-row"><span class="stat-label">Deleted</span><span class="stat-value del">-{deleted}</span></div>
+<div class="stat-row"><span class="stat-label">Modified</span><span class="stat-value mod">{modified}</span></div>
+</div>
+"""
+
+        html_content += """
+</div>
+
+<h2>Detailed Comparison (Time Horizontal - Month, Week, Daily, Shift)</h2>
+<p style="font-size:12px;color:#64748b">Time is horizontal for all tables where applicable. Only rows with differences are shown (up to 200 per table).</p>
+"""
+
+        for table_key, diff_data in all_diffs.items():
+            records = diff_data.get("records", [])[:100]  # limit 100 per table for HTML size
+            if not records:
+                continue
+            html_content += f"""
+<div class="table-section">
+<div class="table-header">
+<span>{table_key} - {len(records)} diffs (of {diff_data.get('pagination', {}).get('total', len(records))} total)</span>
+<span style="font-size:11px;font-weight:400">Previous vs Latest</span>
+</div>
+<div class="table-wrapper">
+<table>
+<thead><tr>
+"""
+            # Headers from first record keys
+            first = records[0]
+            # Flatten keys
+            headers = []
+            if "key" in first and isinstance(first["key"], dict):
+                for k in first["key"].keys():
+                    headers.append(f"key_{k}")
+            for k in first.keys():
+                if k not in ["key", "_group_values", "_drill", "raw"]:
+                    headers.append(k)
+            # Limit headers
+            headers = headers[:12]
+            for h in headers:
+                html_content += f"<th>{h}</th>"
+            html_content += "</tr></thead><tbody>"
+
+            for rec in records:
+                ct = rec.get("change_type", "MODIFY")
+                ct_lower = "add" if "ADD" in ct else "del" if "DEL" in ct or "INCONSISTENT" in ct else "mod"
+                html_content += f'<tr class="diff-{ct_lower}">'
+                flat = {}
+                if "key" in rec and isinstance(rec["key"], dict):
+                    for k,v in rec["key"].items():
+                        flat[f"key_{k}"] = v
+                for k,v in rec.items():
+                    if k not in ["key", "_group_values", "_drill", "raw"] and k not in flat:
+                        flat[k] = v
+                for h in headers:
+                    val = flat.get(h, "")
+                    if isinstance(val, float):
+                        val = f"{val:.2f}"
+                    html_content += f"<td>{str(val)[:100]}</td>"
+                html_content += "</tr>"
+
+            html_content += """
+</tbody>
+</table>
+</div>
+</div>
+"""
+
+        html_content += f"""
+<div class="footer">
+Generated by V2V Comparison Tool | Job {job_id} | {generated_at} | Previous: {previous_name} vs Latest: {latest_name}<br>
+This is a standalone HTML file containing embedded comparison data. No server needed.
+</div>
+
+</div>
+</body>
+</html>
+"""
+
+        from io import BytesIO
+        from flask import send_file
+
+        output = BytesIO()
+        output.write(html_content.encode('utf-8'))
+        output.seek(0)
+
+        filename = f"V2V_Report_{previous_name}_vs_{latest_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
+        # Sanitize filename
+        filename = "".join(c for c in filename if c.isalnum() or c in "._- ").strip()
+        filename = filename.replace(" ", "_") + ".html" if not filename.endswith(".html") else filename
+
+        return send_file(output, as_attachment=True, download_name=filename, mimetype='text/html')
 
     except Exception as e:
         import traceback
