@@ -210,7 +210,7 @@
       <div class="v2v-section" id="v2v-upload-section">
         <div class="v2v-section-header">
           <span class="v2v-section-title">Select Version</span>
-          <span style="font-size:12px;color:#64748b">Select two versions to compare (auto-scan Ivy-* folders)</span>
+          <span style="font-size:12px;color:#64748b">Auto-scan folders with xlsx files (supports Ivy-*, 0721, gated, etc.) | <span id="v2v-scan-time" style="color:#94a3b8"></span></span>
         </div>
 
         <div class="v2v-server-selector">
@@ -222,8 +222,11 @@
             <label style="font-size:12px">Version B</label>
             <select id="v2v-server-b" class="v2v-select"><option>Loading...</option></select>
           </div>
+          <button id="v2v-btn-refresh" class="btn btn-sm" style="height:36px" title="Re-scan folders">🔄 Refresh</button>
           <button id="v2v-btn-load-server" class="btn btn-lg" style="height:36px;background:#0f172a;color:white">▶ Compare</button>
         </div>
+
+        <div style="font-size:11px;color:#64748b;margin-top:8px">💡 Put version folders (containing 12 xlsx) in project root, v2v_data/, data/, or input_files/. Any folder with at least 2 xlsx will be detected. Click Refresh after adding new folder.</div>
 
         <div id="v2v-status" style="margin-top:12px"></div>
       </div>

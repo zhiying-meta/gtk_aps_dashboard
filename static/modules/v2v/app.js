@@ -324,6 +324,59 @@ async function downloadV2VCurrentView() {
   }
 }
 
+async function loadServerVersions() {
+  const selA = document.getElementById('v2v-server-a');
+  const selB = document.getElementById('v2v-server-b');
+  const scanTimeEl = document.getElementById('v2v-scan-time');
+  if (!selA || !selB) return;
+
+  const prevA = selA.value;
+  const prevB = selB.value;
+
+  try {
+    selA.innerHTML = '<option>Loading...</option>';
+    selB.innerHTML = '<option>Loading...</option>';
+    const resp = await fetch('/v2v/api/versions');
+    const data = await resp.json();
+    const versions = data.versions || [];
+    const scannedAt = data.scanned_at ? `Last scan: ${new Date(data.scanned_at).toLocaleTimeString()}` : '';
+
+    if (scanTimeEl) scanTimeEl.textContent = `${scannedAt} | Found ${versions.length} version folders`;
+
+    selA.innerHTML = '<option value="">Select Version A</option>';
+    selB.innerHTML = '<option value="">Select Version B</option>';
+    versions.forEach(v=>{
+      const optA = document.createElement('option');
+      optA.value = v.path;
+      optA.textContent = `${v.name} (${v.file_count} files, ${v.recognized} recog)`;
+      if (v.path === prevA) optA.selected = true;
+      selA.appendChild(optA);
+      const optB = document.createElement('option');
+      optB.value = v.path;
+      optB.textContent = `${v.name} (${v.file_count} files, ${v.recognized} recog)`;
+      if (v.path === prevB) optB.selected = true;
+      selB.appendChild(optB);
+    });
+
+    // If new folder added and previously not selected, auto-select if only one new
+    if (versions.length === 1) {
+      selA.selectedIndex = 1;
+    } else if (versions.length >= 2 && !prevA && !prevB) {
+      // Auto select first two for convenience if nothing selected before
+      // selA.selectedIndex = 1;
+      // selB.selectedIndex = 2;
+    }
+
+    console.log(`Scanned ${versions.length} version folders:`, versions.map(v=>v.name));
+    return versions;
+  } catch(e) {
+    console.log('Failed to load server versions', e);
+    selA.innerHTML = '<option value="">Failed to load</option>';
+    selB.innerHTML = '<option value="">Failed to load</option>';
+    return [];
+  }
+}
+
 function setupV2VServerVersions() {
   const loadBtn = document.getElementById('v2v-btn-load-server');
   if (loadBtn) {
@@ -345,32 +398,27 @@ function setupV2VServerVersions() {
     });
   }
 
-  // Load available versions on init
-  fetch('/v2v/api/versions').then(r=>r.json()).then(data=>{
-    const versions = data.versions || [];
-    const selA = document.getElementById('v2v-server-a');
-    const selB = document.getElementById('v2v-server-b');
-    if (!selA || !selB) return;
-    selA.innerHTML = '<option value="">Select Version A</option>';
-    selB.innerHTML = '<option value="">Select Version B</option>';
-    versions.forEach(v=>{
-      const optA = document.createElement('option');
-      optA.value = v.path;
-      optA.textContent = `${v.name} (${v.file_count} files, ${v.recognized} recognized)`;
-      selA.appendChild(optA);
-      const optB = document.createElement('option');
-      optB.value = v.path;
-      optB.textContent = `${v.name} (${v.file_count} files, ${v.recognized} recognized)`;
-      selB.appendChild(optB);
+  const refreshBtn = document.getElementById('v2v-btn-refresh');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async ()=>{
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = '⏳ Scanning...';
+      await loadServerVersions();
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = '🔄 Refresh';
+      const statusEl = document.getElementById('v2v-status');
+      if (statusEl) statusEl.innerHTML = '<div class="v2v-status success">✅ Refreshed folder list. If you added new folder like 0721, it should now appear in dropdowns.</div>';
     });
-    if (versions.length >= 2) {
-      // Auto select first two for demo
-      // selA.selectedIndex = 1;
-      // selB.selectedIndex = 2;
-    }
-  }).catch(e=>{
-    console.log('Failed to load server versions', e);
-  });
+  }
+
+  // Load on init
+  loadServerVersions();
+
+  // Auto-refresh when dropdown gets focus (in case user added folder and then clicks dropdown)
+  const selA = document.getElementById('v2v-server-a');
+  const selB = document.getElementById('v2v-server-b');
+  if (selA) selA.addEventListener('focus', ()=>{ console.log('Version A dropdown focus, auto-refreshing'); loadServerVersions(); });
+  if (selB) selB.addEventListener('focus', ()=>{ console.log('Version B dropdown focus, auto-refreshing'); loadServerVersions(); });
 }
 
 async function compareServerVersions(aPath, bPath) {

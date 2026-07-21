@@ -48,40 +48,93 @@ def _save_uploaded_files(files, job_id, version_label):
 def list_versions():
     """
     Scan server-side for available version folders
-    Looks in project_root/Ivy-* and project_root/v2v_data/
+    Auto-scans multiple locations and any folder containing at least 2 recognized xlsx files
+    Supports folders like Ivy-*, 0721, gated, etc.
     """
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     candidates = []
+    seen_paths = set()
 
-    # Look for Ivy-* folders in project root
-    for item in os.listdir(project_root):
-        fpath = os.path.join(project_root, item)
-        if os.path.isdir(fpath) and (item.startswith('Ivy-') or 'gated' in item.lower()):
+    def is_version_folder(fpath):
+        """Check if folder is a valid version folder by containing at least 2 recognized tables"""
+        try:
+            if not os.path.isdir(fpath):
+                return False
             scan = scan_folder_for_tables(fpath)
-            candidates.append({
-                "name": item,
-                "path": fpath,
-                "file_count": scan["stats"]["total_files"],
-                "recognized": scan["stats"]["recognized"],
-                "missing": scan["stats"]["missing"]
-            })
+            # Consider valid if at least 2 recognized tables (to avoid random folders)
+            # Or if folder name contains keywords like Ivy, gated, 0721, version, etc.
+            recognized = scan["stats"]["recognized"]
+            total = scan["stats"]["total_files"]
+            # If has at least 2 xlsx and at least 2 recognized, or name contains date-like pattern
+            if total >= 2 and recognized >= 2:
+                return True
+            # Also check if folder name looks like a version (contains digits and is not too generic)
+            name = os.path.basename(fpath).lower()
+            # Allow any folder that has at least 1 xlsx and name contains version-like keywords or date
+            if total >= 1 and any(k in name for k in ["ivy", "gated", "0721", "072", "v2", "v3", "version", "snapshot", "aps"]):
+                return True
+            # If folder name is date-like (e.g., 0721, 20260721, etc.)
+            if total >= 1 and any(char.isdigit() for char in name) and len(name) <= 30:
+                # Check if it has at least 1 recognized table
+                if recognized >= 1:
+                    return True
+            return False
+        except:
+            return False
 
-    # Also look in v2v_data folder if exists
-    v2v_data_path = os.path.join(project_root, 'v2v_data')
-    if os.path.exists(v2v_data_path):
-        for item in os.listdir(v2v_data_path):
-            fpath = os.path.join(v2v_data_path, item)
-            if os.path.isdir(fpath):
-                scan = scan_folder_for_tables(fpath)
-                candidates.append({
-                    "name": item,
-                    "path": fpath,
-                    "file_count": scan["stats"]["total_files"],
-                    "recognized": scan["stats"]["recognized"],
-                    "missing": scan["stats"]["missing"]
-                })
+    def scan_directory(base_path, max_depth=1):
+        """Scan a directory for version folders, with optional depth"""
+        try:
+            if not os.path.exists(base_path):
+                return
+            for item in os.listdir(base_path):
+                fpath = os.path.join(base_path, item)
+                if fpath in seen_paths:
+                    continue
+                if os.path.isdir(fpath):
+                    # Skip hidden, venv, node_modules, etc.
+                    if item.startswith('.') or item in ['__pycache__', 'node_modules', '.venv', 'venv', 'uploads', 'app', 'static', 'docs']:
+                        continue
+                    if is_version_folder(fpath):
+                        scan = scan_folder_for_tables(fpath)
+                        candidates.append({
+                            "name": item,
+                            "path": fpath,
+                            "file_count": scan["stats"]["total_files"],
+                            "recognized": scan["stats"]["recognized"],
+                            "missing": scan["stats"]["missing"]
+                        })
+                        seen_paths.add(fpath)
+        except Exception as e:
+            print(f"Scan error for {base_path}: {e}")
 
-    return jsonify({"versions": candidates})
+    # Scan multiple locations
+    scan_directory(project_root)
+
+    # Also look in common subfolders
+    for sub in ["v2v_data", "data", "input_files"]:
+        sub_path = os.path.join(project_root, sub)
+        scan_directory(sub_path)
+
+    # Sort by name descending (newest first) - try to parse date from name
+    def sort_key(item):
+        # Prefer names with 0721, 20260721 etc.
+        name = item["name"]
+        # Extract digits
+        import re
+        nums = re.findall(r'\d+', name)
+        # Use last number as sort key if exists
+        if nums:
+            try:
+                return int(nums[-1])
+            except:
+                pass
+        return 0
+
+    # Sort by recognized count descending, then by sort_key descending
+    candidates.sort(key=lambda x: (x["recognized"], sort_key(x)), reverse=True)
+
+    return jsonify({"versions": candidates, "scanned_at": __import__('datetime').datetime.now().isoformat()})
 
 
 @v2v_bp.route('/v2v/api/scan', methods=['POST'])
