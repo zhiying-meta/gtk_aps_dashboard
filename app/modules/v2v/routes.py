@@ -458,6 +458,52 @@ def download_current_view():
         return jsonify({"error": str(e)}), 500
 
 
+@v2v_bp.route('/v2v/api/plan_output/matrix', methods=['GET'])
+def get_plan_output_matrix():
+    """
+    Detailed daily matrix for Plan Output
+    Query: job_id, sku_prefix (SK,GB,LT,FR,RT or ALL), line_filter, shift_filter, granularity (day/week/monthly), cum (true/false)
+    Returns dates grouped by week Sun-Sat, sku_list, and data dict with a/b/diff/cum
+    """
+    try:
+        job_id = request.args.get('job_id')
+        if not job_id or job_id not in JOB_STORE:
+            return jsonify({"error": "Invalid job_id"}), 400
+        job = JOB_STORE[job_id]
+        from .parsers.plan_output_parser import get_daily_matrix
+        from .diff_engine import load_single_table
+
+        sku_prefix = request.args.get('sku_prefix', 'SK')  # default FG
+        line_filter = request.args.get('line_filter', None)
+        shift_filter = request.args.get('shift_filter', None)
+        granularity = request.args.get('granularity', 'day')
+        cum = request.args.get('cum', 'true').lower() in ['true', '1', 'yes']
+
+        df_a = load_single_table(job["folder_a"], "plan_output")
+        df_b = load_single_table(job["folder_b"], "plan_output")
+        if df_a is None or df_b is None:
+            return jsonify({"error": "Missing plan_output"}), 400
+
+        # For matrix, we ignore granularity for now and always return daily with weekly grouping,
+        # but we respect sku_prefix, line_filter, shift_filter
+        matrix = get_daily_matrix(df_a, df_b, sku_prefix=sku_prefix, line_filter=line_filter, shift_filter=shift_filter, granularity=granularity, cum=cum)
+
+        matrix["job_id"] = job_id
+        matrix["table"] = "plan_output"
+        matrix["params"] = {
+            "sku_prefix": sku_prefix,
+            "line_filter": line_filter,
+            "shift_filter": shift_filter,
+            "granularity": granularity,
+            "cum": cum
+        }
+        return jsonify(matrix)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @v2v_bp.route('/v2v/templates/schema', methods=['GET'])
 def get_schema():
     """Return table definitions as schema"""

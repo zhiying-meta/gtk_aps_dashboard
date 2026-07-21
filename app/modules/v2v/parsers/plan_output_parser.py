@@ -358,3 +358,253 @@ def get_chart_data_plan_output(df_a, df_b, group_by=None, filters=None, granular
         import traceback
         traceback.print_exc()
         return {"error": str(e), "dates": [], "values_a": [], "values_b": []}
+
+
+def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter=None, granularity="day", cum=True, filters=None):
+    """
+    Detailed daily matrix for Plan Output
+    - Rows: SKU (filtered by prefix, e.g., SK for FG, GB/LT/FR/RT for intermediate)
+    - Columns: Daily dates, grouped by week Sun-Sat, with weekly/monthly aggregation option
+    - Values: A, B, Diff, optionally cumulative (cum=True prioritized for V2V)
+    - Supports drill-down: line, shift, etc. via filters
+
+    Returns:
+    {
+        dates: [YYYY-MM-DD],
+        weeks: [{week_label, start_date, end_date, dates: [...]}, ...],
+        months: [{month_label, dates: [...]}, ...],
+        sku_list: [SKU],
+        data: {
+            SKU: {
+                date: {a, b, diff, cum_a, cum_b, cum_diff},
+                ...
+            }
+        },
+        summary: ...
+    }
+    """
+    try:
+        # Normalize
+        df_a_norm = normalize_dates(df_a)
+        df_b_norm = normalize_dates(df_b)
+
+        # Apply base filters
+        df_a_filt = apply_filters(df_a_norm, filters) if filters else df_a_norm
+        df_b_filt = apply_filters(df_b_norm, filters) if filters else df_b_norm
+
+        # Filter by SKU prefix (FG vs intermediate)
+        if sku_prefix and sku_prefix != "ALL":
+            # sku_prefix can be "SK", "GB", "LT", "FR", "RT" or comma separated
+            prefixes = [p.strip() for p in sku_prefix.split(",") if p.strip()]
+            if prefixes:
+                # Keep rows where SKU starts with any prefix
+                def matches_prefix(sku):
+                    if pd.isna(sku):
+                        return False
+                    s = str(sku)
+                    for pref in prefixes:
+                        if s.startswith(pref+"-") or s.startswith(pref):
+                            return True
+                    return False
+                df_a_filt = df_a_filt[df_a_filt["SKU"].apply(matches_prefix)]
+                df_b_filt = df_b_filt[df_b_filt["SKU"].apply(matches_prefix)]
+
+        # Filter by line
+        if line_filter and line_filter != "ALL":
+            lines = [l.strip() for l in line_filter.split(",") if l.strip()]
+            if lines:
+                df_a_filt = df_a_filt[df_a_filt["LINE_CODE"].isin(lines)]
+                df_b_filt = df_b_filt[df_b_filt["LINE_CODE"].isin(lines)]
+
+        # Filter by shift
+        if shift_filter and shift_filter != "ALL":
+            df_a_filt = df_a_filt[df_a_filt["SHIFT_NAME"] == shift_filter]
+            df_b_filt = df_b_filt[df_b_filt["SHIFT_NAME"] == shift_filter]
+
+        if df_a_filt.empty and df_b_filt.empty:
+            return {"dates": [], "weeks": [], "sku_list": [], "data": {}, "summary": {"total_skus": 0, "total_dates": 0}}
+
+        # Determine date range and daily aggregation per SKU
+        # Group by SKU + DATE
+        agg_a_daily = df_a_filt.groupby(["SKU", "_DATE"], as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else pd.DataFrame(columns=["SKU", "_DATE", "PLAN_VALUE"])
+        agg_b_daily = df_b_filt.groupby(["SKU", "_DATE"], as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else pd.DataFrame(columns=["SKU", "_DATE", "PLAN_VALUE"])
+
+        # Get all unique dates sorted
+        all_dates_a = set(agg_a_daily["_DATE"].dropna()) if not agg_a_daily.empty else set()
+        all_dates_b = set(agg_b_daily["_DATE"].dropna()) if not agg_b_daily.empty else set()
+        all_dates = sorted(list(all_dates_a | all_dates_b))
+
+        # Get all unique SKUs
+        all_skus_a = set(agg_a_daily["SKU"].dropna()) if not agg_a_daily.empty else set()
+        all_skus_b = set(agg_b_daily["SKU"].dropna()) if not agg_b_daily.empty else set()
+        all_skus = sorted(list(all_skus_a | all_skus_b))
+
+        # Build week grouping: Sun-Sat
+        # For each date, find Sunday of that week
+        from datetime import datetime, timedelta
+        def get_sunday(d_str):
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d")
+                # weekday Mon=0...Sun=6, Sunday is 6, so days since Sunday = (weekday+1)%7
+                days_since_sunday = (dt.weekday() + 1) % 7
+                sunday = dt - timedelta(days=days_since_sunday)
+                return sunday.strftime("%Y-%m-%d")
+            except:
+                return None
+
+        def get_month(d_str):
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d")
+                return dt.strftime("%Y-%m")
+            except:
+                return None
+
+        # Build weeks
+        weeks_dict = {}
+        for d in all_dates:
+            sun = get_sunday(d)
+            if sun not in weeks_dict:
+                weeks_dict[sun] = []
+            weeks_dict[sun].append(d)
+
+        weeks = []
+        for sun in sorted(weeks_dict.keys()):
+            dates_in_week = sorted(weeks_dict[sun])
+            # Saturday is Sunday+6
+            try:
+                sun_dt = datetime.strptime(sun, "%Y-%m-%d")
+                sat_dt = sun_dt + timedelta(days=6)
+                weeks.append({
+                    "week_start_sunday": sun,
+                    "week_end_saturday": sat_dt.strftime("%Y-%m-%d"),
+                    "week_label": f"Wk {sun} to {sat_dt.strftime('%Y-%m-%d')}",
+                    "dates": dates_in_week
+                })
+            except:
+                weeks.append({
+                    "week_start_sunday": sun,
+                    "week_end_saturday": "",
+                    "week_label": sun,
+                    "dates": dates_in_week
+                })
+
+        # Build months
+        months_dict = {}
+        for d in all_dates:
+            m = get_month(d)
+            if m not in months_dict:
+                months_dict[m] = []
+            months_dict[m].append(d)
+
+        months = []
+        for m in sorted(months_dict.keys()):
+            months.append({
+                "month": m,
+                "month_label": m,
+                "dates": sorted(months_dict[m])
+            })
+
+        # Build data dict: SKU -> date -> values
+        # Create lookup dicts for fast access
+        lookup_a = {}
+        for _, row in agg_a_daily.iterrows():
+            key = (row["SKU"], row["_DATE"])
+            lookup_a[key] = row["PLAN_VALUE"]
+
+        lookup_b = {}
+        for _, row in agg_b_daily.iterrows():
+            key = (row["SKU"], row["_DATE"])
+            lookup_b[key] = row["PLAN_VALUE"]
+
+        data = {}
+        for sku in all_skus:
+            data[sku] = {}
+            cum_a = 0
+            cum_b = 0
+            for d in all_dates:
+                a_val = lookup_a.get((sku, d), 0)
+                b_val = lookup_b.get((sku, d), 0)
+                cum_a += a_val
+                cum_b += b_val
+                data[sku][d] = {
+                    "a": float(a_val),
+                    "b": float(b_val),
+                    "diff": float(b_val - a_val),
+                    "cum_a": float(cum_a),
+                    "cum_b": float(cum_b),
+                    "cum_diff": float(cum_b - cum_a)
+                }
+
+        # For weekly/monthly views, we can aggregate the daily data on the fly in frontend,
+        # but also provide pre-aggregated weekly data for convenience
+        # Weekly aggregation
+        # Group daily data into weekly sums per SKU
+        weekly_data = {}
+        for sku in all_skus:
+            weekly_data[sku] = {}
+            for wk in weeks:
+                wk_label = wk["week_start_sunday"]
+                sum_a = sum(data[sku][d]["a"] for d in wk["dates"] if d in data[sku])
+                sum_b = sum(data[sku][d]["b"] for d in wk["dates"] if d in data[sku])
+                weekly_data[sku][wk_label] = {
+                    "a": sum_a,
+                    "b": sum_b,
+                    "diff": sum_b - sum_a
+                }
+                # Cum up to this week: sum of all dates <= week_end
+                # For simplicity, cum for weekly is cum up to week_end
+                # Find cum at last date of week
+                if wk["dates"]:
+                    last_d = wk["dates"][-1]
+                    weekly_data[sku][wk_label]["cum_a"] = data[sku].get(last_d, {}).get("cum_a", 0)
+                    weekly_data[sku][wk_label]["cum_b"] = data[sku].get(last_d, {}).get("cum_b", 0)
+                    weekly_data[sku][wk_label]["cum_diff"] = data[sku].get(last_d, {}).get("cum_diff", 0)
+
+        # Monthly aggregation
+        monthly_data = {}
+        for sku in all_skus:
+            monthly_data[sku] = {}
+            for mo in months:
+                mo_label = mo["month"]
+                sum_a = sum(data[sku][d]["a"] for d in mo["dates"] if d in data[sku])
+                sum_b = sum(data[sku][d]["b"] for d in mo["dates"] if d in data[sku])
+                monthly_data[sku][mo_label] = {
+                    "a": sum_a,
+                    "b": sum_b,
+                    "diff": sum_b - sum_a
+                }
+                if mo["dates"]:
+                    last_d = mo["dates"][-1]
+                    monthly_data[sku][mo_label]["cum_a"] = data[sku].get(last_d, {}).get("cum_a", 0)
+                    monthly_data[sku][mo_label]["cum_b"] = data[sku].get(last_d, {}).get("cum_b", 0)
+                    monthly_data[sku][mo_label]["cum_diff"] = data[sku].get(last_d, {}).get("cum_diff", 0)
+
+        return {
+            "dates": all_dates,
+            "weeks": weeks,
+            "months": months,
+            "sku_list": all_skus,
+            "data": data,
+            "weekly_data": weekly_data,
+            "monthly_data": monthly_data,
+            "summary": {
+                "total_skus": len(all_skus),
+                "total_dates": len(all_dates),
+                "total_weeks": len(weeks),
+                "total_months": len(months),
+                "date_range": f"{all_dates[0]} to {all_dates[-1]}" if all_dates else "",
+                "sku_prefix": sku_prefix,
+                "line_filter": line_filter,
+                "cum_default": True
+            },
+            "filters": {
+                "sku_prefix": sku_prefix,
+                "line_filter": line_filter,
+                "shift_filter": shift_filter
+            }
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "dates": [], "sku_list": [], "data": {}}

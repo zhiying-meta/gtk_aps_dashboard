@@ -562,9 +562,15 @@ function selectV2VTable(tableName) {
 
 function updateV2VBuilderForTable(tableName) {
   const builder = document.getElementById('v2v-output-builder');
+  const detailedSection = document.getElementById('v2v-plan-output-detailed');
   if (!builder) return;
   if (tableName === 'plan_output' || tableName === 'balance' || tableName === 'plan_input') {
     builder.style.display = 'block';
+    if (detailedSection && tableName === 'plan_output') {
+      detailedSection.style.display = 'block';
+    } else if (detailedSection) {
+      detailedSection.style.display = 'none';
+    }
     // Populate groupby options
     const optionsEl = document.getElementById('v2v-groupby-options');
     if (optionsEl) {
@@ -591,6 +597,7 @@ function updateV2VBuilderForTable(tableName) {
     }
   } else {
     builder.style.display = 'none';
+    if (detailedSection) detailedSection.style.display = 'none';
   }
 }
 
@@ -1105,6 +1112,138 @@ function handleV2VRowChart(tableName, groupValues) {
   })();
 }
 
+async function loadPlanOutputMatrix() {
+  const wrapper = document.getElementById('v2v-po-matrix-wrapper');
+  const statusEl = document.getElementById('v2v-po-matrix-status');
+  if (!wrapper) return;
+
+  const skuPrefix = document.getElementById('v2v-po-sku-prefix') ? document.getElementById('v2v-po-sku-prefix').value : 'SK';
+  const lineFilter = document.getElementById('v2v-po-line-filter') ? document.getElementById('v2v-po-line-filter').value : '';
+  const granularity = document.getElementById('v2v-po-granularity') ? document.getElementById('v2v-po-granularity').value : 'day';
+  const cum = document.getElementById('v2v-po-cum') ? document.getElementById('v2v-po-cum').checked : true;
+
+  if (!v2vState.jobId) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:#dc2626">No job, please compare first</span>';
+    return;
+  }
+
+  wrapper.innerHTML = '<div class="v2v-loading"><div class="v2v-spinner"></div>Loading detailed matrix... (may take 10-20s for 20w rows)</div>';
+  if (statusEl) statusEl.textContent = `Loading matrix for SKU prefix ${skuPrefix}, Line ${lineFilter||'All'}, Granularity ${granularity}, Cum ${cum}...`;
+
+  try {
+    const params = new URLSearchParams({
+      job_id: v2vState.jobId,
+      sku_prefix: skuPrefix,
+      line_filter: lineFilter,
+      granularity: granularity,
+      cum: cum ? 'true' : 'false'
+    });
+
+    const resp = await fetch(`/v2v/api/plan_output/matrix?${params}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    console.log('Matrix data', data.summary);
+
+    const dates = data.dates || [];
+    const skuList = data.sku_list || [];
+    const weeks = data.weeks || [];
+    const months = data.months || [];
+    const matrixData = data.data || {};
+
+    if (skuList.length === 0 || dates.length === 0) {
+      wrapper.innerHTML = `<div style="padding:20px;text-align:center;color:#64748b">No data for filters: SKU prefix ${skuPrefix}, Line ${lineFilter||'All'}<br>Try ALL prefix or empty line filter</div>`;
+      if (statusEl) statusEl.textContent = `No data: ${data.summary ? JSON.stringify(data.summary) : ''}`;
+      return;
+    }
+
+    // Build table with frozen SKU column and daily columns grouped by week
+    let html = '';
+    // Summary
+    html += `<div style="font-size:12px;color:#64748b;margin-bottom:8px">SKUs: ${skuList.length} | Dates: ${dates.length} | Weeks: ${weeks.length} | Range: ${data.summary ? data.summary.date_range : ''} | Cum: ${cum ? 'Yes (prioritized)' : 'No'}</div>`;
+
+    // Table header with week grouping
+    html += '<div class="v2v-table-wrapper" style="max-height:600px"><table class="v2v-table"><thead>';
+    // First header row: week grouping
+    html += '<tr><th style="min-width:150px;left:0;position:sticky;z-index:20;background:#1e293b">SKU / Date</th>';
+    if (granularity === 'day') {
+      // Group by weeks for header
+      for (const wk of weeks) {
+        html += `<th colspan="${wk.dates.length}" style="text-align:center;background:#334155;min-width:${wk.dates.length*80}px">${esc(wk.week_label)} (${wk.dates.length}d)</th>`;
+      }
+    } else if (granularity === 'week') {
+      html += `<th colspan="${weeks.length}" style="text-align:center;background:#334155">Weekly (${weeks.length} weeks)</th>`;
+    } else if (granularity === 'monthly' || granularity === 'month') {
+      html += `<th colspan="${months.length}" style="text-align:center;background:#334155">Monthly (${months.length} months)</th>`;
+    }
+    html += '</tr>';
+
+    // Second header row: dates
+    html += '<tr><th style="left:0;position:sticky;z-index:15;background:#1e293b">SKU</th>';
+    if (granularity === 'day') {
+      for (const d of dates) {
+        html += `<th style="min-width:80px;font-size:11px">${esc(d.slice(5))}</th>`; // MM-DD
+      }
+    } else if (granularity === 'week') {
+      for (const wk of weeks) {
+        html += `<th style="min-width:90px;font-size:11px">${esc(wk.week_start_sunday.slice(5))}</th>`;
+      }
+    } else if (granularity === 'monthly' || granularity === 'month') {
+      for (const mo of months) {
+        html += `<th style="min-width:80px">${esc(mo.month)}</th>`;
+      }
+    }
+    html += '</tr></thead><tbody>';
+
+    // For performance, only show first 100 SKUs initially
+    const displaySkus = skuList.slice(0, 100);
+    for (const sku of displaySkus) {
+      html += `<tr><td style="left:0;position:sticky;background:white;z-index:10;font-weight:600;min-width:150px" class="frozen">${esc(sku)}</td>`;
+      if (granularity === 'day') {
+        for (const d of dates) {
+          const cell = matrixData[sku] && matrixData[sku][d] ? matrixData[sku][d] : {a:0,b:0,diff:0,cum_a:0,cum_b:0,cum_diff:0};
+          const val = cum ? cell.cum_diff : cell.diff;
+          const cls = val > 0 ? 'num-pos' : val < 0 ? 'num-neg' : '';
+          const displayVal = cum ? `${cell.cum_a.toFixed(0)}/${cell.cum_b.toFixed(0)}<br><small style="color:${val>0?'#16a34a':val<0?'#dc2626':'#64748b'}">${val>0?'+':''}${val.toFixed(0)}</small>` : `${cell.a.toFixed(0)}/${cell.b.toFixed(0)}<br><small style="color:${val>0?'#16a34a':val<0?'#dc2626':'#64748b'}">${val>0?'+':''}${cell.diff.toFixed(0)}</small>`;
+          html += `<td class="data-cell ${cls}" style="font-size:11px;text-align:center;min-width:80px">${displayVal}<br><button class="v2v-drill-btn" style="font-size:10px;padding:1px 4px" onclick="handleV2VRowChart('plan_output', {SKU:'${esc(sku)}'})">📈</button></td>`;
+        }
+      } else if (granularity === 'week') {
+        // Weekly data
+        const weeklyData = data.weekly_data || {};
+        for (const wk of weeks) {
+          const wkData = weeklyData[sku] && weeklyData[sku][wk.week_start_sunday] ? weeklyData[sku][wk.week_start_sunday] : {a:0,b:0,diff:0,cum_a:0,cum_b:0,cum_diff:0};
+          const val = cum ? wkData.cum_diff : wkData.diff;
+          const displayVal = cum ? `${wkData.cum_a.toFixed(0)}/${wkData.cum_b.toFixed(0)}<br><small>${val>0?'+':''}${val.toFixed(0)}</small>` : `${wkData.a.toFixed(0)}/${wkData.b.toFixed(0)}<br><small>${wkData.diff.toFixed(0)}</small>`;
+          html += `<td style="text-align:center;min-width:90px">${displayVal}</td>`;
+        }
+      } else if (granularity === 'monthly' || granularity === 'month') {
+        const monthlyData = data.monthly_data || {};
+        for (const mo of months) {
+          const moData = monthlyData[sku] && monthlyData[sku][mo.month] ? monthlyData[sku][mo.month] : {a:0,b:0,diff:0};
+          const val = cum ? moData.cum_diff : moData.diff;
+          const displayVal = `${moData.a.toFixed(0)}/${moData.b.toFixed(0)}<br><small>${val>0?'+':''}${val.toFixed(0)}</small>`;
+          html += `<td style="text-align:center">${displayVal}</td>`;
+        }
+      }
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+
+    if (skuList.length > 100) {
+      html += `<div style="margin-top:8px;font-size:12px;color:#64748b">Showing first 100 of ${skuList.length} SKUs. Use SKU filter to narrow down (e.g., SK, GB, LT) or search.</div>`;
+    }
+
+    wrapper.innerHTML = html;
+    if (statusEl) statusEl.innerHTML = `<span style="color:#16a34a">✅ Loaded matrix: ${skuList.length} SKUs × ${dates.length} dates | ${weeks.length} weeks | Cum: ${cum ? 'Yes' : 'No'} | <button class="btn btn-sm" onclick="loadPlanOutputMatrix()">Reload</button> <button class="btn btn-sm" onclick="document.getElementById('v2v-po-matrix-wrapper').scrollLeft=0">Scroll to start</button></span>`;
+
+  } catch(e) {
+    console.error('Matrix load failed', e);
+    wrapper.innerHTML = `<div class="v2v-status error">❌ Failed to load matrix: ${e.message}</div>`;
+    if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+  }
+}
+
 function esc(s) {
   if (s==null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1125,6 +1264,7 @@ window.resetV2VOutputQuery = resetV2VOutputQuery;
 window.setV2VQuickQuery = setV2VQuickQuery;
 window.updateV2VBuilderForTable = updateV2VBuilderForTable;
 window.downloadV2VCurrentView = downloadV2VCurrentView;
+window.loadPlanOutputMatrix = loadPlanOutputMatrix;
 
 // Auto init if on V2V page
 if (document.readyState === 'loading') {
