@@ -11,6 +11,7 @@ const V2V_TABLE_DEFS = {
   line: {icon: '🧵', name: 'Line Master', cat: 'input'},
   calendar: {icon: '📅', name: 'Line Calendar', cat: 'input'},
   plan_config: {icon: '⚙️', name: 'Plan Config', cat: 'input'},
+  plan_input: {icon: '📥', name: 'Plan Input', cat: 'input'},
   plan_output: {icon: '📋', name: 'Plan Output', cat: 'output'},
   balance: {icon: '📦', name: 'Balance', cat: 'output'},
 };
@@ -254,6 +255,18 @@ function setupV2VFilters() {
   if (dlBtn) {
     dlBtn.addEventListener('click', async ()=>{
       await downloadV2VCurrentView();
+    });
+  }
+  const cumCb = document.getElementById('v2v-cum');
+  if (cumCb) {
+    cumCb.addEventListener('change', ()=>{
+      if (v2vState.outputQuery) {
+        v2vState.outputQuery.cum = cumCb.checked;
+      } else {
+        v2vState.outputQuery = {cum: cumCb.checked, group_by: getV2VGroupBy(), only_diff: true, granularity: v2vState.granularity};
+      }
+      v2vState.currentPage = 1;
+      if (v2vState.jobId) loadV2VDetail(v2vState.activeTable);
     });
   }
 }
@@ -550,7 +563,7 @@ function selectV2VTable(tableName) {
 function updateV2VBuilderForTable(tableName) {
   const builder = document.getElementById('v2v-output-builder');
   if (!builder) return;
-  if (tableName === 'plan_output' || tableName === 'balance') {
+  if (tableName === 'plan_output' || tableName === 'balance' || tableName === 'plan_input') {
     builder.style.display = 'block';
     // Populate groupby options
     const optionsEl = document.getElementById('v2v-groupby-options');
@@ -562,6 +575,11 @@ function updateV2VBuilderForTable(tableName) {
           {val: 'SKU', label: 'SKU'},
           {val: 'PLAN_ITEM', label: 'PLAN_ITEM'},
           {val: 'PLAN_TYPE', label: 'PLAN_TYPE'}
+        ];
+      } else if (tableName === 'plan_input') {
+        opts = [
+          {val: 'PN_CODE', label: 'PN_CODE / SKU'},
+          {val: 'WEEK', label: 'WEEK'}
         ];
       } else {
         opts = [
@@ -588,12 +606,13 @@ function applyV2VOutputQuery() {
   const granBtn = document.querySelector('#v2v-output-granularity button.active');
   const granularity = granBtn ? granBtn.dataset.granularity : v2vState.granularity;
   const onlyDiff = document.getElementById('v2v-only-diff') ? document.getElementById('v2v-only-diff').checked : true;
+  const cum = document.getElementById('v2v-cum') ? document.getElementById('v2v-cum').checked : true;
   const threshAbs = document.getElementById('v2v-threshold-abs') ? document.getElementById('v2v-threshold-abs').value : '0';
 
   v2vState.granularity = granularity;
   v2vState.currentPage = 1;
   // Store in state for loadV2VDetail to use
-  v2vState.outputQuery = {group_by: groupBy, only_diff: onlyDiff, threshold_abs: threshAbs, granularity: granularity};
+  v2vState.outputQuery = {group_by: groupBy, only_diff: onlyDiff, threshold_abs: threshAbs, granularity: granularity, cum: cum};
 
   loadV2VDetail(v2vState.activeTable);
 }
@@ -605,6 +624,7 @@ function resetV2VOutputQuery() {
   const weekBtn = document.querySelector('#v2v-output-granularity button[data-granularity="week"]');
   if (weekBtn) weekBtn.classList.add('active');
   if (document.getElementById('v2v-only-diff')) document.getElementById('v2v-only-diff').checked = true;
+  if (document.getElementById('v2v-cum')) document.getElementById('v2v-cum').checked = true;
   if (document.getElementById('v2v-threshold-abs')) document.getElementById('v2v-threshold-abs').value = '0';
   loadV2VDetail(v2vState.activeTable);
 }
@@ -650,11 +670,12 @@ async function loadV2VDetail(tableName) {
     });
 
     // Add output query params if present (Phase3 refined)
-    if ((tableName === 'plan_output' || tableName === 'balance') && v2vState.outputQuery) {
+    if ((tableName === 'plan_output' || tableName === 'balance' || tableName === 'plan_input') && v2vState.outputQuery) {
       if (v2vState.outputQuery.group_by) params.append('group_by', v2vState.outputQuery.group_by);
       params.append('only_diff', v2vState.outputQuery.only_diff ? 'true' : 'false');
       if (v2vState.outputQuery.threshold_abs) params.append('threshold_abs', v2vState.outputQuery.threshold_abs);
       if (v2vState.outputQuery.threshold_pct) params.append('threshold_pct', v2vState.outputQuery.threshold_pct);
+      if (v2vState.outputQuery.cum !== undefined) params.append('cum', v2vState.outputQuery.cum ? 'true' : 'false');
       // Override granularity from output query
       if (v2vState.outputQuery.granularity) params.set('granularity', v2vState.outputQuery.granularity);
     }
@@ -735,6 +756,8 @@ function renderV2VTableDetail(data, tableName) {
     html += '<th>Time</th><th>Group</th><th>A Total</th><th>B Total</th><th>Diff</th><th>Diff%</th><th>Drill</th><th>Chart</th>';
   } else if (tableName === 'balance') {
     html += '<th>Time</th><th>Group</th><th>A Balance</th><th>B Balance</th><th>Diff</th><th>Diff%/Neg</th><th>Drill</th><th>Chart</th>';
+  } else if (tableName === 'plan_input') {
+    html += '<th>Time</th><th>SKU/PN</th><th>A FCST</th><th>B FCST</th><th>Diff</th><th>Diff%</th><th>Drill</th><th>Chart</th>';
   } else {
     const first = records[0];
     const keys = Object.keys(first).slice(0,8);
@@ -849,6 +872,21 @@ function renderV2VTableDetail(data, tableName) {
       }
       html += `<td>${drillBtn}</td>`;
       html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('balance', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">📈</button></td>`;
+    } else if (tableName === 'plan_input') {
+      const groupVals = rec._group_values || key;
+      html += `<td>${esc(rec._WEEK||rec._MONTH||rec._DATE||rec.PN_CODE||rec.PN_CODE||'')}</td>`;
+      html += `<td>${Object.entries(groupVals).map(([k,v])=>`<div><small>${k}:</small> ${esc(v||'')}</div>`).join('')}</td>`;
+      html += `<td>${rec.ACTUALWEEKVALUE_A||rec.PLAN_VALUE_A||0}</td>`;
+      html += `<td>${rec.ACTUALWEEKVALUE_B||rec.PLAN_VALUE_B||0}</td>`;
+      html += `<td style="${(rec.diff||0)>0?'color:#16a34a':(rec.diff||0)<0?'color:#dc2626':''};font-weight:600">${rec.diff||0}</td>`;
+      html += `<td>${rec.diff_pct? rec.diff_pct.toFixed(1)+'%':''}</td>`;
+      const drill = rec._drill || {};
+      let drillBtn = '';
+      if (drill.can_drill_day) {
+        drillBtn = `<button class="v2v-drill-btn" onclick="drillDownOutput('${drill.next_granularity}', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">▶ ${drill.next_granularity}</button>`;
+      }
+      html += `<td>${drillBtn}</td>`;
+      html += `<td><button class="v2v-drill-btn" onclick="handleV2VRowChart('plan_input', ${JSON.stringify(groupVals).replace(/"/g,'&quot;')})">📈</button></td>`;
     } else {
       for (const [k,v] of Object.entries(rec).slice(0,8)) {
         html += `<td>${esc(String(v||'').substring(0,100))}</td>`;
@@ -1020,6 +1058,11 @@ function handleV2VRowChart(tableName, groupValues) {
   }
   if (tableName === 'balance') {
     if (groupValues.ITEM_CODE) params.append('item_code', groupValues.ITEM_CODE);
+    params.append('granularity', v2vState.granularity);
+  }
+  if (tableName === 'plan_input') {
+    if (groupValues.PN_CODE) params.append('pn_code', groupValues.PN_CODE);
+    if (groupValues.SKU) params.append('pn_code', groupValues.SKU);
     params.append('granularity', v2vState.granularity);
   }
 

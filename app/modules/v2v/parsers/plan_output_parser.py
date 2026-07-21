@@ -26,6 +26,8 @@ def normalize_dates(df):
     df["_DATE"] = df["_DATE_DT"].dt.strftime("%Y-%m-%d")
     df["_WEEK_DT"] = df["_DATE_DT"].apply(lambda x: to_saturday(x) if pd.notna(x) else None)
     df["_WEEK"] = df["_WEEK_DT"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notna(x) and hasattr(x, 'strftime') else None)
+    df["_MONTH"] = df["_DATE_DT"].dt.strftime("%Y-%m")
+    df["_YEAR_MONTH_DT"] = pd.to_datetime(df["_DATE_DT"].dt.to_period('M').astype(str), errors='coerce')
     return df
 
 def apply_filters(df, filters: Dict):
@@ -64,25 +66,22 @@ def apply_filters(df, filters: Dict):
 
 def get_group_keys(group_by: List[str], granularity: str):
     """Build group keys including time dimension based on granularity"""
-    # Clean group_by: remove empty, dedup, ensure valid columns
     clean_gb = []
     for g in group_by:
         g = g.strip()
         if g and g not in clean_gb:
             clean_gb.append(g)
     
-    # Time columns based on granularity
     if granularity == "week":
         time_cols = ["_WEEK"]
     elif granularity == "day":
         time_cols = ["_DATE"]
+    elif granularity == "monthly" or granularity == "month":
+        time_cols = ["_MONTH"]
     else:  # shift
-        # For shift, we want date + shift + plan_item as time dimensions
         time_cols = ["_DATE", "SHIFT_NAME", "PLAN_ITEM"]
-        # Avoid duplicate if already in group_by
         time_cols = [c for c in time_cols if c not in clean_gb]
 
-    # Final keys = group_by + time_cols
     final_keys = clean_gb + time_cols
     return final_keys, clean_gb, time_cols
 
@@ -112,7 +111,8 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
                      filters: Dict = None, only_diff: bool = True,
                      threshold_abs: float = 0, threshold_pct: float = 0,
                      sort_by: str = "abs_diff_desc",
-                     page: int = 1, page_size: int = 100):
+                     page: int = 1, page_size: int = 100,
+                     cum: bool = False):
     """
     Main diff for plan_output with grouping
     """
@@ -150,6 +150,54 @@ def diff_plan_output(df_a, df_b, group_by: List[str], granularity: str = "week",
         # Groupby sum
         agg_a = df_a_filt.groupby(valid_keys, as_index=False)["PLAN_VALUE"].sum() if not df_a_filt.empty else pd.DataFrame(columns=valid_keys + ["PLAN_VALUE"])
         agg_b = df_b_filt.groupby(valid_keys, as_index=False)["PLAN_VALUE"].sum() if not df_b_filt.empty else pd.DataFrame(columns=valid_keys + ["PLAN_VALUE"])
+
+        # Cumulative handling: if cum=True, compute cumsum per clean_gb group sorted by time
+        if cum:
+            # Determine time col for sorting
+            time_col = None
+            for tc in ["_DATE", "_WEEK", "_MONTH"]:
+                if tc in valid_keys:
+                    time_col = tc
+                    break
+            if time_col and clean_gb:
+                # For each version, sort by time and cumsum per clean_gb
+                # clean_gb may be empty (overall), then cumsum overall sorted by time
+                def cumsum_per_group(df_agg):
+                    if df_agg.empty:
+                        return df_agg
+                    # Sort by time
+                    # Need to handle _DATE_DT for proper sorting? Use time_col string sort might work for YYYY-MM-DD
+                    # For month, YYYY-MM string sort works
+                    # For week, YYYY-MM-DD string sort works
+                    # Sort by clean_gb + time_col
+                    sort_keys = clean_gb + [time_col]
+                    # Ensure clean_gb columns exist
+                    sort_keys = [k for k in sort_keys if k in df_agg.columns]
+                    if not sort_keys:
+                        sort_keys = [time_col] if time_col in df_agg.columns else []
+                    if sort_keys:
+                        df_agg = df_agg.sort_values(sort_keys)
+                    # Group by clean_gb and cumsum
+                    if clean_gb:
+                        # Only cumsum if clean_gb columns exist
+                        valid_gb = [g for g in clean_gb if g in df_agg.columns]
+                        if valid_gb:
+                            df_agg["PLAN_VALUE"] = df_agg.groupby(valid_gb)["PLAN_VALUE"].cumsum()
+                        else:
+                            df_agg["PLAN_VALUE"] = df_agg["PLAN_VALUE"].cumsum()
+                    else:
+                        df_agg["PLAN_VALUE"] = df_agg["PLAN_VALUE"].cumsum()
+                    return df_agg
+                agg_a = cumsum_per_group(agg_a)
+                agg_b = cumsum_per_group(agg_b)
+            elif time_col:
+                # No group_by, overall cumsum
+                agg_a = agg_a.sort_values(time_col) if time_col in agg_a.columns else agg_a
+                agg_b = agg_b.sort_values(time_col) if time_col in agg_b.columns else agg_b
+                if not agg_a.empty:
+                    agg_a["PLAN_VALUE"] = agg_a["PLAN_VALUE"].cumsum()
+                if not agg_b.empty:
+                    agg_b["PLAN_VALUE"] = agg_b["PLAN_VALUE"].cumsum()
 
         # Merge
         merged = pd.merge(agg_a, agg_b, on=valid_keys, how="outer", suffixes=("_A", "_B"))

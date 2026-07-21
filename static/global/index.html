@@ -271,9 +271,10 @@
             <button data-granularity="week" class="active">Week</button>
             <button data-granularity="day">Day</button>
             <button data-granularity="shift">Shift</button>
+            <button data-granularity="monthly">Month</button>
           </div>
           <button id="v2v-btn-compare" class="btn btn-lg" disabled>▶ Compare (Need A & B)</button>
-          <span style="font-size:11px;color:#64748b">Drill-down: Week → Day → Shift</span>
+          <span style="font-size:11px;color:#64748b">Drill-down: Week → Day → Shift → Month, Cum default</span>
         </div>
 
         <div id="v2v-status" style="margin-top:12px"></div>
@@ -297,6 +298,7 @@
               <button data-granularity="week" class="active">Week</button>
               <button data-granularity="day">Day</button>
               <button data-granularity="shift">Shift</button>
+              <button data-granularity="monthly">Month</button>
             </div>
           </div>
         </div>
@@ -320,11 +322,13 @@
                 <button data-granularity="week" class="active">Week</button>
                 <button data-granularity="day">Day</button>
                 <button data-granularity="shift">Shift</button>
+                <button data-granularity="monthly">Month</button>
               </div>
             </div>
-            <div>
-              <label style="font-size:11px">Only Diff <input type="checkbox" id="v2v-only-diff" checked></label>
-              <label style="font-size:11px;margin-left:8px">Threshold Abs: <input type="number" id="v2v-threshold-abs" value="0" style="width:70px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:11px"><input type="checkbox" id="v2v-only-diff" checked> Only Diff</label>
+              <label style="font-size:11px"><input type="checkbox" id="v2v-cum" checked> Cum (Cumulative) - Prioritize cum comparison</label>
+              <label style="font-size:11px">Threshold Abs: <input type="number" id="v2v-threshold-abs" value="0" style="width:70px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>
             </div>
             <div style="display:flex;gap:6px">
               <button class="btn btn-sm" onclick="applyV2VOutputQuery()">▶ Apply</button>

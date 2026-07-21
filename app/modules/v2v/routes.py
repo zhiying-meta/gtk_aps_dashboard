@@ -278,7 +278,9 @@ def diff_detail(table_name):
             "compare_field": request.args.get('compare_field', 'BALANCE_QTY' if table_name=='balance' else 'PLAN_VALUE'),
             "item_code": request.args.get('item_code'),
             "pn_code": request.args.get('pn_code'),
-            "line_code": request.args.get('line_code')
+            "line_code": request.args.get('line_code'),
+            "cum": request.args.get('cum', 'true'),
+            "monthly": request.args.get('monthly', 'false')
         }
         # Also allow direct filter params like LINE_CODE, SKU, ITEM_CODE, etc.
         for extra_key in ["LINE_CODE", "SKU", "ITEM_CODE", "WEEK", "DATE", "PLAN_ITEM", "SHIFT_NAME"]:

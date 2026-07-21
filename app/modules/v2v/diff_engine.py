@@ -318,7 +318,9 @@ def compare_two_versions(folder_a: str, folder_b: str, granularity: str = "week"
         result["summary"]["line"] = {"error": str(e)}
 
     # 7. Large tables: fast counts only for summary, detailed diff on-demand via /v2v/api/diff/<table>
-    for table_key in large_tables:
+    # Include plan_input as virtual large table
+    all_large = large_tables + ["plan_input"]
+    for table_key in all_large:
         try:
             cnt_a = large_counts_a.get(table_key, 0)
             cnt_b = large_counts_b.get(table_key, 0)
@@ -650,6 +652,9 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
         sort_by = filters.get("sort", "abs_diff_desc") if filters else "abs_diff_desc"
         page = int(filters.get("page", page)) if filters and filters.get("page") else page
         page_size = int(filters.get("page_size", page_size)) if filters and filters.get("page_size") else page_size
+        cum = filters.get("cum", True) if filters else True  # Default cum=True for V2V as per user request
+        if isinstance(cum, str):
+            cum = cum.lower() in ["true", "1", "yes", "cum"]
 
         diff_result = diff_plan_output_agg(
             data_a["plan_output"], data_b["plan_output"],
@@ -661,7 +666,8 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
             threshold_pct=threshold_pct,
             sort_by=sort_by,
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            cum=cum
         )
         if "error" in diff_result:
             return diff_result
@@ -742,6 +748,65 @@ def get_detailed_diff(folder_a: str, folder_b: str, table_name: str, granularity
             "valid_keys": diff_result.get("valid_keys", [])
         }
 
+    elif table_name == "plan_input":
+        # Virtual table: aggregated FCST + Supply input
+        from .parsers.plan_input_parser import diff_plan_input as diff_pi
+        # Load FCST data
+        fcst_main_a = load_single_table(folder_a, "fcst")
+        fcst_detail_a = load_single_table(folder_a, "fcst_detail")
+        fcst_main_b = load_single_table(folder_b, "fcst")
+        fcst_detail_b = load_single_table(folder_b, "fcst_detail")
+        supply_a = load_single_table(folder_a, "supply")
+        supply_b = load_single_table(folder_b, "supply")
+        if fcst_main_a is None or fcst_detail_a is None or fcst_main_b is None or fcst_detail_b is None:
+            return {"error": "FCST data missing for plan_input"}
+
+        group_by = filters.get("group_by") if filters else None
+        if isinstance(group_by, str):
+            group_by = [g.strip() for g in group_by.split(",") if g.strip()]
+        if not group_by:
+            group_by = ["PN_CODE"]
+
+        real_filters = {}
+        if filters:
+            for k,v in filters.items():
+                if k in ["PN_CODE", "SKU", "WEEK", "ITEM_CODE"]:
+                    real_filters[k] = v
+                if k == "sku" and v:
+                    real_filters["PN_CODE"] = v
+                if k == "week" and v:
+                    real_filters["WEEK"] = v
+
+        only_diff = filters.get("only_diff", True) if filters else True
+        if isinstance(only_diff, str):
+            only_diff = only_diff.lower() != "false"
+        threshold_abs = float(filters.get("threshold_abs", 0)) if filters and filters.get("threshold_abs") else 0
+
+        diff_result = diff_pi(
+            fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b,
+            supply_a, supply_b,
+            group_by=group_by,
+            granularity=granularity,
+            filters=real_filters,
+            only_diff=only_diff,
+            threshold_abs=threshold_abs
+        )
+        if "error" in diff_result:
+            return diff_result
+        return {
+            "table": table_name,
+            "pagination": diff_result.get("pagination", {"page": page, "page_size": page_size, "total": diff_result.get("total_after_filter", 0)}),
+            "records": diff_result.get("records", []),
+            "summary": {
+                "total_a": diff_result.get("total_a", 0),
+                "total_b": diff_result.get("total_b", 0),
+                "total_after_filter": diff_result.get("total_after_filter", 0)
+            },
+            "group_by": group_by,
+            "granularity": granularity,
+            "filters": real_filters
+        }
+
     else:
         return {
             "table": table_name,
@@ -756,6 +821,19 @@ def get_chart_data(folder_a: str, folder_b: str, table_name: str, **kwargs):
     Get chart data for a table
     kwargs: pn_code, line_code, plan_type, etc.
     """
+    # For virtual tables like plan_input, we need special handling
+    if table_name == "plan_input":
+        from .parsers.plan_input_parser import get_chart_data_plan_input as chart_pi
+        fcst_main_a = load_single_table(folder_a, "fcst")
+        fcst_detail_a = load_single_table(folder_a, "fcst_detail")
+        fcst_main_b = load_single_table(folder_b, "fcst")
+        fcst_detail_b = load_single_table(folder_b, "fcst_detail")
+        if any(x is None for x in [fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b]):
+            return {"error": "FCST data missing for plan_input chart"}
+        pn_code = kwargs.get("pn_code") or kwargs.get("sku") or kwargs.get("item_code")
+        granularity = kwargs.get("granularity", "week")
+        return chart_pi(fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b, pn_code=pn_code, granularity=granularity)
+
     df_a = load_single_table(folder_a, table_name)
     df_b = load_single_table(folder_b, table_name)
     if df_a is None or df_b is None:
@@ -783,7 +861,6 @@ def get_chart_data(folder_a: str, folder_b: str, table_name: str, **kwargs):
             filters["LINE_CODE"] = line_code
         if sku:
             filters["SKU"] = sku
-        # Also support generic filters
         for k in ["LINE_CODE", "SKU", "WEEK", "PLAN_ITEM"]:
             if kwargs.get(k.lower()) and k.lower() not in ["line_code", "sku"]:
                 filters[k] = kwargs.get(k.lower())
