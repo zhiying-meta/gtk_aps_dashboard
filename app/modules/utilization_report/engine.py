@@ -13,6 +13,8 @@ Supports gated / ungated versions stored separately.
 
 import os
 import pathlib
+import pickle
+import hashlib
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 import pandas as pd
@@ -123,6 +125,15 @@ def _build_load_map(schedule_df: pd.DataFrame) -> Dict[Tuple[str,str,str], float
     return load_map
 
 def _compute_records(version: str, calendar_path: str, schedule_path: str) -> UtilizationCache:
+    # Try pickle fast path
+    try:
+        cached = _try_load_pickle(calendar_path, schedule_path, version)
+        if cached:
+            # print(f"[util] loaded from pickle {version}")
+            return cached
+    except Exception:
+        pass
+
     cal_df = _load_calendar_df(calendar_path)
     sched_df = _load_schedule_df(schedule_path)
 
@@ -241,7 +252,68 @@ def _compute_records(version: str, calendar_path: str, schedule_path: str) -> Ut
         raw_calendar=cal_df,
         raw_schedule=sched_df,
     )
+    # Save to pickle for fast future load
+    try:
+        _save_pickle(cache, calendar_path, schedule_path)
+    except Exception as e:
+        print(f"[util] save pickle failed {e}")
+        pass
     return cache
+
+def _get_pickle_path(calendar_path: str, schedule_path: str) -> str:
+    # Pickle path next to calendar file: .cache.pkl
+    try:
+        cal_p = pathlib.Path(calendar_path)
+        return str(cal_p.parent / f".cache_{cal_p.parent.name}_{hashlib.md5((calendar_path+schedule_path).encode()).hexdigest()[:8]}.pkl")
+    except:
+        return ""
+
+def _try_load_pickle(calendar_path: str, schedule_path: str, version: str):
+    pkl_path = pathlib.Path(calendar_path).parent / f"cache_{version}.pkl"
+    # Also check generic pickle
+    if not pkl_path.exists():
+        # Try alternative naming
+        alt = pathlib.Path(calendar_path).parent / ".cache.pkl"
+        if alt.exists():
+            pkl_path = alt
+        else:
+            return None
+
+    # Check mtime
+    try:
+        cal_mtime = pathlib.Path(calendar_path).stat().st_mtime
+        sched_mtime = pathlib.Path(schedule_path).stat().st_mtime
+        pkl_mtime = pkl_path.stat().st_mtime
+        if pkl_mtime < max(cal_mtime, sched_mtime):
+            return None  # stale
+        with open(pkl_path, 'rb') as f:
+            data = pickle.load(f)
+            # Validate version
+            if getattr(data, 'version', None) == version:
+                return data
+    except Exception as e:
+        # print(f"[util] pickle load failed {e}")
+        return None
+    return None
+
+def _save_pickle(cache: UtilizationCache, calendar_path: str, schedule_path: str):
+    try:
+        pkl_path = pathlib.Path(calendar_path).parent / f"cache_{cache.version}.pkl"
+        # Don't save raw dataframes to keep pickle small
+        cache_copy = UtilizationCache(
+            version=cache.version,
+            records_shift=cache.records_shift,
+            records_day=cache.records_day,
+            lines=cache.lines,
+            dates=cache.dates,
+            shifts=cache.shifts,
+            raw_calendar=None,
+            raw_schedule=None,
+        )
+        with open(pkl_path, 'wb') as f:
+            pickle.dump(cache_copy, f)
+    except Exception as e:
+        print(f"[util] pickle save failed {e}")
 
 def load_data_for_version(base_dir: str, version: str) -> UtilizationCache:
     """

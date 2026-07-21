@@ -29,7 +29,6 @@ def _json_error(msg, code=500):
 @util_bp.route("/api/utilization/status", methods=["GET"])
 def api_status():
     try:
-        # Fast path: check cache first, if cached return quickly
         from app.modules.utilization_report.engine import _CACHES
         cached_versions = {}
         for k in _CACHES.keys():
@@ -43,36 +42,44 @@ def api_status():
                     'records_shift': len(c.records_shift),
                     'records_day': len(c.records_day),
                 }
-        if cached_versions:
-            return jsonify({"loaded": True, "versions": list(cached_versions.keys()), "details": cached_versions})
 
-        # Check file existence without loading full Excel (fast)
         import pathlib
         base_path = pathlib.Path(DEFAULT_DATA_DIR)
-        versions_found = []
-        # Check utilization/gated, utilization/ungated
+        files_found = []
         for ver in ['gated','ungated']:
             util_dir = base_path / "utilization" / ver
             if util_dir.exists() and (util_dir / "工作日历快照.xlsx").exists() and (util_dir / "排产结果表.xlsx").exists():
-                versions_found.append(ver)
-        # Check IVY folders
-        if not versions_found:
+                files_found.append(ver)
+        if not files_found:
             for sub in base_path.iterdir():
                 if sub.is_dir() and ('Gated' in sub.name or 'gated' in sub.name.lower()):
                     if (sub / "工作日历快照.xlsx").exists() and (sub / "排产结果表.xlsx").exists():
-                        versions_found.append('gated')
+                        files_found.append('gated')
                         break
-            # Also check any folder containing the pair (first match)
-            if not versions_found:
-                # Quick scan one level
+            if not files_found:
                 for sub in base_path.iterdir():
                     if sub.is_dir():
                         if (sub / "工作日历快照.xlsx").exists() and (sub / "排产结果表.xlsx").exists():
-                            versions_found.append('gated')
+                            files_found.append('gated')
                             break
 
-        loaded = len(versions_found) > 0
-        return jsonify({"loaded": loaded, "versions": versions_found, "details": {}})
+        # Truly ready only when cache exists
+        if cached_versions:
+            return jsonify({
+                "loaded": True,
+                "versions": list(cached_versions.keys()),
+                "details": cached_versions,
+                "files_found": files_found,
+            })
+        else:
+            # Not yet computed, but files may exist
+            return jsonify({
+                "loaded": False,
+                "versions": [],
+                "details": {},
+                "files_found": files_found,
+                "needs_compute": len(files_found) > 0,
+            })
 
     except Exception as e:
         import traceback
@@ -315,128 +322,209 @@ def api_pivot():
 @util_bp.route("/api/utilization/upload", methods=["POST"])
 def api_upload():
     """
-    Upload calendar and schedule files. Supports gated and ungated.
-    Form fields:
-      - version: gated / ungated (default gated)
-      - calendar: file (工作日历快照.xlsx)
-      - schedule: file (排产结果表.xlsx)
-    Or zip containing both.
+    Upload handler supporting:
+    - Separate upload: calendar alone or schedule alone (per version)
+    - One-click: calendar + schedule together (or zip)
+    - Multi-version: gated + ungated together (4 files or zip with both)
+    Like I/O Report: supports .xlsx, .zip, multiple files
     """
     if not request.files:
-        return _json_error("Expected calendar and schedule files", 400)
-
-    version = request.form.get("version", "gated").lower()
-    if version not in ("gated", "ungated"):
-        version = "gated"
+        return _json_error("Expected calendar and schedule files (xlsx or zip)", 400)
 
     tmp_dir = tempfile.mkdtemp(prefix="util_upload_")
     try:
-        # Save files
-        calendar_path = None
-        schedule_path = None
+        import zipfile
+
+        # Collect all uploaded files, handle zip extraction
+        extracted_files = []  # list of paths in tmp_dir
 
         for key in request.files:
-            files = request.files.getlist(key)
-            for f in files:
+            for f in request.files.getlist(key):
                 if not f.filename:
                     continue
-                low = f.filename.lower()
-                # Classify by name or field key
-                field_low = key.lower()
-                save_path = os.path.join(tmp_dir, f.filename)
-                f.save(save_path)
+                fname = f.filename
+                low = fname.lower()
+                tmp_path = os.path.join(tmp_dir, fname)
+                f.save(tmp_path)
 
-                if "工作日历" in f.filename or "calendar" in low or "日历" in f.filename or "calendar" in field_low or "工作日历" in key:
-                    calendar_path = save_path
-                elif "排产结果" in f.filename or "schedule" in low or "排产" in f.filename or "schedule" in field_low or "排产" in key:
-                    schedule_path = save_path
-                else:
-                    # Try to guess by content? For now check first rows? Simple heuristic: file contains UPH etc -> calendar
-                    # We'll attempt to read small sample
+                if low.endswith('.zip'):
+                    # Extract zip
                     try:
-                        import pandas as pd
-                        df_sample = pd.read_excel(save_path, nrows=5, engine='openpyxl')
-                        cols = [str(c) for c in df_sample.columns]
-                        if "PLAN_TYPE" in cols and "UPH" in df_sample.to_string():
-                            # Could be calendar
-                            if not calendar_path:
-                                calendar_path = save_path
-                            else:
-                                if not schedule_path:
-                                    schedule_path = save_path
-                        else:
-                            if not schedule_path:
-                                schedule_path = save_path
-                    except:
-                        # fallback
-                        if not calendar_path:
-                            calendar_path = save_path
-                        elif not schedule_path:
-                            schedule_path = save_path
-
-        if not calendar_path or not schedule_path:
-            # Try to find in tmp_dir if we have at least 2 xlsx
-            xlsxs = list(pathlib.Path(tmp_dir).glob("*.xlsx"))
-            if len(xlsxs) >= 2:
-                # Heuristic: larger file maybe calendar? Actually calendar is large (18M) vs schedule 9M, not reliable
-                # Try to detect by reading
-                for p in xlsxs:
-                    try:
-                        import pandas as pd
-                        df = pd.read_excel(str(p), nrows=10, engine='openpyxl')
-                        col_str = " ".join(map(str, df.columns))
-                        data_str = df.to_string()
-                        if "UPH" in data_str and "工时" in data_str:
-                            calendar_path = str(p)
-                        elif "PLAN_ITEM" in col_str:
-                            # Both have PLAN_ITEM, but schedule has KITTING etc
-                            # Check for SKU column
-                            if "SKU" in col_str or "PLAN_VALUE" in col_str:
-                                if calendar_path and str(p) != calendar_path:
-                                    schedule_path = str(p)
-                                elif not calendar_path:
-                                    # Might be schedule
-                                    pass
-                    except:
+                        with zipfile.ZipFile(tmp_path, 'r') as zf:
+                            for info in zf.infolist():
+                                if info.is_dir():
+                                    continue
+                                if not info.filename.lower().endswith('.xlsx'):
+                                    continue
+                                # Save with basename to avoid path traversal
+                                base = os.path.basename(info.filename)
+                                # Add prefix to avoid collision
+                                out_path = os.path.join(tmp_dir, f"zip_{base}")
+                                with zf.open(info) as src, open(out_path, 'wb') as dst:
+                                    shutil.copyfileobj(src, dst)
+                                extracted_files.append(out_path)
+                        # Remove zip itself after extraction
+                        os.remove(tmp_path)
+                    except Exception as ze:
+                        print(f"[util] zip extract failed {fname}: {ze}")
+                        # Keep zip as is? Skip
                         continue
-                # Fallback assign
-                if not calendar_path and len(xlsxs) >= 1:
-                    calendar_path = str(xlsxs[0])
-                if not schedule_path and len(xlsxs) >= 2:
-                    # pick different from calendar
-                    for p in xlsxs:
-                        if str(p) != calendar_path:
-                            schedule_path = str(p)
-                            break
+                else:
+                    extracted_files.append(tmp_path)
 
-        if not calendar_path or not schedule_path:
-            return _json_error(f"Missing calendar or schedule. Got calendar={calendar_path}, schedule={schedule_path}. Please upload 工作日历快照.xlsx and 排产结果表.xlsx", 400)
+        if not extracted_files:
+            return _json_error("No xlsx files found (including inside zip)", 400)
 
-        # Validate by computing
-        try:
-            cache = _compute_records(version, calendar_path, schedule_path)
-        except Exception as ve:
-            import traceback
-            traceback.print_exc()
-            return _json_error(f"Validation failed: {ve}", 400)
+        # Classify files into gated/ungated calendar/schedule
+        # Map: version -> {calendar: path, schedule: path}
+        def classify_file(path):
+            name = os.path.basename(path).lower()
+            # Check content hint if needed
+            is_calendar = False
+            is_schedule = False
+            if "工作日历" in name or "calendar" in name or "日历" in name:
+                is_calendar = True
+            elif "排产结果" in name or "schedule" in name or "排产" in name:
+                is_schedule = True
+            else:
+                # Try to guess by reading small sample for UPH/工时
+                try:
+                    import pandas as pd
+                    df = pd.read_excel(path, nrows=5, engine='openpyxl')
+                    txt = df.to_string()
+                    if "UPH" in txt and "工时" in txt:
+                        is_calendar = True
+                    else:
+                        is_schedule = True
+                except:
+                    # Fallback: larger file likely calendar
+                    try:
+                        size = os.path.getsize(path)
+                        # Calendar is usually larger (18M vs 9M) but not reliable, assume first large is calendar
+                        pass
+                    except:
+                        pass
+                    is_schedule = True
 
-        # Save to persistent location: data/utilization/<version>/
-        persist_dir = os.path.join(DEFAULT_DATA_DIR, "utilization", version)
-        os.makedirs(persist_dir, exist_ok=True)
-        # Copy files to fixed names
-        shutil.copyfile(calendar_path, os.path.join(persist_dir, "工作日历快照.xlsx"))
-        shutil.copyfile(schedule_path, os.path.join(persist_dir, "排产结果表.xlsx"))
+            # Determine version by filename
+            ver = "gated"  # default
+            if "ungated" in name or "ungate" in name:
+                ver = "ungated"
+            elif "gated" in name:
+                ver = "gated"
+            else:
+                # If no hint, will be assigned later
+                ver = None
 
-        # Also clear cache and reload
+            return ver, is_calendar, is_schedule
+
+        # Group
+        version_groups = {
+            "gated": {"calendar": None, "schedule": None},
+            "ungated": {"calendar": None, "schedule": None},
+        }
+
+        # First pass: assign files with explicit version hint
+        unassigned = []
+        for p in extracted_files:
+            ver, is_cal, is_sched = classify_file(p)
+            if ver and is_cal and not version_groups[ver]["calendar"]:
+                version_groups[ver]["calendar"] = p
+            elif ver and is_sched and not version_groups[ver]["schedule"]:
+                version_groups[ver]["schedule"] = p
+            else:
+                unassigned.append((p, is_cal, is_sched, ver))
+
+        # Second pass: assign unassigned files to fill gaps
+        # Priority: fill gated first, then ungated
+        for p, is_cal, is_sched, ver_hint in unassigned:
+            # If ver_hint is None, try to assign to first version missing that type
+            target_vers = ["gated", "ungated"] if ver_hint is None else [ver_hint]
+            assigned = False
+            for tv in target_vers:
+                if is_cal and not version_groups[tv]["calendar"]:
+                    version_groups[tv]["calendar"] = p
+                    assigned = True
+                    break
+                if is_sched and not version_groups[tv]["schedule"]:
+                    version_groups[tv]["schedule"] = p
+                    assigned = True
+                    break
+            if not assigned:
+                # If still not assigned, try any missing slot
+                for tv in ["gated", "ungated"]:
+                    if is_cal and not version_groups[tv]["calendar"]:
+                        version_groups[tv]["calendar"] = p
+                        assigned = True
+                        break
+                    if is_sched and not version_groups[tv]["schedule"]:
+                        version_groups[tv]["schedule"] = p
+                        assigned = True
+                        break
+
+        # Now we have version_groups with possibly partial (only calendar or only schedule)
+        # Save whatever we have to persist_dir, and for those versions where both exist, compute cache
+        results = {}
+        any_saved = False
+
+        for ver in ["gated", "ungated"]:
+            cal_path = version_groups[ver]["calendar"]
+            sched_path = version_groups[ver]["schedule"]
+            persist_dir = os.path.join(DEFAULT_DATA_DIR, "utilization", ver)
+            os.makedirs(persist_dir, exist_ok=True)
+
+            # If we have a file for this version, copy it to persist dir (even if partial)
+            # Keep existing file if new one not provided
+            if cal_path:
+                dest = os.path.join(persist_dir, "工作日历快照.xlsx")
+                shutil.copyfile(cal_path, dest)
+                any_saved = True
+            if sched_path:
+                dest = os.path.join(persist_dir, "排产结果表.xlsx")
+                shutil.copyfile(sched_path, dest)
+                any_saved = True
+
+            # Check if after saving, both files exist in persist_dir
+            cal_persist = os.path.join(persist_dir, "工作日历快照.xlsx")
+            sched_persist = os.path.join(persist_dir, "排产结果表.xlsx")
+            if os.path.exists(cal_persist) and os.path.exists(sched_persist):
+                # Try to compute / validate
+                try:
+                    cache = _compute_records(ver, cal_persist, sched_persist)
+                    results[ver] = {
+                        "lines": len(cache.lines),
+                        "dates": len(cache.dates),
+                        "records_shift": len(cache.records_shift),
+                        "ready": True,
+                    }
+                except Exception as ve:
+                    import traceback
+                    traceback.print_exc()
+                    results[ver] = {"ready": False, "error": str(ve)}
+            else:
+                # Partial
+                has_cal = os.path.exists(cal_persist)
+                has_sched = os.path.exists(sched_persist)
+                if has_cal or has_sched:
+                    results[ver] = {
+                        "ready": False,
+                        "partial": True,
+                        "has_calendar": has_cal,
+                        "has_schedule": has_sched,
+                        "message": f"Partial upload for {ver}: calendar={has_cal}, schedule={has_sched}. Upload missing file to complete.",
+                    }
+
+        if not any_saved and not results:
+            return _json_error("No valid calendar/schedule files classified. Please upload 工作日历快照.xlsx and 排产结果表.xlsx, or zip containing them.", 400)
+
+        # Reload caches
         reload_all(DEFAULT_DATA_DIR)
 
+        # Build response
         return jsonify({
             "ok": True,
-            "version": version,
-            "lines": len(cache.lines),
-            "dates": len(cache.dates),
-            "records_shift": len(cache.records_shift),
-            "records_day": len(cache.records_day),
+            "results": results,
+            "saved_versions": list(results.keys()),
         })
 
     except Exception as e:

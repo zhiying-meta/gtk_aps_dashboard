@@ -43,44 +43,79 @@
   function statusBadgeHTML(status){
     if(status && status.loaded){
       const vers = (status.versions||[]).join(', ')||'gated';
-      return `<span class="util-status-badge ready">✅ Ready: ${vers}</span>`;
+      const details = status.details||{};
+      let total = 0;
+      Object.values(details).forEach(d=> total+=d.records_shift||0);
+      return `<span class="util-status-badge ready">✅ Ready: ${vers} — ${total} recs (truly ready)</span>`;
+    }else if(status && status.files_found && status.files_found.length>0){
+      const vers = status.files_found.join(', ');
+      return `<span class="util-status-badge empty" style="background:#fffbeb;color:#92400e;border-color:#fde68a">⚠️ Files found: ${vers} — not yet computed, click Apply/Reload to compute (first time ~40s, then cached 0.1s)</span>`;
     }else{
-      return `<span class="util-status-badge empty">No data — upload or load demo</span>`;
+      return `<span class="util-status-badge empty">No data — upload calendar+schedule, or zip, or demo (supports separate & one-click)</span>`;
     }
   }
 
   function buildUploadHTML(status){
+    const filesFound = (status && status.files_found) ? status.files_found.join(', ') : '';
     return `
       <div class="section">
         <div class="section-header">
           <span class="section-title">⚙️ Line Utilization — Upload</span>
           <span id="util-status-badge">${statusBadgeHTML(status)}</span>
         </div>
-        <div style="padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#475569;margin-bottom:12px">
-          <b>Formula:</b> <code>Capacity = UPH × Efficiency × WorkingHours</code> | <code>Load = Σ INPUT</code> | <code>Util% = Load / Capacity</code> capped at 100%
+        <div style="padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#475569;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div><b>Formula:</b> <code>Capacity = UPH × Eff × WH</code> | <code>Load = Σ INPUT</code> | <code>Util% = Load / Capacity</code> capped at 100%</div>
+          <div style="font-size:11px">💡 Supports: separate files, one-click multi-file, zip, demo — like I/O Report</div>
         </div>
-        <div class="util-upload-grid">
-          <div class="util-upload-card">
-            <div class="util-upload-label">Gated Version</div>
-            <div class="util-upload-hint">Calendar + Schedule</div>
-            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-              <div><label style="font-size:11px">Calendar</label><br><input type="file" id="file-gated-cal" accept=".xlsx"></div>
-              <div><label style="font-size:11px">Schedule</label><br><input type="file" id="file-gated-sched" accept=".xlsx"></div>
-            </div>
-            <div style="margin-top:8px"><button class="util-btn" id="btn-upload-gated">Upload Gated</button> <span id="msg-gated" style="font-size:11px;color:#64748b"></span></div>
+
+        <!-- Quick Upload like I/O Report -->
+        <div class="util-upload-card" style="border:2px dashed #8b5cf6;background:#faf5ff;margin-bottom:12px">
+          <div class="util-upload-label">⚡ Quick Upload <span style="font-size:10px;background:#8b5cf6;color:#fff;padding:1px 6px;border-radius:8px">Recommended</span></div>
+          <div class="util-upload-hint">One-click: select 2 files (calendar+schedule) for gated, or 4 files for gated+ungated, or a .zip</div>
+          <input type="file" id="input-quick" accept=".xlsx,.zip" multiple style="margin:6px 0">
+          <div id="fname-quick" style="font-size:11px;color:#6d28d9;margin-top:6px;min-height:16px"></div>
+          <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
+            <button class="util-btn" id="btn-quick-upload" disabled>▶ Upload & Analyze</button>
+            <span id="msg-quick" style="font-size:11px;color:#64748b"></span>
           </div>
-          <div class="util-upload-card">
+        </div>
+
+        <div style="font-size:11px;color:#94a3b8;margin:8px 0;text-align:center">— or upload separately —</div>
+
+        <div class="util-upload-grid">
+          <div class="util-upload-card" id="card-gated">
+            <div class="util-upload-label">Gated Version</div>
+            <div class="util-upload-hint">Supports separate: calendar alone or schedule alone</div>
+            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+              <div><label style="font-size:11px">Calendar (工作日历快照.xlsx)</label><br><input type="file" id="file-gated-cal" accept=".xlsx"></div>
+              <div><label style="font-size:11px">Schedule (排产结果表.xlsx)</label><br><input type="file" id="file-gated-sched" accept=".xlsx"></div>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
+              <button class="util-btn" id="btn-upload-gated-cal" style="padding:3px 8px;font-size:11px">Upload Calendar Only</button>
+              <button class="util-btn" id="btn-upload-gated-sched" style="padding:3px 8px;font-size:11px">Upload Schedule Only</button>
+              <button class="util-btn" id="btn-upload-gated">Upload Both</button>
+            </div>
+            <div style="margin-top:6px"><span id="msg-gated" style="font-size:11px;color:#64748b"></span></div>
+            <div id="status-gated-files" style="font-size:10px;color:#059669;margin-top:4px">${filesFound.includes('gated')? '✅ Files present for gated (truly ready only after compute)' : 'No files for gated'}</div>
+          </div>
+          <div class="util-upload-card" id="card-ungated">
             <div class="util-upload-label">Ungated (optional)</div>
-            <div class="util-upload-hint">For compare</div>
+            <div class="util-upload-hint">For compare — separate supported</div>
             <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
               <div><label style="font-size:11px">Calendar</label><br><input type="file" id="file-ungated-cal" accept=".xlsx"></div>
               <div><label style="font-size:11px">Schedule</label><br><input type="file" id="file-ungated-sched" accept=".xlsx"></div>
             </div>
-            <div style="margin-top:8px"><button class="util-btn" id="btn-upload-ungated">Upload Ungated</button> <span id="msg-ungated" style="font-size:11px;color:#64748b"></span></div>
+            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
+              <button class="util-btn" id="btn-upload-ungated-cal" style="padding:3px 8px;font-size:11px">Upload Calendar Only</button>
+              <button class="util-btn" id="btn-upload-ungated-sched" style="padding:3px 8px;font-size:11px">Upload Schedule Only</button>
+              <button class="util-btn" id="btn-upload-ungated">Upload Both</button>
+            </div>
+            <div style="margin-top:6px"><span id="msg-ungated" style="font-size:11px;color:#64748b"></span></div>
+            <div id="status-ungated-files" style="font-size:10px;color:#059669;margin-top:4px">${filesFound.includes('ungated')? '✅ Files present for ungated' : 'No files for ungated'}</div>
           </div>
         </div>
         <div style="text-align:center;margin:12px 0">
-          <button class="util-btn util-btn-outline" id="btn-load-demo">📦 Load Demo (IVY20260721Gated)</button>
+          <button class="util-btn util-btn-outline" id="btn-load-demo">📦 Load Demo (IVY20260721Gated) — One-click</button>
           <span id="msg-demo" style="font-size:11px;margin-left:8px;color:#64748b"></span>
         </div>
       </div>
@@ -427,34 +462,106 @@
     setupVersionTypeDropdown();
     setupLineDropdown(lines);
 
-    // Upload handlers
+    // Upload handlers - support separate and one-click like I/O Report
     const bindUpload = (gated)=>{
       const calId = gated ? 'file-gated-cal' : 'file-ungated-cal';
       const schedId = gated ? 'file-gated-sched' : 'file-ungated-sched';
-      const btnId = gated ? 'btn-upload-gated' : 'btn-upload-ungated';
+      const btnBothId = gated ? 'btn-upload-gated' : 'btn-upload-ungated';
+      const btnCalOnlyId = gated ? 'btn-upload-gated-cal' : 'btn-upload-ungated-cal';
+      const btnSchedOnlyId = gated ? 'btn-upload-gated-sched' : 'btn-upload-ungated-sched';
       const msgId = gated ? 'msg-gated' : 'msg-ungated';
       const ver = gated ? 'gated' : 'ungated';
-      document.getElementById(btnId)?.addEventListener('click', async ()=>{
-        const cal = document.getElementById(calId).files[0];
-        const sched = document.getElementById(schedId).files[0];
-        if(!cal || !sched){ alert('Select both calendar and schedule'); return; }
-        const fd = new FormData();
-        fd.append('version', ver);
-        fd.append('calendar', cal);
-        fd.append('schedule', sched);
+
+      const uploadFiles = async (files, message)=>{
         const msg = document.getElementById(msgId);
-        if(msg) msg.textContent='Uploading...';
+        if(msg) msg.textContent = message || 'Uploading...';
         try{
+          const fd = new FormData();
+          files.forEach(f=> fd.append('file', f));
+          // Also append version hint via filename if needed, backend will infer
           const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
           const j = await r.json();
           if(!r.ok) throw new Error(j.error||'upload failed');
-          if(msg) msg.textContent=`✅ ${j.lines} lines`;
-          setTimeout(()=> location.reload(), 800);
-        }catch(e){ if(msg) msg.textContent='❌ '+e.message; }
+          const res = j.results && j.results[ver] ? j.results[ver] : {};
+          if(res.ready){
+            if(msg) msg.textContent = `✅ Ready: ${res.lines||'?'} lines`;
+          }else if(res.partial){
+            if(msg) msg.textContent = `⚠️ Partial: cal=${res.has_calendar} sched=${res.has_schedule} — upload missing to complete`;
+          }else{
+            if(msg) msg.textContent = `✅ Uploaded — ${JSON.stringify(j.results||j)}`;
+          }
+          setTimeout(async ()=>{
+            const st = await checkStatus();
+            document.getElementById('util-status-badge').innerHTML = statusBadgeHTML(st);
+            if(st.loaded) applyPivot();
+          }, 800);
+        }catch(e){ if(document.getElementById(msgId)) document.getElementById(msgId).textContent='❌ '+e.message; }
+      };
+
+      // Both
+      document.getElementById(btnBothId)?.addEventListener('click', async ()=>{
+        const cal = document.getElementById(calId).files[0];
+        const sched = document.getElementById(schedId).files[0];
+        if(!cal && !sched){ alert('Select calendar and/or schedule'); return; }
+        const files = [];
+        if(cal) files.push(cal);
+        if(sched) files.push(sched);
+        uploadFiles(files, 'Uploading both...');
+      });
+      // Calendar only
+      document.getElementById(btnCalOnlyId)?.addEventListener('click', async ()=>{
+        const cal = document.getElementById(calId).files[0];
+        if(!cal){ alert('Select calendar file'); return; }
+        uploadFiles([cal], 'Uploading calendar only (partial)...');
+      });
+      // Schedule only
+      document.getElementById(btnSchedOnlyId)?.addEventListener('click', async ()=>{
+        const sched = document.getElementById(schedId).files[0];
+        if(!sched){ alert('Select schedule file'); return; }
+        uploadFiles([sched], 'Uploading schedule only (partial)...');
       });
     };
     bindUpload(true);
     bindUpload(false);
+
+    // Quick Upload (one-click) like I/O Report
+    const quickInput = document.getElementById('input-quick');
+    const quickBtn = document.getElementById('btn-quick-upload');
+    const quickMsg = document.getElementById('msg-quick');
+    const fnameQuick = document.getElementById('fname-quick');
+    let quickFiles = [];
+    if(quickInput){
+      quickInput.addEventListener('change', ()=>{
+        quickFiles = Array.from(quickInput.files||[]);
+        if(quickFiles.length===0){
+          if(fnameQuick) fnameQuick.textContent='';
+          if(quickBtn) quickBtn.disabled=true;
+          return;
+        }
+        const names = quickFiles.map(f=>f.name).join(', ');
+        if(fnameQuick) fnameQuick.textContent = `✓ ${quickFiles.length} files: ${names}`;
+        if(quickBtn) quickBtn.disabled=false;
+      });
+    }
+    quickBtn?.addEventListener('click', async ()=>{
+      if(quickFiles.length===0){ alert('Select files or zip first'); return; }
+      if(quickMsg) quickMsg.textContent='Uploading... (supports zip & multi)';
+      try{
+        const fd = new FormData();
+        quickFiles.forEach(f=> fd.append('file', f));
+        const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
+        const j = await r.json();
+        if(!r.ok) throw new Error(j.error||'upload failed');
+        if(quickMsg) quickMsg.textContent = `✅ ${JSON.stringify(j.results)} — Ready: ${j.saved_versions||''}`;
+        setTimeout(async ()=>{
+          const st = await checkStatus();
+          document.getElementById('util-status-badge').innerHTML = statusBadgeHTML(st);
+          if(st.loaded) applyPivot();
+        }, 800);
+      }catch(e){
+        if(quickMsg) quickMsg.textContent='❌ '+e.message;
+      }
+    });
 
     document.getElementById('btn-load-demo')?.addEventListener('click', async ()=>{
       const msg = document.getElementById('msg-demo');
