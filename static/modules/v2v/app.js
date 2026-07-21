@@ -10,7 +10,7 @@ const V2V_TABLE_DEFS = {
   line: {name: 'Line Master', cat: 'input'},
   calendar: {name: 'Line Calendar', cat: 'input'},
   plan_config: {name: 'Plan Config', cat: 'input'},
-  plan_input: {name: 'Plan Input', cat: 'input'},
+  plan_input: {name: 'Plan Input', cat: 'output'},
   plan_output: {name: 'Plan Output', cat: 'output'},
   balance: {name: 'Balance', cat: 'output'},
 };
@@ -340,24 +340,126 @@ async function exportV2VHtmlReport() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting HTML...'; }
 
   try {
-    const resp = await fetch('/v2v/api/export/html', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({job_id: v2vState.jobId})
-    });
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.error || `HTTP ${resp.status}`);
+    // Try to get current V2V tab HTML for full UI export
+    const v2vModule = document.getElementById('module-v2v');
+    const v2vHtml = v2vModule ? v2vModule.outerHTML : document.body.innerHTML;
+
+    // Fetch CSS for inlining (global + v2v)
+    let globalCss = '', v2vCss = '', planMergeCss = '';
+    try {
+      const resp1 = await fetch('/static/global/style.css');
+      globalCss = await resp1.text();
+    } catch(e) { console.log('Failed to fetch global css', e); }
+    try {
+      const resp2 = await fetch('/static/modules/v2v/style.css');
+      v2vCss = await resp2.text();
+    } catch(e) { console.log('Failed to fetch v2v css', e); }
+    try {
+      const resp3 = await fetch('/static/modules/plan_merge/style.css');
+      planMergeCss = await resp3.text();
+    } catch(e) {}
+
+    // Get current comparison data for embedding
+    let jobData = null;
+    try {
+      const jobResp = await fetch(`/v2v/api/job/${v2vState.jobId}`);
+      jobData = await jobResp.json();
+    } catch(e) { console.log('Failed to fetch job data', e); }
+
+    const previousName = v2vState.versionA ? v2vState.versionA.name : 'Previous';
+    const latestName = v2vState.versionB ? v2vState.versionB.name : 'Latest';
+    const generatedAt = new Date().toLocaleString();
+
+    // Build standalone HTML with embedded UI + data
+    const fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V2V Comparison - ${esc(previousName)} vs ${esc(latestName)} - Full UI Export</title>
+<style>
+${globalCss}
+${v2vCss}
+${planMergeCss}
+body { background: #f8fafc; padding: 20px; }
+.export-header { background: #0f172a; color: white; padding: 16px; border-radius: 8px; margin-bottom: 20px; }
+.export-header h1 { margin: 0; font-size: 20px; }
+.export-header .meta { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+.v2v-section { margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="export-header">
+<h1>🔍 V2V Comparison - Full UI Export</h1>
+<div class="meta">
+<div>Previous Version: ${esc(previousName)} | Latest Version: ${esc(latestName)}</div>
+<div>Generated: ${generatedAt} | Job ID: ${v2vState.jobId}</div>
+<div>This is a standalone export of the V2V Comparison tab at time of export. Contains embedded UI and data.</div>
+</div>
+</div>
+
+<div style="background:white;padding:16px;border-radius:8px;margin-bottom:20px;border:2px solid #0f172a">
+<h3>📋 Embedded Comparison Data (JSON)</h3>
+<p style="font-size:12px;color:#64748b">This section contains the raw comparison data used to generate the UI below. For developers.</p>
+<pre style="background:#f8fafc;padding:12px;border-radius:4px;max-height:300px;overflow:auto;font-size:11px">${esc(JSON.stringify({jobId: v2vState.jobId, previous: previousName, latest: latestName, summary: jobData ? jobData.summary : {}, overall: jobData ? jobData.overall : {}}, null, 2))}</pre>
+</div>
+
+${v2vHtml}
+
+<script>
+// Embedded data for offline viewing
+window.EMBEDDED_V2V_DATA = ${JSON.stringify({jobId: v2vState.jobId, previous: previousName, latest: latestName, jobData: jobData, v2vState: {activeTable: v2vState.activeTable, granularity: v2vState.granularity}}, null, 2)};
+// Disable interactive elements that require server in exported version
+document.addEventListener('DOMContentLoaded', () => {
+  // Make all buttons that would call server show message
+  const serverBtns = document.querySelectorAll('#v2v-btn-load-server, #v2v-btn-refresh');
+  serverBtns.forEach(btn => {
+    if (btn) {
+      btn.disabled = true;
+      btn.title = 'Disabled in exported HTML - this is a static snapshot';
+      btn.style.opacity = '0.5';
     }
-    const blob = await resp.blob();
+  });
+  // Add banner
+  const banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f59e0b;color:white;padding:8px;text-align:center;font-size:12px;z-index:10000';
+  banner.textContent = '📄 This is an exported static snapshot of V2V Comparison tab at ' + new Date().toLocaleString() + ' - Some interactive features requiring server are disabled';
+  document.body.prepend(banner);
+});
+</script>
+</body>
+</html>`;
+
+    const blob = new Blob([fullHtml], {type: 'text/html'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `V2V_Report_${v2vState.jobId.slice(0,6)}.html`;
+    a.download = `V2V_FullUI_${previousName}_vs_${latestName}_${new Date().toISOString().slice(0,10)}.html`.replace(/[^a-zA-Z0-9._-]/g, '_');
     a.click();
     URL.revokeObjectURL(a.href);
+
   } catch(e) {
-    alert('Export HTML failed: ' + e.message);
-    console.error(e);
+    console.error('Export HTML failed, falling back to server export', e);
+    // Fallback to server-side export
+    try {
+      const resp = await fetch('/v2v/api/export/html', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({job_id: v2vState.jobId})
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `V2V_Report_${v2vState.jobId.slice(0,6)}.html`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch(e2) {
+      alert('Export HTML failed: ' + e2.message);
+      console.error(e2);
+    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = origText || '📄 Export HTML Report'; }
   }
@@ -611,7 +713,7 @@ function renderDetailTabs(data) {
   // Group by Input/Output
   const groups = {input: [], output: []};
   for (const [key, s] of Object.entries(summary)) {
-    if (key === 'actual_io') continue; // removed
+    if (key === 'actual_io') continue;
     const def = V2V_TABLE_DEFS[key] || {name:key, cat:'input'};
     const cat = def.cat || 'input';
     if (!groups[cat]) groups[cat] = [];
@@ -620,26 +722,28 @@ function renderDetailTabs(data) {
 
   let html = '';
 
-  // Input group
+  // Input group - first row
   if (groups.input && groups.input.length > 0) {
-    html += '<span style="font-size:12px;font-weight:600;color:#0f172a;margin-right:8px;padding:6px 0">Input:</span>';
+    html += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-bottom:8px"><span style="font-size:12px;font-weight:600;color:#0f172a;margin-right:8px;min-width:50px">Input:</span>';
     for (const [key, s] of groups.input) {
       const def = V2V_TABLE_DEFS[key] || {name:key};
       const totalDiff = (s.added||0)+(s.deleted||0)+(s.modified||0)+(s.inconsistent||0);
       const hasDiff = totalDiff>0;
       html += `<button class="v2v-detail-tab ${v2vState.activeTable===key?'active':''} ${hasDiff?'has-diff':''}" data-table="${key}" onclick="selectV2VTable('${key}')">${def.name} <span class="count-badge">${totalDiff}</span></button>`;
     }
+    html += '</div>';
   }
 
-  // Output group
+  // Output group - second row
   if (groups.output && groups.output.length > 0) {
-    html += '<span style="font-size:12px;font-weight:600;color:#0f172a;margin-left:16px;margin-right:8px;padding:6px 0">Output:</span>';
+    html += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px"><span style="font-size:12px;font-weight:600;color:#0f172a;margin-right:8px;min-width:50px">Output:</span>';
     for (const [key, s] of groups.output) {
       const def = V2V_TABLE_DEFS[key] || {name:key};
       const totalDiff = (s.added||0)+(s.deleted||0)+(s.modified||0);
       const hasDiff = totalDiff>0;
       html += `<button class="v2v-detail-tab ${v2vState.activeTable===key?'active':''} ${hasDiff?'has-diff':''}" data-table="${key}" onclick="selectV2VTable('${key}')">${def.name} <span class="count-badge">${totalDiff}</span></button>`;
     }
+    html += '</div>';
   }
 
   tabsEl.innerHTML = html;
@@ -837,9 +941,9 @@ function renderTimeHorizontal(records, tableName, rowKeyFn, timeKeyFn, valueFn) 
       return null;
     }
 
-    let html = `<div style="font-size:12px;color:#64748b;margin-bottom:8px">Time Horizontal: ${rowKeys.length} rows × ${allTimes.length} time buckets | Rows: ${tableName} key | Columns: Time (Month→Week→Daily→Shift order) | Values: Diff (A/B)</div>`;
+    let html = `<div style="font-size:12px;color:#64748b;margin-bottom:8px">Time Horizontal: ${rowKeys.length} rows × ${allTimes.length} time buckets | Rows: ${tableName} key | Columns: Time (Month→Week→Daily→Shift order) | Values: Diff (A/B) | Change Type: <span class="v2v-change-badge add">ADD</span> <span class="v2v-change-badge del">DEL</span> <span class="v2v-change-badge mod">MODIFY</span></div>`;
     html += '<div class="v2v-table-wrapper" style="max-height:500px"><table class="v2v-table"><thead><tr>';
-    html += '<th style="min-width:180px;left:0;position:sticky;z-index:20;background:#1e293b">Row / Time</th>';
+    html += '<th style="min-width:180px;left:0;position:sticky;z-index:20;background:#1e293b">Row / Time (SKU Level)</th>';
     for (const t of allTimes) {
       html += `<th style="min-width:100px;font-size:11px">${esc(t.slice(0,10))}</th>`;
     }
@@ -853,11 +957,25 @@ function renderTimeHorizontal(records, tableName, rowKeyFn, timeKeyFn, valueFn) 
         if (!rec) {
           html += '<td style="background:#f8fafc"></td>';
         } else {
-          const diff = rec.diff || rec.delta || 0;
-          const a = rec.value_a || rec.PLAN_VALUE_A || rec.ACTUALWEEKVALUE_A || rec.BALANCE_QTY_A || 0;
-          const b = rec.value_b || rec.PLAN_VALUE_B || rec.ACTUALWEEKVALUE_B || rec.BALANCE_QTY_B || 0;
+          // Compute diff if not present
+          let diff = rec.diff;
+          if (diff === undefined || diff === null) diff = rec.delta;
+          if (diff === undefined || diff === null) {
+            const aVal = rec.value_a ?? rec.PLAN_VALUE_A ?? rec.ACTUALWEEKVALUE_A ?? rec.BALANCE_QTY_A ?? rec.ACTUALWEEKVALUE_A ?? 0;
+            const bVal = rec.value_b ?? rec.PLAN_VALUE_B ?? rec.ACTUALWEEKVALUE_B ?? rec.BALANCE_QTY_B ?? 0;
+            // Handle null/undefined
+            const aNum = (aVal === null || aVal === undefined || isNaN(aVal)) ? 0 : Number(aVal);
+            const bNum = (bVal === null || bVal === undefined || isNaN(bVal)) ? 0 : Number(bVal);
+            diff = bNum - aNum;
+          }
+          const a = rec.value_a ?? rec.PLAN_VALUE_A ?? rec.ACTUALWEEKVALUE_A ?? rec.BALANCE_QTY_A ?? rec.ACTUALWEEKVALUE_A ?? rec.A ?? 0;
+          const b = rec.value_b ?? rec.PLAN_VALUE_B ?? rec.ACTUALWEEKVALUE_B ?? rec.BALANCE_QTY_B ?? rec.ACTUALWEEKVALUE_B ?? rec.B ?? 0;
+          const aNum = (a === null || a === undefined || isNaN(a)) ? 0 : a;
+          const bNum = (b === null || b === undefined || isNaN(b)) ? 0 : b;
+          const ct = rec.change_type || (diff !== 0 ? (aNum===0 ? 'ADD' : bNum===0 ? 'DEL' : 'MODIFY') : 'UNCHANGED');
+          const ctLower = ct.includes('ADD') ? 'add' : ct.includes('DEL') ? 'del' : 'mod';
           const cls = diff > 0 ? 'num-pos' : diff < 0 ? 'num-neg' : '';
-          html += `<td class="data-cell ${cls}" style="font-size:11px;text-align:center;min-width:100px">${a}/${b}<br><small style="color:${diff>0?'#16a34a':diff<0?'#dc2626':'#64748b'}">${diff>0?'+':''}${diff}</small></td>`;
+          html += `<td class="data-cell ${cls}" style="font-size:11px;text-align:center;min-width:100px"><span class="v2v-change-badge ${ctLower}" style="font-size:9px">${ct}</span><br>${aNum}/${bNum}<br><small style="color:${diff>0?'#16a34a':diff<0?'#dc2626':'#64748b'}">${diff>0?'+':''}${diff}</small></td>`;
         }
       }
       html += '</tr>';

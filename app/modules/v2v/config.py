@@ -108,11 +108,11 @@ TABLE_DEFS = {
         "icon": "📦",
         "supports_granularity": True
     },
-    # Aggregated Input (virtual, for Plan Input card similar to Plan Output)
+    # Aggregated Input (virtual, but belongs to Output per user request)
     "plan_input": {
         "keywords": ["plan_input", "input_summary", "inputs"],
         "display_name": "Plan Input",
-        "category": "input",
+        "category": "output",
         "key_fields": ["SKU", "PLAN_DATE"],
         "compare_fields": ["PLAN_VALUE", "FCST_QTY", "SUPPLY_QTY"],
         "icon": "📥",
