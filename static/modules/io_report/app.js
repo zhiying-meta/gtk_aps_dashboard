@@ -365,71 +365,152 @@ function attachUploadLogic(isCompact){
       setTimeout(()=>{ renderUploadPage(); }, 800);
     }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; }
   });
-  document.getElementById('btnDownloadStaticIO_'+suffix)?.addEventListener('click', ()=>{
+  document.getElementById('btnDownloadStaticIO_'+suffix)?.addEventListener('click', async ()=>{
+    const btn = document.getElementById('btnDownloadStaticIO_'+suffix);
+    const origText = btn ? btn.textContent : '';
     try{
-      const reportContent = document.getElementById('ioReportContent')?.innerHTML || document.getElementById('io-main-section')?.innerHTML || '<div>No data loaded yet — upload first</div>';
+      if(btn){ btn.textContent='⏳ Preparing full BI report...'; btn.disabled=true; }
+      const groups = ['FG','GB','FR','LT','RT'];
+      const colDims = ['shift','day','week','month'];
+      const status = await (async()=>{ try{ const r=await fetch('/api/io/status'); return await r.json(); }catch{ return {}; } })();
+      const allEmbedded = {status: status, groups: {}};
+      for(const g of groups){
+        allEmbedded.groups[g] = {};
+        for(const cd of colDims){
+          try{
+            const metaRes = await fetch(`/api/io/meta?group=${encodeURIComponent(g)}&col_dim=${cd}`);
+            const meta = await metaRes.json();
+            const reportsRes = await fetch(`/api/io/reports?group=${encodeURIComponent(g)}&dim=LINE_CODE&col_dim=${cd}`);
+            const reportsData = await reportsRes.json();
+            const reportsPN = await fetch(`/api/io/reports?group=${encodeURIComponent(g)}&dim=ITEM_NO&col_dim=${cd}`).then(r=>r.json()).catch(()=>({}));
+            const reportsStyle = await fetch(`/api/io/reports?group=${encodeURIComponent(g)}&dim=STYLE&col_dim=${cd}`).then(r=>r.json()).catch(()=>({}));
+            allEmbedded.groups[g][cd] = {meta: meta, reportsLine: reportsData, reportsPN: reportsPN, reportsStyle: reportsStyle};
+          }catch(e){}
+        }
+      }
       const statusBadge = document.getElementById('ioMainStatusBadge')?.innerHTML || document.getElementById('ioStatusBadge_'+suffix)?.innerHTML || '';
       const now = new Date().toLocaleString();
       const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>I/O Report - Static Interactive - ${now}</title>
+<title>I/O Report - Static BI Full - ${now}</title>
 <style>
 body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}
 h1{font-size:18px;color:#1e293b}
 .sub{font-size:11px;color:#64748b;margin-bottom:8px}
 .status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
+.tabs{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}
+.tab{padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:12px}
+.tab.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
 .filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .filter-group{display:flex;flex-direction:column;gap:4px;min-width:140px}
 .filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
-.filter-group input{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
+.filter-group input, .filter-group select{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
 .btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
 .btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
-.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:80vh}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:70vh}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
 th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
 td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}
-td.frozen{position:sticky;left:0;background:#fff;z-index:1;min-width:80px;text-align:left;font-weight:500}
+td.frozen{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}
 </style></head><body>
-<h1>📈 I/O Report — Static Interactive</h1>
-<div class="sub">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM} | Filters: Line=${filterVals.lineCode||'All'} PN=${filterVals.itemNo||'All'} Style=${filterVals.style||'All'} | Flexible filtering works offline</div>
-<div class="status"><b>Status:</b> ${statusBadge}</div>
+<h1>📈 I/O Report — Static BI Report (All Tabs & Flexible Dims)</h1>
+<div class="sub">Generated: ${now} | All groups (FG/GB/FR/LT/RT) and col dims (Shift/Day/Week/Month) embedded | Flexible filtering works offline — full BI</div>
+<div class="status"><b>Status:</b> ${statusBadge} | Embedded groups: ${Object.keys(allEmbedded.groups).join(', ')}</div>
+<div class="tabs" id="groupTabs">${['FG','GB','FR','LT','RT'].map(g=>'<button class="tab '+(g===currentGroup?'active':'')+'" data-group="'+g+'">'+g+'</button>').join('')}</div>
+<div class="tabs" id="colDimTabs">${['shift','day','week','month'].map(cd=>'<button class="tab '+(cd===COL_DIM?'active':'')+'" data-coldim="'+cd+'">'+cd+'</button>').join('')}</div>
+<div class="tabs" id="rowDimTabs"><button class="tab active" data-rowdim="LINE_CODE">Line</button><button class="tab" data-rowdim="ITEM_NO">PN</button><button class="tab" data-rowdim="STYLE">Style</button></div>
 <div class="filters">
-  <div class="filter-group"><label>Search (Line / PN / Style / any text)</label><input type="text" id="f-search" placeholder="e.g. Line01, FG001, Style-A"></div>
-  <div class="filter-group"><label>Group</label><select id="f-group"><option>FG</option><option>GB</option><option>FR</option><option>LT</option><option>RT</option></select></div>
-  <div class="filter-group"><label>Col Dim</label><select id="f-coldim"><option>shift</option><option selected>day</option><option>week</option><option>month</option></select></div>
+  <div class="filter-group"><label>Search Line</label><input type="text" id="f-line" placeholder="Line filter"></div>
+  <div class="filter-group"><label>Search PN</label><input type="text" id="f-pn" placeholder="PN filter"></div>
+  <div class="filter-group"><label>Search Style</label><input type="text" id="f-style" placeholder="Style filter"></div>
+  <div class="filter-group"><label>Search Any</label><input type="text" id="f-search" placeholder="Any text"></div>
   <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
 </div>
-<div id="ioReportContent">${reportContent}</div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static interactive snapshot from I/O Report dashboard. Filtering works offline via embedded data. Open directly in browser and share.</div>
+<div id="static-all-content"></div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static BI report from I/O dashboard. All tabs (FG/GB/FR/LT/RT) and flexible dims (Line/PN/Style, Column Shift/Day/Week/Month) preserved with embedded numbers. Filtering works offline. Open directly and share.</div>
 <script>
+const STATIC_DATA = ${JSON.stringify(allEmbedded).replace(/</g,'\\u003c')};
+let curGroup = '${currentGroup}';
+let curColDim = '${COL_DIM}';
+let curRowDim = 'LINE_CODE';
+function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+function renderReports(){
+  const groupData = STATIC_DATA.groups[curGroup] && STATIC_DATA.groups[curGroup][curColDim];
+  if(!groupData){ document.getElementById('static-all-content').innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">No data for '+curGroup+' / '+curColDim+'</div>'; return; }
+  let reportsData;
+  if(curRowDim==='ITEM_NO') reportsData = groupData.reportsPN;
+  else if(curRowDim==='STYLE') reportsData = groupData.reportsStyle;
+  else reportsData = groupData.reportsLine;
+  if(!reportsData || Object.keys(reportsData).length===0){
+    document.getElementById('static-all-content').innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">No data for '+curGroup+' / '+curColDim+' / '+curRowDim+'</div>';
+    return;
+  }
+  let html='';
+  const reportOrder = ['daily_input','daily_output','daily_checkin','daily_checkout','cum_input','cum_output','cum_checkin','cum_checkout','balance'];
+  const reportNames = {daily_input:'Daily Input',daily_output:'Daily Output',daily_checkin:'Daily Checkin',daily_checkout:'Daily Checkout',cum_input:'Cum Input',cum_output:'Cum Output',cum_checkin:'Cum Checkin',cum_checkout:'Cum Checkout',balance:'BOH'};
+  reportOrder.forEach(rt=>{
+    const data = reportsData[rt];
+    if(!data || !data.rows || data.rows.length===0) return;
+    const cols = data.columns || [];
+    const rows = data.rows || [];
+    html += '<div class="table-wrapper" style="margin-bottom:16px"><div style="font-weight:600;font-size:12px;margin:6px">'+esc(reportNames[rt]||rt)+' — '+rows.length+' rows × '+cols.length+' cols</div><table><thead><tr>';
+    html += '<th class="frozen" style="left:0;min-width:120px">'+esc(curRowDim)+'</th><th class="frozen divider-col" style="left:120px;min-width:5px"></th>';
+    cols.forEach(c=>{ html += '<th>'+esc(c)+'</th>'; });
+    html += '</tr></thead><tbody>';
+    rows.slice(0,500).forEach(r=>{
+      const dimVal = r[curRowDim] || r['LINE_CODE'] || r['ITEM_NO'] || r['STYLE'] || '';
+      html += '<tr><td class="frozen" style="left:0;min-width:120px">'+esc(String(dimVal))+'</td><td class="frozen divider-col" style="left:120px"></td>';
+      cols.forEach(c=>{ const v=r[c]; html += '<td>'+(v!=null?Number(v).toLocaleString():'')+'</td>'; });
+      html += '</tr>';
+    });
+    if(rows.length>500) html += '<tr><td colspan="999" style="text-align:center;color:#94a3b8">... '+rows.length+' total rows, showing first 500 for static ...</td></tr>';
+    html += '</tbody></table></div>';
+  });
+  document.getElementById('static-all-content').innerHTML = html || '<div style="text-align:center;padding:20px;color:#94a3b8">No data</div>';
+  applyFilter();
+}
 function applyFilter(){
+  const lineF = document.getElementById('f-line').value.toLowerCase();
+  const pnF = document.getElementById('f-pn').value.toLowerCase();
+  const styleF = document.getElementById('f-style').value.toLowerCase();
   const search = document.getElementById('f-search').value.toLowerCase();
-  const content = document.getElementById('ioReportContent');
+  const content = document.getElementById('static-all-content');
   if(!content) return;
   let visible=0, total=0;
   content.querySelectorAll('tr').forEach(tr=>{
-    if(tr.querySelector('th')) return; // skip header
+    if(tr.querySelector('th')) return;
     total++;
     const text = tr.textContent.toLowerCase();
-    const show = !search || text.includes(search);
+    let show = true;
+    if(lineF && !text.includes(lineF)) show=false;
+    if(pnF && !text.includes(pnF)) show=false;
+    if(styleF && !text.includes(styleF)) show=false;
+    if(search && !text.includes(search)) show=false;
     tr.style.display = show ? '' : 'none';
     if(show) visible++;
   });
   document.getElementById('f-count').textContent = visible+' / '+total+' rows';
 }
+document.querySelectorAll('#groupTabs .tab').forEach(b=>{ b.addEventListener('click', ()=>{ document.querySelectorAll('#groupTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curGroup=b.dataset.group; renderReports(); }); });
+document.querySelectorAll('#colDimTabs .tab').forEach(b=>{ b.addEventListener('click', ()=>{ document.querySelectorAll('#colDimTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curColDim=b.dataset.coldim; renderReports(); }); });
+document.querySelectorAll('#rowDimTabs .tab').forEach(b=>{ b.addEventListener('click', ()=>{ document.querySelectorAll('#rowDimTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curRowDim=b.dataset.rowdim; renderReports(); }); });
 document.getElementById('f-apply')?.addEventListener('click', applyFilter);
-document.getElementById('f-clear')?.addEventListener('click', ()=>{ document.getElementById('f-search').value=''; applyFilter(); });
+document.getElementById('f-clear')?.addEventListener('click', ()=>{ document.getElementById('f-line').value=''; document.getElementById('f-pn').value=''; document.getElementById('f-style').value=''; document.getElementById('f-search').value=''; applyFilter(); });
 document.getElementById('f-search')?.addEventListener('input', applyFilter);
-setTimeout(applyFilter, 200);
+document.getElementById('f-line')?.addEventListener('input', applyFilter);
+document.getElementById('f-pn')?.addEventListener('input', applyFilter);
+document.getElementById('f-style')?.addEventListener('input', applyFilter);
+renderReports();
 </script>
 </body></html>`;
       const blob = new Blob([staticHtml], {type:'text/html'});
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'io_report_static_interactive_'+ new Date().toISOString().slice(0,10) + '.html';
+      a.download = 'io_report_static_fullBI_'+ new Date().toISOString().slice(0,10) + '.html';
       a.click();
       setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
-    }catch(e){ alert('Download static HTML failed: '+e.message); }
+    }catch(e){ alert('Download static HTML failed: '+e.message); console.error(e); }
+    finally{ if(btn){ btn.textContent=origText; btn.disabled=false; } }
   });
   if(isCompact) document.getElementById('toggleUploadBar')?.addEventListener('click', ()=>{ const c=document.getElementById('uploadBarContent'); if(!c) return; const hid=c.style.display==='none'; c.style.display=hid?'block':'none'; document.getElementById('toggleUploadBar').textContent=hid?'▼ Collapse':'▶ Expand'; });
 }
@@ -563,60 +644,154 @@ function initReportsPage(){
       renderUploadPage();
     }catch(e){ alert('❌ Clear failed: '+e.message); }
   });
-  document.getElementById('io-download-static')?.addEventListener('click', ()=>{
+  document.getElementById('io-download-static')?.addEventListener('click', async ()=>{
+    const btn = document.getElementById('io-download-static');
+    const origText = btn ? btn.textContent : '';
     try{
+      if(btn){ btn.textContent='⏳ Preparing BI report...'; btn.disabled=true; }
+      // Fetch all groups and col dims for full BI report
+      const groups = ['FG','GB','FR','LT','RT'];
+      const colDims = ['shift','day','week','month'];
+      const status = await (async()=>{ try{ const r=await fetch('/api/io/status'); return await r.json(); }catch{ return {}; } })();
+      const allEmbedded = {status: status, groups: {}};
+      // Fetch for each group/colDim/dim
+      for(const g of groups){
+        allEmbedded.groups[g] = {};
+        for(const cd of colDims){
+          try{
+            const metaRes = await fetch(`/api/io/meta?group=${encodeURIComponent(g)}&col_dim=${cd}`);
+            const meta = await metaRes.json();
+            const reportsRes = await fetch(`/api/io/reports?group=${encodeURIComponent(g)}&dim=LINE_CODE&col_dim=${cd}`);
+            const reportsData = await reportsRes.json();
+            // Also fetch for ITEM_NO and STYLE dims for flexible row dimensions
+            const reportsPN = await fetch(`/api/io/reports?group=${encodeURIComponent(g)}&dim=ITEM_NO&col_dim=${cd}`).then(r=>r.json()).catch(()=>({}));
+            const reportsStyle = await fetch(`/api/io/reports?group=${encodeURIComponent(g)}&dim=STYLE&col_dim=${cd}`).then(r=>r.json()).catch(()=>({}));
+            allEmbedded.groups[g][cd] = {meta: meta, reportsLine: reportsData, reportsPN: reportsPN, reportsStyle: reportsStyle};
+          }catch(e){ /* ignore */ }
+        }
+      }
       const reportContent = document.getElementById('ioReportContent')?.innerHTML || '<div>No data</div>';
       const statusBadge = document.getElementById('ioMainStatusBadge')?.innerHTML || '';
       const now = new Date().toLocaleString();
       const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>I/O Report - Static Interactive - ${now}</title>
+<title>I/O Report - Static BI - ${now}</title>
 <style>
 body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}
 h1{font-size:18px;color:#1e293b}
 .sub{font-size:11px;color:#64748b;margin-bottom:8px}
 .status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
+.tabs{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}
+.tab{padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:12px}
+.tab.active{background:#3b82f6;color:#fff;border-color:#3b82f6}
 .filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .filter-group{display:flex;flex-direction:column;gap:4px;min-width:140px}
 .filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
-.filter-group input{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
+.filter-group input, .filter-group select{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
 .btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
 .btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
-.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:80vh}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:70vh}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
-th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0}
+th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
 td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}
 td.frozen{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}
+.group-content{display:none}.group-content.active{display:block}
+.coldim-content{display:none}.coldim-content.active{display:block}
 </style></head><body>
-<h1>📈 I/O Report — Static Interactive</h1>
-<div class="sub">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM} | Filters: Line=${filterVals.lineCode||'All'} PN=${filterVals.itemNo||'All'} Style=${filterVals.style||'All'} | Flexible filtering works offline</div>
-<div class="status"><b>Status:</b> ${statusBadge}</div>
+<h1>📈 I/O Report — Static BI Report (All Tabs & Flexible Dims)</h1>
+<div class="sub">Generated: ${now} | Flexible filtering: Line/PN/Style, Column (Shift/Day/Week/Month), Row Dimensions | Data embedded at export time</div>
+<div class="status"><b>Status:</b> ${statusBadge} | Embedded groups: ${Object.keys(allEmbedded.groups).join(', ')}</div>
+<div class="tabs" id="groupTabs">${groups.map(g=>'<button class="tab '+(g===currentGroup?'active':'')+'" data-group="'+g+'">'+g+'</button>').join('')}</div>
+<div class="tabs" id="colDimTabs">${colDims.map(cd=>'<button class="tab '+(cd===COL_DIM?'active':'')+'" data-coldim="'+cd+'">'+cd+'</button>').join('')}</div>
+<div class="tabs" id="rowDimTabs"><button class="tab active" data-rowdim="LINE_CODE">Line</button><button class="tab" data-rowdim="ITEM_NO">PN</button><button class="tab" data-rowdim="STYLE">Style</button><button class="tab" data-rowdim="detail">Detail</button></div>
 <div class="filters">
-  <div class="filter-group"><label>Search (Line / PN / Style)</label><input type="text" id="f-search" placeholder="e.g. Line01, FG001"></div>
+  <div class="filter-group"><label>Search Line</label><input type="text" id="f-line" placeholder="Line filter"></div>
+  <div class="filter-group"><label>Search PN</label><input type="text" id="f-pn" placeholder="PN filter"></div>
+  <div class="filter-group"><label>Search Style</label><input type="text" id="f-style" placeholder="Style filter"></div>
+  <div class="filter-group"><label>Search Any</label><input type="text" id="f-search" placeholder="Any text"></div>
   <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
 </div>
-<div id="ioReportContent">${reportContent}</div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static interactive snapshot from I/O Report dashboard. Filtering works offline. Open directly and share.</div>
+<div id="static-all-content"></div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static BI report from I/O dashboard. All tabs (FG/GB/FR/LT/RT) and flexible dims (Line/PN/Style, Column Shift/Day/Week/Month) preserved with embedded numbers. Filtering works offline. Open directly and share.</div>
 <script>
+const STATIC_DATA = ${JSON.stringify(allEmbedded).replace(/</g,'\\u003c')};
+let curGroup = '${currentGroup}';
+let curColDim = '${COL_DIM}';
+let curRowDim = 'LINE_CODE';
+
+function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+function renderReports(){
+  const groupData = STATIC_DATA.groups[curGroup] && STATIC_DATA.groups[curGroup][curColDim];
+  if(!groupData){ document.getElementById('static-all-content').innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">No data for '+curGroup+' / '+curColDim+'</div>'; return; }
+  let reportsData;
+  if(curRowDim==='ITEM_NO') reportsData = groupData.reportsPN;
+  else if(curRowDim==='STYLE') reportsData = groupData.reportsStyle;
+  else reportsData = groupData.reportsLine;
+
+  if(!reportsData || Object.keys(reportsData).length===0){
+    document.getElementById('static-all-content').innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">No data for '+curGroup+' / '+curColDim+' / '+curRowDim+'</div>';
+    return;
+  }
+  let html='';
+  const reportOrder = ['daily_input','daily_output','daily_checkin','daily_checkout','cum_input','cum_output','cum_checkin','cum_checkout','balance'];
+  const reportNames = {daily_input:'Daily Input',daily_output:'Daily Output',daily_checkin:'Daily Checkin',daily_checkout:'Daily Checkout',cum_input:'Cum Input',cum_output:'Cum Output',cum_checkin:'Cum Checkin',cum_checkout:'Cum Checkout',balance:'BOH'};
+  reportOrder.forEach(rt=>{
+    const data = reportsData[rt];
+    if(!data || !data.rows || data.rows.length===0) return;
+    const cols = data.columns || [];
+    const rows = data.rows || [];
+    html += '<div class="table-wrapper" style="margin-bottom:16px"><div style="font-weight:600;font-size:12px;margin:6px">'+esc(reportNames[rt]||rt)+' — '+rows.length+' rows × '+cols.length+' cols</div><table><thead><tr>';
+    html += '<th class="frozen" style="left:0;min-width:120px">'+esc(curRowDim)+'</th><th class="frozen divider-col" style="left:120px;min-width:5px"></th>';
+    cols.forEach(c=>{ html += '<th>'+esc(c)+'</th>'; });
+    html += '</tr></thead><tbody>';
+    rows.slice(0,500).forEach(r=>{
+      const dimVal = r[curRowDim] || r['LINE_CODE'] || r['ITEM_NO'] || r['STYLE'] || '';
+      html += '<tr><td class="frozen" style="left:0;min-width:120px">'+esc(String(dimVal))+'</td><td class="frozen divider-col" style="left:120px"></td>';
+      cols.forEach(c=>{ const v=r[c]; html += '<td>'+(v!=null?Number(v).toLocaleString():'')+'</td>'; });
+      html += '</tr>';
+    });
+    if(rows.length>500) html += '<tr><td colspan="999" style="text-align:center;color:#94a3b8">... '+rows.length+' total rows, showing first 500 for static ...</td></tr>';
+    html += '</tbody></table></div>';
+  });
+  document.getElementById('static-all-content').innerHTML = html || '<div style="text-align:center;padding:20px;color:#94a3b8">No data</div>';
+  applyFilter();
+}
+
 function applyFilter(){
+  const lineF = document.getElementById('f-line').value.toLowerCase();
+  const pnF = document.getElementById('f-pn').value.toLowerCase();
+  const styleF = document.getElementById('f-style').value.toLowerCase();
   const search = document.getElementById('f-search').value.toLowerCase();
-  const content = document.getElementById('ioReportContent');
+  const content = document.getElementById('static-all-content');
   if(!content) return;
   let visible=0, total=0;
   content.querySelectorAll('tr').forEach(tr=>{
     if(tr.querySelector('th')) return;
     total++;
     const text = tr.textContent.toLowerCase();
-    const show = !search || text.includes(search);
+    let show = true;
+    if(lineF && !text.includes(lineF)) show=false;
+    if(pnF && !text.includes(pnF)) show=false;
+    if(styleF && !text.includes(styleF)) show=false;
+    if(search && !text.includes(search)) show=false;
     tr.style.display = show ? '' : 'none';
     if(show) visible++;
   });
   document.getElementById('f-count').textContent = visible+' / '+total+' rows';
 }
+
+document.querySelectorAll('#groupTabs .tab').forEach(b=>{ b.addEventListener('click', ()=>{ document.querySelectorAll('#groupTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curGroup=b.dataset.group; renderReports(); }); });
+document.querySelectorAll('#colDimTabs .tab').forEach(b=>{ b.addEventListener('click', ()=>{ document.querySelectorAll('#colDimTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curColDim=b.dataset.coldim; renderReports(); }); });
+document.querySelectorAll('#rowDimTabs .tab').forEach(b=>{ b.addEventListener('click', ()=>{ document.querySelectorAll('#rowDimTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curRowDim=b.dataset.rowdim; renderReports(); }); });
 document.getElementById('f-apply')?.addEventListener('click', applyFilter);
-document.getElementById('f-clear')?.addEventListener('click', ()=>{ document.getElementById('f-search').value=''; applyFilter(); });
+document.getElementById('f-clear')?.addEventListener('click', ()=>{ document.getElementById('f-line').value=''; document.getElementById('f-pn').value=''; document.getElementById('f-style').value=''; document.getElementById('f-search').value=''; applyFilter(); });
 document.getElementById('f-search')?.addEventListener('input', applyFilter);
-setTimeout(applyFilter, 200);
+document.getElementById('f-line')?.addEventListener('input', applyFilter);
+document.getElementById('f-pn')?.addEventListener('input', applyFilter);
+document.getElementById('f-style')?.addEventListener('input', applyFilter);
+
+renderReports();
 </script>
 </body></html>`;
       const blob = new Blob([staticHtml], {type:'text/html'});
