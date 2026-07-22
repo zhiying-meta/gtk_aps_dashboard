@@ -529,6 +529,57 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   }
 });
 
+// ===== Clear — similar to utilization and io_report, sets Not Ready and supports re-upload =====
+function clearPackout(clearMsg) {
+  if(!confirm(clearMsg || 'Clear Packout data? It will become Not Ready, you can re-upload new file.')) return;
+  // Call backend clear for consistency (backend is stateless but returns ok)
+  fetch('/api/plan_merge/clear', {method:'POST'}).catch(()=>{});
+  try{
+    // Clear file inputs
+    document.querySelectorAll('.file-input').forEach(inp=>{
+      inp.value='';
+      const card = inp.closest('.upload-card');
+      if(card) card.classList.remove('has-file');
+    });
+    // Clear file name displays
+    const fnMain = document.getElementById('file-name-main');
+    if(fnMain){ fnMain.textContent=''; fnMain.className='file-name'; }
+    document.querySelectorAll('.file-name').forEach(el=>{ el.textContent=''; el.className='file-name'; });
+    // Clear data
+    allRows=[]; allWeeks=[]; weekLabels={}; filteredRows=[]; activeDim='FG'; pivotFields=[];
+    // Hide report
+    const reportSec = document.getElementById('report-section');
+    if(reportSec){ reportSec.style.display='none'; reportSec.dataset.hasData='false'; }
+    // Clear warnings and status
+    const warnEl = document.getElementById('upload-warnings');
+    if(warnEl){ warnEl.style.display='none'; warnEl.innerHTML=''; }
+    const statusEl = document.getElementById('upload-status');
+    if(statusEl) statusEl.textContent='🗑️ Cleared — Not Ready, re-upload supported';
+    const reportStatus = document.getElementById('report-status');
+    if(reportStatus) reportStatus.textContent='';
+    // Clear localStorage
+    try{
+      localStorage.removeItem('plan_merge_last_load');
+      localStorage.removeItem('plan_merge_rows');
+    }catch{}
+    // Clear dropdowns
+    ['sku','usage','style','color','type','detail'].forEach(name=>{
+      const menu=document.getElementById(name+'-menu');
+      if(menu) menu.innerHTML='';
+      const btn=document.getElementById(name+'-btn');
+      if(btn) btn.textContent='All';
+      const cnt=document.getElementById(name+'-count');
+      if(cnt) cnt.textContent='';
+    });
+    // Clear table
+    const th=document.getElementById('table-head'), tb=document.getElementById('table-body');
+    if(th) th.innerHTML=''; if(tb) tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">Cleared — Not Ready. Upload new file to display.</td></tr>';
+    document.getElementById('row-count').textContent='';
+  }catch(e){ console.error('clear packout failed', e); }
+}
+document.getElementById('btn-clear-packout')?.addEventListener('click', ()=> clearPackout());
+document.getElementById('btn-clear-packout-report')?.addEventListener('click', ()=> clearPackout());
+
 // ===== Filters =====
 function setupDropdowns() {
   for (const [name, opts] of Object.entries({

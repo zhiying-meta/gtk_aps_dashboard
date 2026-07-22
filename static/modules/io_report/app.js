@@ -161,7 +161,12 @@ function buildUploadSectionHTML(isCompact){
           <div class="upload-card" id="card_schedule_${isCompact?'compact':'full'}"><div class="upload-label">📁 Schedule <span class="req">*</span></div><input type="file" class="file-input" id="input_schedule_${isCompact?'compact':'full'}" accept=".xlsx"><div class="fname" id="fname_schedule_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_balance_${isCompact?'compact':'full'}"><div class="upload-label">📁 BOH Balance <span class="req">*</span></div><input type="file" class="file-input" id="input_balance_${isCompact?'compact':'full'}" accept=".xlsx"><div class="fname" id="fname_balance_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
         </div>
-        <div style="margin-top:12px;display:flex;gap:10px;align-items:center"><button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled>▶ Upload & Analyze</button><button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck</button><span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span></div>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled>▶ Upload & Analyze</button>
+          <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck</button>
+          <button class="btn btn-outline btn-sm" id="btnClearIO_${isCompact?'compact':'full'}" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button>
+          <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
+        </div>
       </div>
     </div>`;
 }
@@ -340,6 +345,20 @@ function attachUploadLogic(isCompact){
     }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
   });
   document.getElementById('btnRetryLoad_'+suffix)?.addEventListener('click', async ()=>{ const ok=await checkStatus(); if(ok) renderReportsPage(); else alert('No valid data'); });
+  document.getElementById('btnClearIO_'+suffix)?.addEventListener('click', async ()=>{
+    if(!confirm('Clear IO Report cache and files? It will become Not Ready, you can re-upload new files.')) return;
+    const prog=document.getElementById('uploadProgress_'+suffix);
+    if(prog) prog.textContent='Clearing...';
+    try{
+      const r=await fetch('/api/io/clear',{method:'POST'});
+      const j=await r.json();
+      if(!r.ok) throw new Error(j.error||'clear failed');
+      if(prog) prog.innerHTML=`<span style="color:#059669">✅ Cleared — ${j.message} — Now Not Ready, re-upload supported</span>`;
+      try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
+      _ioClientCache=null;
+      setTimeout(()=>{ renderUploadPage(); }, 800);
+    }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; }
+  });
   if(isCompact) document.getElementById('toggleUploadBar')?.addEventListener('click', ()=>{ const c=document.getElementById('uploadBarContent'); if(!c) return; const hid=c.style.display==='none'; c.style.display=hid?'block':'none'; document.getElementById('toggleUploadBar').textContent=hid?'▼ Collapse':'▶ Expand'; });
 }
 function renderUploadPage(){ ioRoot.innerHTML=buildUploadSectionHTML(false); attachUploadLogic(false); }
@@ -356,7 +375,7 @@ function renderReportsPage(){
           <span id="ioMainStatusBadge">${_badge}</span>
           <span id="ioMainPersistent" style="font-size:11px;color:#059669;font-weight:500">${_persistText}</span>
         </div>
-        <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button></div>
+        <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button><button id="io-clear-all" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button></div>
       </div>
       <div class="dim-tabs" id="io-group-tabs">
         <button class="dim-tab active" data-group="FG">FG (SKU)</button>
@@ -456,6 +475,18 @@ function initReportsPage(){
   document.getElementById('io-dl-all')?.addEventListener('click', downloadAll);
   document.getElementById('io-reset-groups')?.addEventListener('click', ()=>{ reportGroups = REPORTS.map(r=>[r]); pendingNewGroup=[]; Object.keys(treeCache).forEach(k=>delete treeCache[k]); if(window._ioExpanded) window._ioExpanded={}; renderAllReports(); });
   document.getElementById('addEmptyGroupBtn')?.addEventListener('click', ()=>{ reportGroups.push([]); renderAllReports(); });
+  document.getElementById('io-clear-all')?.addEventListener('click', async ()=>{
+    if(!confirm('Clear IO Report cache and files? It will become Not Ready, you can re-upload new files.')) return;
+    try{
+      const r=await fetch('/api/io/clear',{method:'POST'});
+      const j=await r.json();
+      if(!r.ok) throw new Error(j.error||'clear failed');
+      alert('✅ Cleared IO Report — now Not Ready. Re-upload supported.');
+      try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
+      _ioClientCache=null;
+      renderUploadPage();
+    }catch(e){ alert('❌ Clear failed: '+e.message); }
+  });
 }
 
 function initSearchableSelect(key){

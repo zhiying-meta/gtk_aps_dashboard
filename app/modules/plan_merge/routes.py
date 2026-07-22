@@ -106,3 +106,14 @@ def api_download():
         as_attachment=True,
         download_name="report.xlsx",
     )
+
+
+@plan_merge_bp.route("/api/plan_merge/clear", methods=["POST", "DELETE"])
+@plan_merge_bp.route("/api/clear", methods=["POST", "DELETE"])
+def api_clear():
+    """Clear Packout (ExF vs ETD vs Packout vs CTB) cache — frontend will reset UI, backend is stateless"""
+    # No persistent files, just return ok for consistency with other modules
+    return jsonify({
+        "ok": True,
+        "message": "Cleared Packout data — now Not Ready, re-upload supported"
+    })

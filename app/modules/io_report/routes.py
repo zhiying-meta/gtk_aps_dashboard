@@ -393,6 +393,47 @@ def api_upload():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# ---------- clear ----------
+@io_bp.route("/api/io/clear", methods=["POST", "DELETE"])
+def api_clear():
+    """Clear IO report cache and data files — similar to utilization clear, supports re-upload"""
+    try:
+        import pathlib
+        base_path = pathlib.Path(DEFAULT_DATA_DIR)
+        cleared = []
+        for fn in TARGET_MAP.values():
+            fp = base_path / fn
+            if fp.exists():
+                try:
+                    fp.unlink()
+                    cleared.append(fn)
+                except Exception as e:
+                    print(f"[IO] clear file failed {fp}: {e}")
+        # Also clear any cache files if present
+        for cache_file in base_path.glob("*.pkl"):
+            try:
+                cache_file.unlink()
+            except:
+                pass
+        # Clear in-memory cache — _global_cache is the main cache
+        try:
+            import app.modules.io_report.engine as eng
+            eng._global_cache = None
+            eng._global_data_dir = None
+        except Exception as ce:
+            print(f"[IO] clear cache failed: {ce}")
+
+        return jsonify({
+            "ok": True,
+            "cleared": cleared,
+            "message": f"Cleared {', '.join(cleared) if cleared else 'no files (already empty)'} — now Not Ready, re-upload supported"
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Clear failed: {e}")
+
+
 # ---------- templates ----------
 IO_SCHEMA = {
     "item_master": {
