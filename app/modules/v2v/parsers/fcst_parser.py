@@ -198,3 +198,153 @@ def diff_fcst(main_a, detail_a, main_b, detail_b, mode="grouped", granularity="w
             "error": str(e),
             "records": []
         }
+
+
+def get_fcst_horizontal_matrix(main_a, detail_a, main_b, detail_b, granularity="week", sku_category="ALL", only_diff=True, change_type="ALL"):
+    """Horizontal matrix for FCST - similar to Plan Input but using FCST parser logic"""
+    try:
+        from .matrix_helpers import apply_sku_filter_df, generate_time_buckets
+        # Reuse build_fcst_joined logic but with normalized dates
+        def normalize_fcst_detail(detail_df, main_df):
+            try:
+                if detail_df.empty or main_df.empty:
+                    return pd.DataFrame()
+                detail_df = detail_df.copy()
+                main_df = main_df.copy()
+                main_df["ID_STR"] = main_df["ID"].astype(str)
+                detail_df["MAIN_ID_STR"] = detail_df["MAIN_ID"].astype(str)
+                merged = pd.merge(detail_df, main_df[["ID_STR", "PN_CODE"]], left_on="MAIN_ID_STR", right_on="ID_STR", how="left")
+                merged["_WEEK_DT"] = pd.to_datetime(merged["ACTUALFIRSTDAYOFWEEK"], errors='coerce')
+                merged = merged[~merged["_WEEK_DT"].isna()]
+                if merged.empty:
+                    return merged
+                merged["_DATE_DT"] = merged["_WEEK_DT"]
+                merged["_WEEK"] = merged["_WEEK_DT"].dt.strftime("%Y-%m-%d")
+                merged["_DATE"] = merged["_WEEK"]
+                merged["_MONTH"] = merged["_WEEK_DT"].dt.strftime("%Y-%m")
+                return merged
+            except Exception as e:
+                print(f"FCST matrix normalize error: {e}")
+                return pd.DataFrame()
+
+        df_a_norm = normalize_fcst_detail(detail_a, main_a)
+        df_b_norm = normalize_fcst_detail(detail_b, main_b)
+
+        df_a_filt = apply_sku_filter_df(df_a_norm, "PN_CODE", sku_category)
+        df_b_filt = apply_sku_filter_df(df_b_norm, "PN_CODE", sku_category)
+
+        if df_a_filt.empty and df_b_filt.empty:
+            return {"time_buckets": [], "sku_list": [], "matrix": {}, "summary": {"total_skus":0, "total_times":0}}
+
+        gran = (granularity or "week").lower()
+        if gran in ["month", "monthly"]:
+            time_col = "_MONTH"
+        else:
+            time_col = "_WEEK"
+
+        time_buckets = generate_time_buckets(df_a_filt, df_b_filt, gran)
+
+        if not time_buckets:
+            return {"time_buckets": [], "sku_list": [], "matrix": {}, "summary": {"total_skus":0, "total_times":0}}
+
+        group_keys = ["PN_CODE", time_col]
+        def agg_sum(df, keys):
+            if df.empty:
+                return pd.DataFrame(columns=keys + ["ACTUALWEEKVALUE"])
+            try:
+                return df.groupby(keys, as_index=False)["ACTUALWEEKVALUE"].sum()
+            except:
+                return pd.DataFrame(columns=keys + ["ACTUALWEEKVALUE"])
+
+        agg_a = agg_sum(df_a_filt, group_keys)
+        agg_b = agg_sum(df_b_filt, group_keys)
+
+        def get_label(row):
+            return row.get(time_col)
+
+        lookup_a = {}
+        lookup_b = {}
+        if not agg_a.empty:
+            for _, r in agg_a.iterrows():
+                sku = r.get("PN_CODE")
+                t_label = get_label(r)
+                if sku and t_label:
+                    lookup_a[(sku, t_label)] = float(r.get("ACTUALWEEKVALUE", 0))
+        if not agg_b.empty:
+            for _, r in agg_b.iterrows():
+                sku = r.get("PN_CODE")
+                t_label = get_label(r)
+                if sku and t_label:
+                    lookup_b[(sku, t_label)] = float(r.get("ACTUALWEEKVALUE", 0))
+
+        skus_a = set(agg_a["PN_CODE"].dropna()) if not agg_a.empty and "PN_CODE" in agg_a.columns else set()
+        skus_b = set(agg_b["PN_CODE"].dropna()) if not agg_b.empty and "PN_CODE" in agg_b.columns else set()
+        all_skus = sorted(list(skus_a | skus_b))
+
+        bucket_labels = time_buckets
+
+        def matches_ct(tag, filter_ct):
+            if not filter_ct or filter_ct.upper() == "ALL":
+                return True
+            return tag.upper() == filter_ct.upper()
+
+        matrix = {}
+        for sku in all_skus:
+            matrix[sku] = {}
+            has_matching = False
+            for tb in bucket_labels:
+                prev = lookup_a.get((sku, tb), None)
+                latest = lookup_b.get((sku, tb), None)
+                if prev is None and latest is None:
+                    matrix[sku][tb] = None
+                else:
+                    p_val = prev if prev is not None else 0
+                    l_val = latest if latest is not None else 0
+                    diff = l_val - p_val
+                    if prev is None and latest is not None:
+                        tag = "ADDED"
+                    elif prev is not None and latest is None:
+                        tag = "DELETED"
+                    else:
+                        tag = "MODIFY" if diff !=0 else "UNCHANGED"
+                    if not matches_ct(tag, change_type):
+                        matrix[sku][tb] = None
+                        continue
+                    if tag == "UNCHANGED" and only_diff:
+                        matrix[sku][tb] = None
+                        continue
+                    if diff !=0 or tag in ["ADDED","DELETED"]:
+                        has_matching = True
+                    matrix[sku][tb] = {"prev": p_val, "latest": l_val, "diff": diff, "tag": tag, "prev_raw": prev, "latest_raw": latest}
+            if only_diff and not has_matching:
+                if sku in matrix:
+                    has_any = any(v is not None for v in matrix[sku].values())
+                    if not has_any:
+                        del matrix[sku]
+            elif change_type and change_type.upper() != "ALL":
+                has_any = any(v is not None for v in matrix[sku].values())
+                if not has_any and sku in matrix:
+                    del matrix[sku]
+
+        final_skus = sorted(list(matrix.keys()))
+
+        return {
+            "time_buckets": time_buckets,
+            "bucket_labels": bucket_labels,
+            "sku_list": final_skus,
+            "matrix": matrix,
+            "granularity": gran,
+            "sku_category": sku_category,
+            "summary": {
+                "total_skus": len(final_skus),
+                "total_times": len(bucket_labels),
+                "total_original_skus": len(all_skus),
+                "time_range": f"{bucket_labels[0]} to {bucket_labels[-1]}" if bucket_labels else ""
+            }
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "time_buckets": [], "sku_list": [], "matrix": {}}
+

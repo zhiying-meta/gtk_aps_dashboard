@@ -206,6 +206,9 @@
 
     <!-- ===== V2V Module ===== -->
     <div id="module-v2v" class="module-section">
+      <!-- Restore banner for persistence (survives swipe/refresh) -->
+      <div id="v2v-restore-banner" style="display:none;flex-direction:column;gap:4px;background:#eff6ff;border:1px solid #bfdbfe;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:12px"></div>
+
       <!-- Top actions - Download/Export at page's right top per user request -->
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
         <button id="v2v-btn-download" class="btn btn-sm" style="background:#0f172a;color:white">📥 Download Current View</button>
@@ -246,7 +249,6 @@
               <button data-granularity="monthly">Month</button>
               <button data-granularity="week" class="active">Week</button>
               <button data-granularity="day">Day</button>
-              <button data-granularity="shift">Shift</button>
             </div>
           </div>
         </div>
@@ -255,8 +257,8 @@
         <div class="v2v-detail-tabs" id="v2v-detail-tabs"></div>
 
         <div class="v2v-toolbar">
-          <div class="v2v-toolbar-left" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-            <label style="font-size:12px">Change Type:
+          <div class="v2v-toolbar-left" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px">Change Type:
               <select id="v2v-filter-changetype" class="v2v-select" style="width:120px">
                 <option value="ALL">All</option>
                 <option value="ADDED">Added</option>
@@ -264,6 +266,44 @@
                 <option value="MODIFY">Modified</option>
               </select>
             </label>
+            <!-- SKU Category multi-select -->
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px" id="v2v-sku-filter-label">
+              <span style="white-space:nowrap">SKU Category:</span>
+              <div class="v2v-multi-select" id="v2v-sku-multi">
+                <button class="v2v-multi-btn" id="v2v-sku-btn" type="button">All SKU ▾</button>
+                <div class="v2v-multi-menu" id="v2v-sku-menu" style="display:none">
+                  <label><input type="checkbox" value="ALL" checked> All SKU</label>
+                  <label><input type="checkbox" value="MATERIAL"> 1- Material (3010*)</label>
+                  <label><input type="checkbox" value="FRAME"> 2- Frame (FR-*)</label>
+                  <label><input type="checkbox" value="GB"> 3- GB (GB-*)</label>
+                  <label><input type="checkbox" value="LT"> 4- LT (LT-*)</label>
+                  <label><input type="checkbox" value="RT"> 5- RT (RT-*)</label>
+                  <label><input type="checkbox" value="FG"> 6- FG (SK-*)</label>
+                </div>
+              </div>
+            </div>
+            <!-- Line Category multi-select -->
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px" id="v2v-line-filter-label">
+              <span style="white-space:nowrap">Line Category:</span>
+              <div class="v2v-multi-select" id="v2v-line-multi">
+                <button class="v2v-multi-btn" id="v2v-line-btn" type="button">All Lines ▾</button>
+                <div class="v2v-multi-menu" id="v2v-line-menu" style="display:none">
+                  <label><input type="checkbox" value="ALL" checked> All Lines</label>
+                  <label><input type="checkbox" value="AL1"> 1- AL1 (AL1-*)</label>
+                  <label><input type="checkbox" value="AL2"> 2- AL2 (AL2-*)</label>
+                  <label><input type="checkbox" value="AL3"> 3- AL3 (AL3-*)</label>
+                  <label><input type="checkbox" value="AL4"> 4- AL4 (AL4-*)</label>
+                  <label><input type="checkbox" value="AL5"> 5- AL5 (AL5-*)</label>
+                  <label><input type="checkbox" value="AL6"> 6- AL6 (AL6-*)</label>
+                  <label><input type="checkbox" value="AL7"> 7- AL7 (AL7-*)</label>
+                  <label><input type="checkbox" value="AL8"> 8- AL8 (AL8-*)</label>
+                  <label><input type="checkbox" value="AL9"> 9- AL9 (AL9-*)</label>
+                  <label><input type="checkbox" value="AL10"> 10- AL10 (AL10-*)</label>
+                  <label><input type="checkbox" value="ML2"> 11- ML2 (ML2-*)</label>
+                  <label><input type="checkbox" value="ML5"> 12- ML5 (ML5-*)</label>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -314,8 +354,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="/static/global/app.js?v=20260721_16"></script>
-<script src="/static/modules/plan_merge/app.js?v=20260721_16"></script>
-<script src="/static/modules/v2v/app.js?v=20260721_16"></script>
+<script src="/static/global/app.js?v=20260722_03"></script>
+<script src="/static/modules/plan_merge/app.js?v=20260722_03"></script>
+<script src="/static/modules/v2v/app.js?v=20260722_03"></script>
 </body>
 </html>

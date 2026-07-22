@@ -629,3 +629,287 @@ def get_daily_matrix(df_a, df_b, sku_prefix="SK", line_filter=None, shift_filter
         import traceback
         traceback.print_exc()
         return {"error": str(e), "dates": [], "sku_list": [], "data": {}}
+
+
+def get_plan_output_horizontal_matrix(df_a, df_b, granularity="week", sku_category="ALL", line_category="ALL", only_diff=True, change_type="ALL"):
+    """
+    Horizontal matrix for Plan Output - NEW LOGIC per user request 2026-07-22:
+    - day/shift: detailed numbers
+    - week/month: yellow-only indicator if any daily change inside that week/month
+    """
+    try:
+        from .matrix_helpers import apply_sku_filter_df, apply_line_filter_df, generate_time_buckets
+        import pandas as pd
+        from datetime import timedelta
+
+        # Normalize
+        df_a_norm = normalize_dates(df_a)
+        df_b_norm = normalize_dates(df_b)
+
+        # Apply filters
+        df_a_filt = apply_sku_filter_df(df_a_norm, "SKU", sku_category)
+        df_b_filt = apply_sku_filter_df(df_b_norm, "SKU", sku_category)
+        df_a_filt = apply_line_filter_df(df_a_filt, "LINE_CODE", line_category)
+        df_b_filt = apply_line_filter_df(df_b_filt, "LINE_CODE", line_category)
+
+        if df_a_filt.empty and df_b_filt.empty:
+            return {"time_buckets": [], "sku_list": [], "matrix": {}, "summary": {"total_skus":0, "total_times":0}}
+
+        gran = (granularity or "week").lower()
+
+        def agg_sum(df, keys):
+            if df.empty:
+                return pd.DataFrame(columns=keys + ["PLAN_VALUE"])
+            try:
+                return df.groupby(keys, as_index=False)["PLAN_VALUE"].sum()
+            except:
+                return pd.DataFrame(columns=keys + ["PLAN_VALUE"])
+
+        # Shift and Day detailed mode
+        if gran in ["day", "shift"]:
+            shift_names=[]
+            if gran=="shift":
+                shifts_a = df_a_filt["SHIFT_NAME"].dropna().unique().tolist() if "SHIFT_NAME" in df_a_filt.columns else []
+                shifts_b = df_b_filt["SHIFT_NAME"].dropna().unique().tolist() if "SHIFT_NAME" in df_b_filt.columns else []
+                shift_names = list(set(shifts_a + shifts_b))
+                if not shift_names:
+                    shift_names=["白班","夜班"]
+                shift_names=sorted(shift_names, key=lambda x: {"白班":0,"夜班":1}.get(x,99))
+            time_buckets = generate_time_buckets(df_a_filt, df_b_filt, gran, shift_names if gran=="shift" else None)
+            if not time_buckets:
+                return {"time_buckets": [], "sku_list": [], "matrix": {}, "summary": {"total_skus":0, "total_times":0}}
+            if gran=="shift":
+                group_keys=["SKU","_DATE","SHIFT_NAME"]
+            else:
+                group_keys=["SKU","_DATE"]
+            group_keys=[k for k in group_keys if k in df_a_filt.columns or k in df_b_filt.columns]
+            agg_a=agg_sum(df_a_filt, group_keys)
+            agg_b=agg_sum(df_b_filt, group_keys)
+            def get_label(r):
+                if gran=="shift":
+                    return f"{r.get('_DATE')} {r.get('SHIFT_NAME')}"
+                else:
+                    return r.get("_DATE")
+            lookup_a={}
+            lookup_b={}
+            if not agg_a.empty:
+                for _, r in agg_a.iterrows():
+                    sku=r.get("SKU")
+                    t=get_label(r)
+                    if sku and t:
+                        lookup_a[(sku,t)]=float(r.get("PLAN_VALUE",0))
+            if not agg_b.empty:
+                for _, r in agg_b.iterrows():
+                    sku=r.get("SKU")
+                    t=get_label(r)
+                    if sku and t:
+                        lookup_b[(sku,t)]=float(r.get("PLAN_VALUE",0))
+            all_skus=sorted(list(set(agg_a["SKU"].dropna()) | set(agg_b["SKU"].dropna()) if not agg_a.empty or not agg_b.empty else []))
+            bucket_labels = [b["label"] for b in time_buckets] if gran=="shift" else time_buckets
+            def matches_ct(tag,fct):
+                if not fct or fct.upper()=="ALL":
+                    return True
+                return tag.upper()==fct.upper()
+            matrix={}
+            for sku in all_skus:
+                matrix[sku]={}
+                has_match=False
+                for tb in bucket_labels:
+                    prev=lookup_a.get((sku,tb),None)
+                    latest=lookup_b.get((sku,tb),None)
+                    if prev is None and latest is None:
+                        matrix[sku][tb]=None
+                    else:
+                        p_val=prev if prev is not None else 0
+                        l_val=latest if latest is not None else 0
+                        diff=l_val-p_val
+                        if prev is None and latest is not None:
+                            tag="ADDED"
+                        elif prev is not None and latest is None:
+                            tag="DELETED"
+                        else:
+                            tag="MODIFY" if diff!=0 else "UNCHANGED"
+                        if not matches_ct(tag, change_type):
+                            matrix[sku][tb]=None
+                            continue
+                        if tag=="UNCHANGED" and only_diff:
+                            matrix[sku][tb]=None
+                            continue
+                        if diff!=0 or tag in ["ADDED","DELETED"]:
+                            has_match=True
+                        matrix[sku][tb]={"prev":p_val,"latest":l_val,"diff":diff,"tag":tag,"prev_raw":prev,"latest_raw":latest}
+                if only_diff and not has_match:
+                    if not any(v is not None for v in matrix[sku].values()):
+                        del matrix[sku]
+            final_skus=sorted(list(matrix.keys()))
+            return {
+                "time_buckets": time_buckets,
+                "bucket_labels": bucket_labels,
+                "sku_list": final_skus,
+                "matrix": matrix,
+                "granularity": gran,
+                "sku_category": sku_category,
+                "line_category": line_category,
+                "display_mode": "detailed",
+                "summary": {
+                    "total_skus": len(final_skus),
+                    "total_times": len(bucket_labels),
+                    "total_original_skus": len(all_skus),
+                    "time_range": f"{bucket_labels[0]} to {bucket_labels[-1]}" if bucket_labels else ""
+                }
+            }
+
+        # For week/month: yellow-only indicator
+        # Step 1 daily diff
+        daily_keys=["SKU","_DATE"]
+        agg_a_daily=agg_sum(df_a_filt, daily_keys)
+        agg_b_daily=agg_sum(df_b_filt, daily_keys)
+        lookup_a_daily={}
+        lookup_b_daily={}
+        if not agg_a_daily.empty:
+            for _, r in agg_a_daily.iterrows():
+                sku=r.get("SKU")
+                d=r.get("_DATE")
+                if sku and d:
+                    lookup_a_daily[(sku,d)]=float(r.get("PLAN_VALUE",0))
+        if not agg_b_daily.empty:
+            for _, r in agg_b_daily.iterrows():
+                sku=r.get("SKU")
+                d=r.get("_DATE")
+                if sku and d:
+                    lookup_b_daily[(sku,d)]=float(r.get("PLAN_VALUE",0))
+        time_buckets_daily = generate_time_buckets(df_a_filt, df_b_filt, "day")
+        skus_a_daily = set([k[0] for k in lookup_a_daily.keys()])
+        skus_b_daily = set([k[0] for k in lookup_b_daily.keys()])
+        all_skus = sorted(list(skus_a_daily | skus_b_daily))
+
+        # Optimized: use merge to find daily diffs
+        # Build DataFrames from lookup dicts for vectorized diff
+        # Instead we already have agg_a_daily and agg_b_daily, merge them
+        merged_daily = pd.merge(agg_a_daily, agg_b_daily, on=daily_keys, how="outer", suffixes=("_A","_B"), indicator=True)
+        merged_daily["PLAN_VALUE_A"] = merged_daily["PLAN_VALUE_A"].fillna(0)
+        merged_daily["PLAN_VALUE_B"] = merged_daily["PLAN_VALUE_B"].fillna(0)
+        merged_daily["diff"] = merged_daily["PLAN_VALUE_B"] - merged_daily["PLAN_VALUE_A"]
+        def _tag(r):
+            if r["_merge"]=="left_only":
+                return "DELETED"
+            elif r["_merge"]=="right_only":
+                return "ADDED"
+            else:
+                return "MODIFY" if r["diff"]!=0 else "UNCHANGED"
+        merged_daily["tag"] = merged_daily.apply(_tag, axis=1)
+        merged_daily_diff = merged_daily[merged_daily["tag"]!="UNCHANGED"]
+        daily_has_change={}
+        if not merged_daily_diff.empty:
+            for sku, group in merged_daily_diff.groupby("SKU"):
+                daily_has_change[sku]=set(group["_DATE"].astype(str).tolist())
+
+        if gran in ["month","monthly"]:
+            target_buckets = generate_time_buckets(df_a_filt, df_b_filt, "month")
+            def date_to_month(ds):
+                try:
+                    return ds[:7]
+                except:
+                    return None
+            matrix={}
+            for sku in all_skus:
+                changed_set = daily_has_change.get(sku,set())
+                if not changed_set and only_diff:
+                    continue
+                matrix[sku]={}
+                has_any=False
+                for mb in target_buckets:
+                    changed_in_month=[d for d in changed_set if date_to_month(d)==mb]
+                    if changed_in_month:
+                        has_any=True
+                        matrix[sku][mb]={
+                            "has_change": True,
+                            "tag": "HAS_CHANGE",
+                            "changed_days": sorted(changed_in_month),
+                            "changed_count": len(changed_in_month),
+                            "display_mode": "has_change"
+                        }
+                    else:
+                        matrix[sku][mb]=None
+                if only_diff and not has_any:
+                    del matrix[sku]
+            final_skus=sorted(list(matrix.keys()))
+            return {
+                "time_buckets": target_buckets,
+                "bucket_labels": target_buckets,
+                "sku_list": final_skus,
+                "matrix": matrix,
+                "granularity": gran,
+                "sku_category": sku_category,
+                "line_category": line_category,
+                "display_mode": "has_change",
+                "summary": {
+                    "total_skus": len(final_skus),
+                    "total_times": len(target_buckets),
+                    "total_original_skus": len(all_skus),
+                    "time_range": f"{target_buckets[0]} to {target_buckets[-1]}" if target_buckets else "",
+                    "note": "Weekly/Monthly yellow-only: any daily change inside bucket -> yellow"
+                }
+            }
+        else:  # week
+            target_buckets = generate_time_buckets(df_a_filt, df_b_filt, "week")
+            def dates_in_week(sat_str):
+                try:
+                    sat_dt = pd.to_datetime(sat_str)
+                    sun_dt = sat_dt - timedelta(days=6)
+                    dates=[]
+                    cur=sun_dt
+                    for _ in range(7):
+                        dates.append(cur.strftime("%Y-%m-%d"))
+                        cur+=timedelta(days=1)
+                    return set(dates)
+                except:
+                    return set()
+            week_to_dates={wb: dates_in_week(wb) for wb in target_buckets}
+            matrix={}
+            for sku in all_skus:
+                changed_set = daily_has_change.get(sku,set())
+                if not changed_set and only_diff:
+                    continue
+                matrix[sku]={}
+                has_any=False
+                for wb in target_buckets:
+                    dset=week_to_dates.get(wb,set())
+                    changed_in_week=list(changed_set & dset)
+                    if changed_in_week:
+                        has_any=True
+                        matrix[sku][wb]={
+                            "has_change": True,
+                            "tag": "HAS_CHANGE",
+                            "changed_days": sorted(changed_in_week),
+                            "changed_count": len(changed_in_week),
+                            "display_mode": "has_change"
+                        }
+                    else:
+                        matrix[sku][wb]=None
+                if only_diff and not has_any:
+                    del matrix[sku]
+            final_skus=sorted(list(matrix.keys()))
+            return {
+                "time_buckets": target_buckets,
+                "bucket_labels": target_buckets,
+                "sku_list": final_skus,
+                "matrix": matrix,
+                "granularity": gran,
+                "sku_category": sku_category,
+                "line_category": line_category,
+                "display_mode": "has_change",
+                "summary": {
+                    "total_skus": len(final_skus),
+                    "total_times": len(target_buckets),
+                    "total_original_skus": len(all_skus),
+                    "time_range": f"{target_buckets[0]} to {target_buckets[-1]}" if target_buckets else "",
+                    "note": "Weekly yellow-only: any daily change inside week -> yellow"
+                }
+            }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "time_buckets": [], "sku_list": [], "matrix": {}}
+

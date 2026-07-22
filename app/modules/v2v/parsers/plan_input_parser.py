@@ -222,3 +222,298 @@ def get_chart_data_plan_input(fcst_main_a, fcst_detail_a, fcst_main_b, fcst_deta
         import traceback
         traceback.print_exc()
         return {"error": str(e), "dates": [], "values_a": [], "values_b": []}
+
+
+def normalize_fcst_for_matrix(detail_df, main_df):
+    """For matrix, normalize FCST detail+main to have _DATE_DT, _WEEK, _MONTH, PN_CODE"""
+    try:
+        if detail_df.empty or main_df.empty:
+            return pd.DataFrame()
+        detail_df = detail_df.copy()
+        main_df = main_df.copy()
+        main_df["ID_STR"] = main_df["ID"].astype(str)
+        detail_df["MAIN_ID_STR"] = detail_df["MAIN_ID"].astype(str)
+        merged = pd.merge(detail_df, main_df[["ID_STR", "PN_CODE"]], left_on="MAIN_ID_STR", right_on="ID_STR", how="left")
+        merged["_WEEK_DT"] = pd.to_datetime(merged["ACTUALFIRSTDAYOFWEEK"], errors='coerce')
+        merged = merged[~merged["_WEEK_DT"].isna()]
+        if merged.empty:
+            return merged
+        merged["_DATE_DT"] = merged["_WEEK_DT"]
+        merged["_WEEK"] = merged["_WEEK_DT"].dt.strftime("%Y-%m-%d")
+        merged["_DATE"] = merged["_WEEK"]
+        merged["_MONTH"] = merged["_WEEK_DT"].dt.strftime("%Y-%m")
+        return merged
+    except Exception as e:
+        print(f"FCST matrix normalize error: {e}")
+        return pd.DataFrame()
+
+
+def get_plan_input_horizontal_matrix(fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b, granularity="week", sku_category="ALL", only_diff=True, change_type="ALL"):
+    """
+    Horizontal matrix for Plan Input (FCST) - NEW LOGIC per user request 2026-07-22:
+    - day/week: for FCST weekly data, day is same as week but we show detailed numbers for day granularity
+    - week/month: yellow-only indicator: any change inside bucket -> yellow, no numbers
+    """
+    try:
+        from .matrix_helpers import apply_sku_filter_df, generate_time_buckets
+        import pandas as pd
+        from datetime import timedelta
+
+        df_a_norm = normalize_fcst_for_matrix(fcst_detail_a, fcst_main_a)
+        df_b_norm = normalize_fcst_for_matrix(fcst_detail_b, fcst_main_b)
+
+        df_a_filt = apply_sku_filter_df(df_a_norm, "PN_CODE", sku_category)
+        df_b_filt = apply_sku_filter_df(df_b_norm, "PN_CODE", sku_category)
+
+        if df_a_filt.empty and df_b_filt.empty:
+            return {"time_buckets": [], "sku_list": [], "matrix": {}, "summary": {"total_skus":0, "total_times":0}}
+
+        gran = (granularity or "week").lower()
+
+        def agg_sum(df, keys):
+            if df.empty:
+                return pd.DataFrame(columns=keys + ["ACTUALWEEKVALUE"])
+            try:
+                return df.groupby(keys, as_index=False)["ACTUALWEEKVALUE"].sum()
+            except:
+                return pd.DataFrame(columns=keys + ["ACTUALWEEKVALUE"])
+
+        # For day granularity we still show detailed numbers (weekly values but per week bucket)
+        # For week/month we switch to yellow-only
+        if gran == "day":
+            # Detailed numbers per week (since FCST is weekly)
+            time_col = "_WEEK"
+            try:
+                uniq_weeks_a = df_a_filt["_WEEK"].dropna().unique().tolist() if "_WEEK" in df_a_filt.columns else []
+                uniq_weeks_b = df_b_filt["_WEEK"].dropna().unique().tolist() if "_WEEK" in df_b_filt.columns else []
+                time_buckets = sorted(list(set(uniq_weeks_a + uniq_weeks_b)))
+            except:
+                time_buckets = generate_time_buckets(df_a_filt, df_b_filt, "week")
+            if not time_buckets:
+                return {"time_buckets": [], "sku_list": [], "matrix": {}, "summary": {"total_skus":0, "total_times":0}}
+            group_keys = ["PN_CODE", time_col]
+            agg_a = agg_sum(df_a_filt, group_keys)
+            agg_b = agg_sum(df_b_filt, group_keys)
+            def get_label(r):
+                return r.get(time_col)
+            lookup_a={}
+            lookup_b={}
+            if not agg_a.empty:
+                for _, r in agg_a.iterrows():
+                    sku=r.get("PN_CODE")
+                    t=get_label(r)
+                    if sku and t:
+                        lookup_a[(sku,t)]=float(r.get("ACTUALWEEKVALUE",0))
+            if not agg_b.empty:
+                for _, r in agg_b.iterrows():
+                    sku=r.get("PN_CODE")
+                    t=get_label(r)
+                    if sku and t:
+                        lookup_b[(sku,t)]=float(r.get("ACTUALWEEKVALUE",0))
+            all_skus=sorted(list(set(agg_a["PN_CODE"].dropna()) | set(agg_b["PN_CODE"].dropna()) if not agg_a.empty or not agg_b.empty else []))
+            bucket_labels=time_buckets
+            def matches_ct(tag,fct):
+                if not fct or fct.upper()=="ALL":
+                    return True
+                return tag.upper()==fct.upper()
+            matrix={}
+            for sku in all_skus:
+                matrix[sku]={}
+                has_match=False
+                for tb in bucket_labels:
+                    prev=lookup_a.get((sku,tb),None)
+                    latest=lookup_b.get((sku,tb),None)
+                    if prev is None and latest is None:
+                        matrix[sku][tb]=None
+                    else:
+                        p_val=prev if prev is not None else 0
+                        l_val=latest if latest is not None else 0
+                        diff=l_val-p_val
+                        if prev is None and latest is not None:
+                            tag="ADDED"
+                        elif prev is not None and latest is None:
+                            tag="DELETED"
+                        else:
+                            tag="MODIFY" if diff!=0 else "UNCHANGED"
+                        if not matches_ct(tag, change_type):
+                            matrix[sku][tb]=None
+                            continue
+                        if tag=="UNCHANGED" and only_diff:
+                            matrix[sku][tb]=None
+                            continue
+                        if diff!=0 or tag in ["ADDED","DELETED"]:
+                            has_match=True
+                        matrix[sku][tb]={"prev":p_val,"latest":l_val,"diff":diff,"tag":tag,"prev_raw":prev,"latest_raw":latest}
+                if only_diff and not has_match:
+                    if not any(v is not None for v in matrix[sku].values()):
+                        if sku in matrix:
+                            del matrix[sku]
+            final_skus=sorted(list(matrix.keys()))
+            return {
+                "time_buckets": time_buckets,
+                "bucket_labels": bucket_labels,
+                "sku_list": final_skus,
+                "matrix": matrix,
+                "granularity": gran,
+                "sku_category": sku_category,
+                "display_mode": "detailed",
+                "summary": {
+                    "total_skus": len(final_skus),
+                    "total_times": len(bucket_labels),
+                    "total_original_skus": len(all_skus),
+                    "time_range": f"{bucket_labels[0]} to {bucket_labels[-1]}" if bucket_labels else ""
+                }
+            }
+
+        # For week and month: yellow-only logic
+        # First compute weekly diff
+        weekly_col = "_WEEK"
+        # For FCST, use unique _WEEK values as buckets (not Saturdays) to avoid mismatch
+        try:
+            uniq_weeks_a = df_a_filt["_WEEK"].dropna().unique().tolist() if "_WEEK" in df_a_filt.columns else []
+            uniq_weeks_b = df_b_filt["_WEEK"].dropna().unique().tolist() if "_WEEK" in df_b_filt.columns else []
+            weekly_buckets = sorted(list(set(uniq_weeks_a + uniq_weeks_b)))
+        except:
+            weekly_buckets = generate_time_buckets(df_a_filt, df_b_filt, "week")
+        group_keys_weekly = ["PN_CODE", weekly_col]
+        agg_a_weekly = agg_sum(df_a_filt, group_keys_weekly)
+        agg_b_weekly = agg_sum(df_b_filt, group_keys_weekly)
+        lookup_a_weekly={}
+        lookup_b_weekly={}
+        if not agg_a_weekly.empty:
+            for _, r in agg_a_weekly.iterrows():
+                sku=r.get("PN_CODE")
+                t=r.get(weekly_col)
+                if sku and t:
+                    lookup_a_weekly[(sku,t)]=float(r.get("ACTUALWEEKVALUE",0))
+        if not agg_b_weekly.empty:
+            for _, r in agg_b_weekly.iterrows():
+                sku=r.get("PN_CODE")
+                t=r.get(weekly_col)
+                if sku and t:
+                    lookup_b_weekly[(sku,t)]=float(r.get("ACTUALWEEKVALUE",0))
+        skus_a = set(agg_a_weekly["PN_CODE"].dropna()) if not agg_a_weekly.empty and "PN_CODE" in agg_a_weekly.columns else set()
+        skus_b = set(agg_b_weekly["PN_CODE"].dropna()) if not agg_b_weekly.empty and "PN_CODE" in agg_b_weekly.columns else set()
+        all_skus = sorted(list(skus_a | skus_b))
+
+        # Build weekly has_change set per SKU
+        weekly_has_change={}
+        for sku in all_skus:
+            weekly_has_change[sku]=set()
+            for wb in weekly_buckets:
+                prev=lookup_a_weekly.get((sku,wb),None)
+                latest=lookup_b_weekly.get((sku,wb),None)
+                if prev is None and latest is None:
+                    continue
+                p_val=prev if prev is not None else 0
+                l_val=latest if latest is not None else 0
+                diff=l_val-p_val
+                if prev is None and latest is not None:
+                    tag="ADDED"
+                elif prev is not None and latest is None:
+                    tag="DELETED"
+                else:
+                    tag="MODIFY" if diff!=0 else "UNCHANGED"
+                if tag!="UNCHANGED":
+                    weekly_has_change[sku].add(wb)
+
+        if gran in ["month","monthly"]:
+            # Monthly buckets from unique _MONTH
+            try:
+                uniq_months_a = df_a_filt["_MONTH"].dropna().unique().tolist() if "_MONTH" in df_a_filt.columns else []
+                uniq_months_b = df_b_filt["_MONTH"].dropna().unique().tolist() if "_MONTH" in df_b_filt.columns else []
+                monthly_buckets = sorted(list(set(uniq_months_a + uniq_months_b)))
+            except:
+                monthly_buckets = generate_time_buckets(df_a_filt, df_b_filt, "month")
+            def week_to_month(week_str):
+                try:
+                    return week_str[:7]
+                except:
+                    return None
+            # Map week -> month
+            matrix={}
+            for sku in all_skus:
+                changed_weeks = weekly_has_change.get(sku,set())
+                if not changed_weeks and only_diff:
+                    continue
+                matrix[sku]={}
+                has_any=False
+                for mb in monthly_buckets:
+                    # Any week in this month that has change?
+                    changed_in_month=[w for w in changed_weeks if week_to_month(w)==mb]
+                    if changed_in_month:
+                        has_any=True
+                        matrix[sku][mb]={
+                            "has_change": True,
+                            "tag": "HAS_CHANGE",
+                            "changed_weeks": sorted(changed_in_month),
+                            "changed_count": len(changed_in_month),
+                            "display_mode": "has_change"
+                        }
+                    else:
+                        matrix[sku][mb]=None
+                if only_diff and not has_any:
+                    if sku in matrix:
+                        del matrix[sku]
+            final_skus=sorted(list(matrix.keys()))
+            return {
+                "time_buckets": monthly_buckets,
+                "bucket_labels": monthly_buckets,
+                "sku_list": final_skus,
+                "matrix": matrix,
+                "granularity": gran,
+                "sku_category": sku_category,
+                "display_mode": "has_change",
+                "summary": {
+                    "total_skus": len(final_skus),
+                    "total_times": len(monthly_buckets),
+                    "total_original_skus": len(all_skus),
+                    "time_range": f"{monthly_buckets[0]} to {monthly_buckets[-1]}" if monthly_buckets else "",
+                    "note": "Monthly yellow-only: any weekly change inside month -> yellow"
+                }
+            }
+        else:  # week granularity -> yellow indicator per week
+            matrix={}
+            for sku in all_skus:
+                changed_weeks = weekly_has_change.get(sku,set())
+                if not changed_weeks and only_diff:
+                    continue
+                matrix[sku]={}
+                has_any=False
+                for wb in weekly_buckets:
+                    if wb in changed_weeks:
+                        has_any=True
+                        matrix[sku][wb]={
+                            "has_change": True,
+                            "tag": "HAS_CHANGE",
+                            "changed_weeks": [wb],
+                            "changed_count": 1,
+                            "display_mode": "has_change"
+                        }
+                    else:
+                        matrix[sku][wb]=None
+                if only_diff and not has_any:
+                    del matrix[sku]
+            final_skus=sorted(list(matrix.keys()))
+            return {
+                "time_buckets": weekly_buckets,
+                "bucket_labels": weekly_buckets,
+                "sku_list": final_skus,
+                "matrix": matrix,
+                "granularity": gran,
+                "sku_category": sku_category,
+                "display_mode": "has_change",
+                "summary": {
+                    "total_skus": len(final_skus),
+                    "total_times": len(weekly_buckets),
+                    "total_original_skus": len(all_skus),
+                    "time_range": f"{weekly_buckets[0]} to {weekly_buckets[-1]}" if weekly_buckets else "",
+                    "note": "Weekly yellow-only: any change in that week -> yellow"
+                }
+            }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "time_buckets": [], "sku_list": [], "matrix": {}}
+

@@ -17,8 +17,49 @@ import math
 
 # In-memory job store (MVP) - maps job_id to {folder_a, folder_b, result}
 JOB_STORE = {}
+# Caches for performance optimization
+JOB_DF_CACHE = {}  # job_id -> {table_key: df}
+MATRIX_CACHE = {}  # (job_id, table, gran, sku_cat, line_cat, only_diff, change_type) -> result
 UPLOAD_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), 'uploads', 'v2v')
 os.makedirs(UPLOAD_ROOT, exist_ok=True)
+
+def get_cached_df(job_id, folder, table_key):
+    """Get cached dataframe or load and cache"""
+    if job_id not in JOB_DF_CACHE:
+        JOB_DF_CACHE[job_id] = {}
+    cache = JOB_DF_CACHE[job_id]
+    # Use table_key as cache key, but also need folder distinction (a vs b) - we'll use folder+table
+    cache_key = f"{folder}__{table_key}"
+    if cache_key in cache:
+        return cache[cache_key]
+    try:
+        from .diff_engine import load_single_table
+        # For fcst we need special handling
+        if table_key == "fcst":
+            # load_single_table returns dict? Actually for fcst it returns df? Let's check
+            df = load_single_table(folder, table_key)
+            cache[cache_key] = df
+            return df
+        else:
+            df = load_single_table(folder, table_key)
+            cache[cache_key] = df
+            return df
+    except Exception as e:
+        print(f"Cache load failed for {table_key} in {folder}: {e}")
+        return None
+
+def get_cached_matrix(job_id, table, gran, sku_cat, line_cat, only_diff, change_type):
+    key = (job_id, table, gran, sku_cat, line_cat, only_diff, change_type)
+    return MATRIX_CACHE.get(key)
+
+def set_cached_matrix(job_id, table, gran, sku_cat, line_cat, only_diff, change_type, result):
+    key = (job_id, table, gran, sku_cat, line_cat, only_diff, change_type)
+    # Limit cache size to 100 entries
+    if len(MATRIX_CACHE) > 100:
+        # Remove oldest
+        oldest = next(iter(MATRIX_CACHE))
+        del MATRIX_CACHE[oldest]
+    MATRIX_CACHE[key] = result
 
 def sanitize_for_json(obj):
     """Recursively replace NaN, Infinity, -Infinity, NaT with None for valid JSON, and convert datetime to string.
@@ -466,8 +507,31 @@ def compare():
             "version_b_name": os.path.basename(folder_b)
         }
 
-        # If folder_a was temp uploaded, keep it for job lifetime (cleanup after 1 hour could be implemented)
-        # For server path mode, don't delete
+        # Preload and cache dataframes for faster detail queries (optimization)
+        try:
+            from .diff_engine import load_single_table
+            # Clear old cache for this job
+            if job_id in JOB_DF_CACHE:
+                del JOB_DF_CACHE[job_id]
+            JOB_DF_CACHE[job_id] = {}
+            # Preload key tables
+            for tbl in ["balance", "plan_output", "fcst", "fcst_detail"]:
+                try:
+                    df_a = load_single_table(folder_a, tbl)
+                    df_b = load_single_table(folder_b, tbl)
+                    JOB_DF_CACHE[job_id][f"{folder_a}__{tbl}"] = df_a
+                    JOB_DF_CACHE[job_id][f"{folder_b}__{tbl}"] = df_b
+                except Exception as ce:
+                    print(f"Preload cache failed for {tbl}: {ce}")
+            # Clear matrix cache for old jobs if too many
+            if len(MATRIX_CACHE) > 200:
+                # Keep only recent 100
+                keys = list(MATRIX_CACHE.keys())[-100:]
+                new_cache = {k: MATRIX_CACHE[k] for k in keys}
+                MATRIX_CACHE.clear()
+                MATRIX_CACHE.update(new_cache)
+        except Exception as ce:
+            print(f"Cache preload error: {ce}")
 
         return jsonify(sanitize_for_json(result))
 
@@ -688,12 +752,11 @@ def download_current_view():
         return jsonify({"error": str(e)}), 500
 
 
+
 @v2v_bp.route('/v2v/api/export/html', methods=['POST', 'GET'])
 def export_html():
     """
-    Export full V2V comparison as standalone HTML for sharing
-    Query or JSON: job_id
-    Returns HTML file that can be viewed offline, containing latest comparison data
+    Export full V2V comparison as standalone HTML for sharing - Full functionality version
     """
     try:
         if request.is_json:
@@ -707,165 +770,156 @@ def export_html():
 
         job = JOB_STORE[job_id]
         result = job["result"]
+        folder_a = job["folder_a"]
+        folder_b = job["folder_b"]
 
-        # Get detailed diffs for all tables (limited to 200 rows each for HTML size)
-        from .diff_engine import get_detailed_diff
-        all_diffs = {}
-        for table_name in result.get("summary", {}).keys():
-            try:
-                # Get up to 200 rows per table
-                detail = get_detailed_diff(job["folder_a"], job["folder_b"], table_name, granularity="week", filters={"only_diff": "true"}, page=1, page_size=200)
-                all_diffs[table_name] = detail
-            except Exception as e:
-                all_diffs[table_name] = {"error": str(e), "records": []}
-
-        # Build HTML
+        from .diff_engine import get_detailed_diff, load_single_table
+        from .parsers.balance_parser import get_boh_horizontal_matrix
+        from .parsers.plan_output_parser import get_plan_output_horizontal_matrix
+        from .parsers.plan_input_parser import get_plan_input_horizontal_matrix
+        from .parsers.fcst_parser import get_fcst_horizontal_matrix
+        from .export_html_generator import generate_full_featured_html
+        import os
         from datetime import datetime
+
         previous_name = job.get("version_a_name", "Previous Version")
         latest_name = job.get("version_b_name", "Latest Version")
         generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        html_content = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>V2V Comparison - {previous_name} vs {latest_name}</title>
-<style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #0f172a; }}
-.container {{ max-width: 1400px; margin: 0 auto; background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-.header {{ border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 24px; }}
-.header h1 {{ margin: 0; font-size: 24px; }}
-.header .meta {{ color: #64748b; font-size: 13px; margin-top: 8px; }}
-.summary-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }}
-.summary-card {{ border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }}
-.summary-card h3 {{ margin: 0 0 8px 0; font-size: 14px; }}
-.stat-row {{ display: flex; justify-content: space-between; font-size: 12px; margin: 2px 0; }}
-.stat-label {{ color: #64748b; }}
-.stat-value {{ font-weight: 600; }}
-.add {{ color: #16a34a; }} .del {{ color: #dc2626; }} .mod {{ color: #d97706; }}
-.table-section {{ margin-bottom: 32px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }}
-.table-header {{ background: #0f172a; color: white; padding: 12px 16px; font-weight: 600; display: flex; justify-content: space-between; }}
-.table-wrapper {{ max-height: 400px; overflow: auto; }}
-table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-th {{ background: #1e293b; color: white; padding: 8px 10px; text-align: left; position: sticky; top: 0; }}
-td {{ padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }}
-tr.diff-add td {{ background: #f0fdf4; }}
-tr.diff-del td {{ background: #fef2f2; }}
-tr.diff-mod td {{ background: #fffbeb; }}
-.badge {{ font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }}
-.badge.add {{ background: #dcfce7; color: #166534; }}
-.badge.del {{ background: #fecaca; color: #991b1b; }}
-.badge.mod {{ background: #fef3c7; color: #92400e; }}
-.footer {{ margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center; }}
-</style>
-</head>
-<body>
-<div class="container">
-<div class="header">
-<h1>🔍 V2V Comparison Report</h1>
-<div class="meta">
-<div><b>Previous Version:</b> {previous_name}</div>
-<div><b>Latest Version:</b> {latest_name}</div>
-<div><b>Generated:</b> {generated_at} | <b>Job ID:</b> {job_id}</div>
-<div><b>Overall:</b> Added {result.get('overall', {}).get('total_added', 0)} | Deleted {result.get('overall', {}).get('total_deleted', 0)} | Modified {result.get('overall', {}).get('total_modified', 0)} | Tables: {len(result.get('summary', {}))}</div>
-</div>
-</div>
+        # Collect matrices
+        matrices = {}
+        def safe_matrix(fn, *args, **kwargs):
+            try:
+                import time
+                start_t = time.time()
+                m = fn(*args, **kwargs)
+                elapsed = time.time() - start_t
+                print(f"[Export] Matrix {fn.__name__} {kwargs.get('granularity')} took {elapsed:.2f}s, skus={len(m.get('sku_list',[]))} buckets={len(m.get('bucket_labels',[]))}")
+                # Aggressive limits for export to keep HTML small and fast
+                if m.get("sku_list") and len(m["sku_list"]) > 200:
+                    orig_skus = m["sku_list"]
+                    m["sku_list"] = orig_skus[:200]
+                    filtered_matrix = {sku: m["matrix"].get(sku, {}) for sku in m["sku_list"]}
+                    m["matrix"] = filtered_matrix
+                    m["summary"]["truncated_skus"] = True
+                    m["summary"]["original_sku_count"] = len(orig_skus)
+                if m.get("bucket_labels") and len(m["bucket_labels"]) > 100:
+                    orig_len = len(m["bucket_labels"])
+                    keep = m["bucket_labels"][:100]
+                    m["bucket_labels"] = keep
+                    if isinstance(m.get("time_buckets"), list):
+                        m["time_buckets"] = m["time_buckets"][:100]
+                    for sku in list(m["matrix"].keys()):
+                        # Keep only non-None and in keep
+                        new_row = {k: v for k, v in m["matrix"][sku].items() if k in keep and v is not None}
+                        m["matrix"][sku] = new_row
+                    m["summary"]["truncated_buckets"] = True
+                    m["summary"]["original_bucket_count"] = orig_len
+                else:
+                    # Make sparse: remove None entries to reduce JSON size
+                    for sku in list(m["matrix"].keys()):
+                        sparse_row = {k: v for k, v in m["matrix"][sku].items() if v is not None}
+                        m["matrix"][sku] = sparse_row
+                return m
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                return {"error": str(e), "time_buckets": [], "sku_list": [], "matrix": {}, "summary": {}}
 
-<h2>Summary Dashboard</h2>
-<div class="summary-grid">
-"""
+        try:
+            df_balance_a = load_single_table(folder_a, "balance")
+            df_balance_b = load_single_table(folder_b, "balance")
+            df_plan_output_a = load_single_table(folder_a, "plan_output")
+            df_plan_output_b = load_single_table(folder_b, "plan_output")
+            df_fcst_main_a = load_single_table(folder_a, "fcst")
+            df_fcst_detail_a = load_single_table(folder_a, "fcst_detail")
+            df_fcst_main_b = load_single_table(folder_b, "fcst")
+            df_fcst_detail_b = load_single_table(folder_b, "fcst_detail")
+        except Exception as e:
+            df_balance_a = df_balance_b = df_plan_output_a = df_plan_output_b = None
+            df_fcst_main_a = df_fcst_detail_a = df_fcst_main_b = df_fcst_detail_b = None
 
-        for table_key, summary in result.get("summary", {}).items():
-            total_a = summary.get("total_a", 0)
-            total_b = summary.get("total_b", 0)
-            added = summary.get("added", 0)
-            deleted = summary.get("deleted", 0)
-            modified = summary.get("modified", 0)
-            html_content += f"""
-<div class="summary-card">
-<h3>{table_key}</h3>
-<div class="stat-row"><span class="stat-label">Previous</span><span class="stat-value">{total_a} rows</span></div>
-<div class="stat-row"><span class="stat-label">Latest</span><span class="stat-value">{total_b} rows</span></div>
-<div class="stat-row"><span class="stat-label">Added</span><span class="stat-value add">+{added}</span></div>
-<div class="stat-row"><span class="stat-label">Deleted</span><span class="stat-value del">-{deleted}</span></div>
-<div class="stat-row"><span class="stat-label">Modified</span><span class="stat-value mod">{modified}</span></div>
-</div>
-"""
+        # Optimized: only export week and day (month same logic as week yellow), use cache if available, and limit size aggressively for speed
+        export_grans_balance = ["week", "day"]  # month can be derived from week yellow, but include month for completeness
+        # Try to use cached matrices first to be fast
+        def get_matrix_cached_or_compute(table, gran, fn, *args, **kwargs):
+            cached = get_cached_matrix(job_id, table, gran, "ALL", "ALL", True, "ALL")
+            if cached and not cached.get("error"):
+                return cached
+            return safe_matrix(fn, *args, **kwargs)
 
-        html_content += """
-</div>
+        for gran in ["week", "day", "month"]:
+            if df_balance_a is not None and df_balance_b is not None:
+                if "balance" not in matrices:
+                    matrices["balance"] = {}
+                matrices["balance"][gran] = get_matrix_cached_or_compute("balance", gran, get_boh_horizontal_matrix, df_balance_a, df_balance_b, granularity=gran, sku_category="ALL", only_diff=True, change_type="ALL")
+            if df_plan_output_a is not None and df_plan_output_b is not None:
+                if "plan_output" not in matrices:
+                    matrices["plan_output"] = {}
+                matrices["plan_output"][gran] = get_matrix_cached_or_compute("plan_output", gran, get_plan_output_horizontal_matrix, df_plan_output_a, df_plan_output_b, granularity=gran, sku_category="ALL", line_category="ALL", only_diff=True, change_type="ALL")
 
-<h2>Detailed Comparison (Time Horizontal - Month, Week, Daily, Shift)</h2>
-<p style="font-size:12px;color:#64748b">Time is horizontal for all tables where applicable. Only rows with differences are shown (up to 200 per table).</p>
-"""
+        for gran in ["week", "day"]:
+            if df_fcst_main_a is not None and df_fcst_detail_a is not None and df_fcst_main_b is not None and df_fcst_detail_b is not None:
+                if "plan_input" not in matrices:
+                    matrices["plan_input"] = {}
+                matrices["plan_input"][gran] = get_matrix_cached_or_compute("plan_input", gran, get_plan_input_horizontal_matrix, df_fcst_main_a, df_fcst_detail_a, df_fcst_main_b, df_fcst_detail_b, granularity=gran, sku_category="ALL", only_diff=True, change_type="ALL")
+                if "fcst" not in matrices:
+                    matrices["fcst"] = {}
+                matrices["fcst"][gran] = get_matrix_cached_or_compute("fcst", gran, get_fcst_horizontal_matrix, df_fcst_main_a, df_fcst_detail_a, df_fcst_main_b, df_fcst_detail_b, granularity=gran, sku_category="ALL", only_diff=True, change_type="ALL")
 
-        for table_key, diff_data in all_diffs.items():
-            records = diff_data.get("records", [])[:100]  # limit 100 per table for HTML size
-            if not records:
+        vertical_diffs = {}
+        for table_name in result.get("summary", {}).keys():
+            if table_name in ["balance", "plan_output", "plan_input", "fcst"]:
                 continue
-            html_content += f"""
-<div class="table-section">
-<div class="table-header">
-<span>{table_key} - {len(records)} diffs (of {diff_data.get('pagination', {}).get('total', len(records))} total)</span>
-<span style="font-size:11px;font-weight:400">Previous vs Latest</span>
-</div>
-<div class="table-wrapper">
-<table>
-<thead><tr>
-"""
-            # Headers from first record keys
-            first = records[0]
-            # Flatten keys
-            headers = []
-            if "key" in first and isinstance(first["key"], dict):
-                for k in first["key"].keys():
-                    headers.append(f"key_{k}")
-            for k in first.keys():
-                if k not in ["key", "_group_values", "_drill", "raw"]:
-                    headers.append(k)
-            # Limit headers
-            headers = headers[:12]
-            for h in headers:
-                html_content += f"<th>{h}</th>"
-            html_content += "</tr></thead><tbody>"
+            try:
+                detail = get_detailed_diff(folder_a, folder_b, table_name, granularity="week", filters={"only_diff": "true"}, page=1, page_size=300)
+                vertical_diffs[table_name] = detail
+            except Exception as e:
+                vertical_diffs[table_name] = {"error": str(e), "records": []}
 
-            for rec in records:
-                ct = rec.get("change_type", "MODIFY")
-                ct_lower = "add" if "ADD" in ct else "del" if "DEL" in ct or "INCONSISTENT" in ct else "mod"
-                html_content += f'<tr class="diff-{ct_lower}">'
-                flat = {}
-                if "key" in rec and isinstance(rec["key"], dict):
-                    for k,v in rec["key"].items():
-                        flat[f"key_{k}"] = v
-                for k,v in rec.items():
-                    if k not in ["key", "_group_values", "_drill", "raw"] and k not in flat:
-                        flat[k] = v
-                for h in headers:
-                    val = flat.get(h, "")
-                    if isinstance(val, float):
-                        val = f"{val:.2f}"
-                    html_content += f"<td>{str(val)[:100]}</td>"
-                html_content += "</tr>"
+        embedded_data = {
+            "meta": {
+                "previous_name": previous_name,
+                "latest_name": latest_name,
+                "generated_at": generated_at,
+                "job_id": job_id,
+                "version_a_name": previous_name,
+                "version_b_name": latest_name,
+                "overall": result.get("overall", {}),
+                "export_version": "v2-full-featured"
+            },
+            "summary": result.get("summary", {}),
+            "matrices": matrices,
+            "vertical_diffs": vertical_diffs
+        }
 
-            html_content += """
-</tbody>
-</table>
-</div>
-</div>
-"""
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        css_global = ""
+        css_v2v = ""
+        try:
+            with open(os.path.join(project_root, "static", "global", "style.css"), "r") as f:
+                css_global = f.read()
+        except:
+            css_global = ""
+        try:
+            with open(os.path.join(project_root, "static", "modules", "v2v", "style.css"), "r") as f:
+                css_v2v = f.read()
+        except:
+            css_v2v = ""
 
-        html_content += f"""
-<div class="footer">
-Generated by V2V Comparison Tool | Job {job_id} | {generated_at} | Previous: {previous_name} vs Latest: {latest_name}<br>
-This is a standalone HTML file containing embedded comparison data. No server needed.
-</div>
+        from .config import TABLE_DEFS
 
-</div>
-</body>
-</html>
-"""
+        html_content = generate_full_featured_html(
+            embedded_data=embedded_data,
+            table_defs=TABLE_DEFS,
+            css_global=css_global,
+            css_v2v=css_v2v,
+            previous_name=previous_name,
+            latest_name=latest_name,
+            generated_at=generated_at,
+            job_id=job_id,
+            summary_count=len(result.get("summary", {})),
+            overall=result.get("overall", {})
+        )
 
         from io import BytesIO
         from flask import send_file
@@ -874,10 +928,11 @@ This is a standalone HTML file containing embedded comparison data. No server ne
         output.write(html_content.encode('utf-8'))
         output.seek(0)
 
-        filename = f"V2V_Report_{previous_name}_vs_{latest_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
-        # Sanitize filename
+        filename = f"V2V_Full_Featured_{previous_name}_vs_{latest_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
         filename = "".join(c for c in filename if c.isalnum() or c in "._- ").strip()
-        filename = filename.replace(" ", "_") + ".html" if not filename.endswith(".html") else filename
+        filename = filename.replace(" ", "_")
+        if not filename.endswith(".html"):
+            filename += ".html"
 
         return send_file(output, as_attachment=True, download_name=filename, mimetype='text/html')
 
@@ -983,9 +1038,7 @@ def get_plan_output_breakdown():
 @v2v_bp.route('/v2v/api/plan_output/matrix', methods=['GET'])
 def get_plan_output_matrix():
     """
-    Detailed daily matrix for Plan Output
-    Query: job_id, sku_prefix (SK,GB,LT,FR,RT or ALL), line_filter, shift_filter, granularity (day/week/monthly), cum (true/false)
-    Returns dates grouped by week Sun-Sat, sku_list, and data dict with a/b/diff/cum
+    Detailed daily matrix for Plan Output (legacy, kept for compatibility)
     """
     try:
         job_id = request.args.get('job_id')
@@ -995,7 +1048,7 @@ def get_plan_output_matrix():
         from .parsers.plan_output_parser import get_daily_matrix
         from .diff_engine import load_single_table
 
-        sku_prefix = request.args.get('sku_prefix', 'SK')  # default FG
+        sku_prefix = request.args.get('sku_prefix', 'SK')
         line_filter = request.args.get('line_filter', None)
         shift_filter = request.args.get('shift_filter', None)
         exact_sku = request.args.get('exact_sku', None)
@@ -1020,6 +1073,101 @@ def get_plan_output_matrix():
             "exact_sku": exact_sku
         }
         return jsonify(sanitize_for_json(matrix))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@v2v_bp.route('/v2v/api/matrix/<table_name>', methods=['GET'])
+def get_horizontal_matrix(table_name):
+    """
+    Optimized horizontal matrix with caching
+    """
+    try:
+        job_id = request.args.get('job_id')
+        if not job_id or job_id not in JOB_STORE:
+            return jsonify({"error": "Invalid job_id"}), 400
+        job = JOB_STORE[job_id]
+
+        granularity = request.args.get('granularity', 'week')
+        sku_category = request.args.get('sku_category', request.args.get('sku_prefix', 'ALL'))
+        line_category = request.args.get('line_category', request.args.get('line_filter', 'ALL'))
+        only_diff = request.args.get('only_diff', 'true').lower() in ['true', '1', 'yes']
+        change_type = request.args.get('change_type', request.args.get('changeType', 'ALL'))
+
+        table_name = table_name.lower()
+        if table_name == 'boh':
+            table_name = 'balance'
+
+        # Check cache first
+        cached = get_cached_matrix(job_id, table_name, granularity, sku_category, line_category, only_diff, change_type)
+        if cached:
+            cached["job_id"] = job_id
+            cached["table"] = table_name
+            cached["params"] = {
+                "granularity": granularity,
+                "sku_category": sku_category,
+                "line_category": line_category,
+                "only_diff": only_diff,
+                "change_type": change_type,
+                "cached": True
+            }
+            return jsonify(sanitize_for_json(cached))
+
+        if table_name in ['balance', 'boh']:
+            from .parsers.balance_parser import get_boh_horizontal_matrix
+            df_a = get_cached_df(job_id, job["folder_a"], "balance")
+            df_b = get_cached_df(job_id, job["folder_b"], "balance")
+            if df_a is None or df_b is None:
+                return jsonify({"error": "Missing BOH/balance data"}), 400
+            result = get_boh_horizontal_matrix(df_a, df_b, granularity=granularity, sku_category=sku_category, only_diff=only_diff, change_type=change_type)
+
+        elif table_name == 'plan_output':
+            from .parsers.plan_output_parser import get_plan_output_horizontal_matrix
+            df_a = get_cached_df(job_id, job["folder_a"], "plan_output")
+            df_b = get_cached_df(job_id, job["folder_b"], "plan_output")
+            if df_a is None or df_b is None:
+                return jsonify({"error": "Missing plan_output"}), 400
+            result = get_plan_output_horizontal_matrix(df_a, df_b, granularity=granularity, sku_category=sku_category, line_category=line_category, only_diff=only_diff, change_type=change_type)
+
+        elif table_name == 'plan_input':
+            from .parsers.plan_input_parser import get_plan_input_horizontal_matrix
+            fcst_main_a = get_cached_df(job_id, job["folder_a"], "fcst")
+            fcst_detail_a = get_cached_df(job_id, job["folder_a"], "fcst_detail")
+            fcst_main_b = get_cached_df(job_id, job["folder_b"], "fcst")
+            fcst_detail_b = get_cached_df(job_id, job["folder_b"], "fcst_detail")
+            if any(x is None for x in [fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b]):
+                return jsonify({"error": "Missing FCST data for plan_input"}), 400
+            result = get_plan_input_horizontal_matrix(fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b, granularity=granularity, sku_category=sku_category, only_diff=only_diff, change_type=change_type)
+
+        elif table_name == 'fcst':
+            from .parsers.fcst_parser import get_fcst_horizontal_matrix
+            fcst_main_a = get_cached_df(job_id, job["folder_a"], "fcst")
+            fcst_detail_a = get_cached_df(job_id, job["folder_a"], "fcst_detail")
+            fcst_main_b = get_cached_df(job_id, job["folder_b"], "fcst")
+            fcst_detail_b = get_cached_df(job_id, job["folder_b"], "fcst_detail")
+            if any(x is None for x in [fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b]):
+                return jsonify({"error": "Missing FCST data"}), 400
+            result = get_fcst_horizontal_matrix(fcst_main_a, fcst_detail_a, fcst_main_b, fcst_detail_b, granularity=granularity, sku_category=sku_category, only_diff=only_diff, change_type=change_type)
+
+        else:
+            return jsonify({"error": f"Matrix not supported for table {table_name}. Supported: balance/boh, plan_output, plan_input, fcst"}), 400
+
+        result["job_id"] = job_id
+        result["table"] = table_name
+        result["params"] = {
+            "granularity": granularity,
+            "sku_category": sku_category,
+            "line_category": line_category,
+            "only_diff": only_diff,
+            "change_type": change_type
+        }
+
+        # Cache result
+        set_cached_matrix(job_id, table_name, granularity, sku_category, line_category, only_diff, change_type, result)
+        return jsonify(sanitize_for_json(result))
+
     except Exception as e:
         import traceback
         traceback.print_exc()

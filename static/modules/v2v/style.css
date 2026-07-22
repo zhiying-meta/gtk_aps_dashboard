@@ -411,6 +411,115 @@
   text-align: center;
 }
 
+/* Multi-select dropdown with checkboxes */
+.v2v-multi-select {
+  position: relative;
+  display: inline-block;
+}
+
+.v2v-multi-btn {
+  padding: 6px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 120px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.v2v-multi-btn:hover {
+  border-color: #94a3b8;
+}
+
+.v2v-multi-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  padding: 6px 0;
+  min-width: 200px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.v2v-multi-menu label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.v2v-multi-menu label:hover {
+  background: #f8fafc;
+}
+
+.v2v-multi-menu input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+}
+
+/* Fixed colors for ADDED/DELETED/MODIFY per user request */
+.v2v-legend {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.v2v-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.v2v-legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid #cbd5e1;
+}
+
+.v2v-legend-color.added {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.v2v-legend-color.deleted {
+  background: #fecaca;
+  border-color: #fca5a5;
+}
+
+.v2v-legend-color.modify {
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+/* Horizontal table cell colors - using background not text */
+.v2v-table td.cell-added {
+  background: #f0fdf4;
+}
+
+.v2v-table td.cell-deleted {
+  background: #fef2f2;
+}
+
+.v2v-table td.cell-modify {
+  background: #fffbeb;
+}
+
 /* Toolbar */
 .v2v-toolbar {
   display: flex;
