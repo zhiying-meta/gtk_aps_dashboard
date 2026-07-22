@@ -203,7 +203,6 @@
             <div id="fname-gated" style="font-size:11px;color:#92400e;margin-top:6px;min-height:16px;word-break:break-all"></div>
             <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
               <button class="util-btn" id="btn-upload-gated" disabled style="background:#f59e0b;border-color:#f59e0b">▶ Upload Gated</button>
-              <button class="util-btn util-btn-outline" id="btn-clear-gated" style="border-color:#ef4444;color:#ef4444" title="Clear Gated cache — will become Not Ready">🗑️ Clear Gated</button>
               <span id="msg-gated" style="font-size:11px;color:#64748b"></span>
             </div>
             <div id="status-gated-files" style="font-size:11px;margin-top:8px;padding:6px 8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : (hasGated? 'background:#fef3c7;color:#92400e;border:1px solid #fde68a' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca')}">
@@ -220,7 +219,6 @@
             <div id="fname-ungated" style="font-size:11px;color:#065f46;margin-top:6px;min-height:16px;word-break:break-all"></div>
             <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
               <button class="util-btn" id="btn-upload-ungated" disabled style="background:#10b981;border-color:#10b981">▶ Upload Ungated</button>
-              <button class="util-btn util-btn-outline" id="btn-clear-ungated" style="border-color:#ef4444;color:#ef4444" title="Clear Ungated cache — will become Not Ready">🗑️ Clear Ungated</button>
               <span id="msg-ungated" style="font-size:11px;color:#64748b"></span>
             </div>
             <div id="status-ungated-files" style="font-size:11px;margin-top:8px;padding:6px 8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : (hasUngated? 'background:#fef3c7;color:#92400e;border:1px solid #fde68a' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca')}">
@@ -228,6 +226,10 @@
               <span style="font-size:10px;opacity:0.8">${isUngatedReady? 'Status: Ready' : 'Status: Not Ready'}</span>
             </div>
           </div>
+        </div>
+        <div style="text-align:center;margin-top:12px">
+          <button class="util-btn util-btn-outline" id="btn-clear-util" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Both Not Ready) — One button per interface</button>
+          <span id="msg-clear-util" style="font-size:11px;color:#64748b;margin-left:8px"></span>
         </div>
       </div>
     `;
@@ -793,60 +795,35 @@
       if(msg) msg.textContent = 'Cleared — you can re-select files and upload again';
     };
 
-    const bindClear = (ver) => {
-      const btn = document.getElementById(`btn-clear-${ver}`);
-      if(!btn) return;
-      btn.addEventListener('click', async () => {
-        const confirmMsg = `Clear ${ver.toUpperCase()} module cache? It will become Not Ready (empty), matrix will show only remaining Ready module. After clear, you can re-upload new files for this module.`;
-        if(!confirm(confirmMsg)) return;
-        const msgEl = document.getElementById(`msg-${ver}`) || document.getElementById('msg-clear');
-        if(msgEl) msgEl.textContent = `Clearing ${ver}...`;
-        try{
-          const r = await fetch(`${API_CLEAR}?version=${ver}`, { method: 'POST' });
-          const j = await r.json();
-          if(!r.ok) throw new Error(j.error||'clear failed');
-          if(msgEl) msgEl.textContent = `✅ Cleared ${ver} — now Not Ready. You can re-upload new files.`;
-
-          // Immediately reset file input to allow re-upload of same or new files
-          resetUploadInput(ver);
-
-          // Refresh UI — use single source helper for card statuses to avoid Ready/Not Ready mismatch
-          setTimeout(async ()=>{
-            const st = await checkStatus();
-            const badge = document.getElementById('util-status-badge');
-            if(badge) badge.innerHTML = statusBadgeHTML(st);
-            // Update per-card status divs correctly
-            updateCardStatuses(st);
-
-            if(st.versions && st.versions.length===0){
-              // Both cleared — show empty matrix, no values
-              await loadMeta().catch(()=>{});
-              setupLineDropdown([]);
-              setupVersionTypeDropdown();
-              const wrapper = document.getElementById('util-matrix-wrapper');
-              if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">❌ All modules cleared — both Gated and Ungated are Not Ready (empty). You can re-upload new files for Gated or Ungated (independent one-click).</div>`;
-              const mbadge = document.getElementById('util-matrix-badge');
-              if(mbadge) mbadge.innerHTML = `<span style="color:#991b1b">❌ Gated: Not Ready | ❌ Ungated: Not Ready — empty — Re-upload supported</span>`;
-            }else{
-              // One module remains — show only that, other stays Not Ready (empty)
-              await loadMeta();
-              setupLineDropdown(meta?.lines||[]);
-              if(st.versions.length===1){
-                selectedVersionTypes = new Set([st.versions[0].charAt(0).toUpperCase()+st.versions[0].slice(1).toLowerCase()]);
-              }else{
-                selectedVersionTypes = new Set(st.versions.map(v=> v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()));
-              }
-              setupVersionTypeDropdown();
-              applyPivot();
-            }
-          }, 500);
-        }catch(e){
-          if(msgEl) msgEl.textContent = '❌ '+e.message;
-        }
-      });
-    };
-    bindClear('gated');
-    bindClear('ungated');
+    // Single Clear button per interface (as requested) — clears both gated and ungated, sets Not Ready, supports re-upload
+    document.getElementById('btn-clear-util')?.addEventListener('click', async ()=>{
+      if(!confirm('Clear Utilization cache (both Gated and Ungated)? Both will become Not Ready (empty). After clear, you can re-upload new files for Gated or Ungated.')) return;
+      const msgEl = document.getElementById('msg-clear-util');
+      if(msgEl) msgEl.textContent='Clearing both...';
+      try{
+        const r = await fetch(`${API_CLEAR}?version=all`, {method:'POST'});
+        const j = await r.json();
+        if(!r.ok) throw new Error(j.error||'clear failed');
+        if(msgEl) msgEl.textContent=`✅ Cleared both — now Not Ready. ${j.message} Re-upload supported.`;
+        resetUploadInput('gated');
+        resetUploadInput('ungated');
+        setTimeout(async ()=>{
+          const st = await checkStatus();
+          const badge = document.getElementById('util-status-badge');
+          if(badge) badge.innerHTML = statusBadgeHTML(st);
+          updateCardStatuses(st);
+          await loadMeta().catch(()=>{});
+          setupLineDropdown([]);
+          setupVersionTypeDropdown();
+          const wrapper = document.getElementById('util-matrix-wrapper');
+          if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">❌ All cleared — both Gated and Ungated are Not Ready (empty). You can re-upload new files for Gated or Ungated (independent one-click).</div>`;
+          const mbadge = document.getElementById('util-matrix-badge');
+          if(mbadge) mbadge.innerHTML = `<span style="color:#991b1b">❌ Gated: Not Ready | ❌ Ungated: Not Ready — empty — Re-upload supported</span>`;
+        }, 500);
+      }catch(e){
+        if(msgEl) msgEl.textContent='❌ '+e.message;
+      }
+    });
 
     // View Schema — single source of truth, no duplicate schema elsewhere
     // Download buttons Template Zip and Demo Zip are in top info box (no duplication)

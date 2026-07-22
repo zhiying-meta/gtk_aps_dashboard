@@ -189,7 +189,6 @@ function buildUploadSectionHTML(isCompact){
         <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled>▶ Upload & Analyze</button>
           <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck</button>
-          <button class="btn btn-outline btn-sm" id="btnClearIO_${isCompact?'compact':'full'}" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button>
           <button class="btn btn-outline btn-sm" id="btnDownloadStaticIO_${isCompact?'compact':'full'}">📥 Download Static HTML</button>
           <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
         </div>
