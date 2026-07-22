@@ -25,7 +25,10 @@
       return new Date(s.getFullYear(), s.getMonth(), s.getDate());
     }
     let key = String(s);
-    if (_toDtCache.has(key)) return _toDtCache.get(key);
+    if (_toDtCache.has(key)) {
+      let cached = _toDtCache.get(key);
+      return cached ? new Date(cached.getTime()) : null;
+    }
     let str = key.trim();
     if (!str){ _toDtCache.set(key, null); return null; }
     let m, dt=null;
@@ -33,39 +36,39 @@
     if (m) {
       let y = parseInt(m[1],10), mo = parseInt(m[2],10)-1, d = parseInt(m[3],10);
       dt = new Date(y, mo, d);
-      if (!isNaN(dt.getTime())){ _toDtCache.set(key, dt); return dt; }
+      if (!isNaN(dt.getTime())){ _toDtCache.set(key, new Date(dt.getTime())); return new Date(dt.getTime()); }
     }
     m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(\s|$)/);
     if (m) {
       let mo = parseInt(m[1],10)-1, d = parseInt(m[2],10), y = parseInt(m[3],10);
       let dtt = new Date(y, mo, d);
-      if (!isNaN(dtt.getTime())){ _toDtCache.set(key, dtt); return dtt; }
+      if (!isNaN(dtt.getTime())){ _toDtCache.set(key, new Date(dtt.getTime())); return new Date(dtt.getTime()); }
     }
     m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (m) {
       let mo = parseInt(m[1],10)-1, d = parseInt(m[2],10), y = parseInt(m[3],10);
       if (y<100) y+=2000;
       let dtt = new Date(y, mo, d);
-      if (!isNaN(dtt.getTime()) && dtt.getMonth()===mo){ _toDtCache.set(key, dtt); return dtt; }
+      if (!isNaN(dtt.getTime()) && dtt.getMonth()===mo){ _toDtCache.set(key, new Date(dtt.getTime())); return new Date(dtt.getTime()); }
       let d2 = parseInt(m[1],10), mo2 = parseInt(m[2],10)-1;
       let dt2 = new Date(y, mo2, d2);
-      if (!isNaN(dt2.getTime())){ _toDtCache.set(key, dt2); return dt2; }
+      if (!isNaN(dt2.getTime())){ _toDtCache.set(key, new Date(dt2.getTime())); return new Date(dt2.getTime()); }
     }
     m = str.match(/^(\d{4})(\d{2})(\d{2})$/);
     if (m) {
       let dtt = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
-      if (!isNaN(dtt.getTime())){ _toDtCache.set(key, dtt); return dtt; }
+      if (!isNaN(dtt.getTime())){ _toDtCache.set(key, new Date(dtt.getTime())); return new Date(dtt.getTime()); }
     }
     m = str.match(/(\d{4})年(\d{1,2})月(\d{1,2})日?/);
     if (m) {
       let dtt = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
-      if (!isNaN(dtt.getTime())){ _toDtCache.set(key, dtt); return dtt; }
+      if (!isNaN(dtt.getTime())){ _toDtCache.set(key, new Date(dtt.getTime())); return new Date(dtt.getTime()); }
     }
     let dtt = new Date(str);
     if (!isNaN(dtt.getTime())) {
       let nd = new Date(dtt.getFullYear(), dtt.getMonth(), dtt.getDate());
-      _toDtCache.set(key, nd);
-      return nd;
+      _toDtCache.set(key, new Date(nd.getTime()));
+      return new Date(nd.getTime());
     }
     _toDtCache.set(key, null);
     return null;
@@ -275,6 +278,11 @@
   }
 
   function processWorkbook(workbook, config){
+    // No cross-file cache: every upload is treated as fresh, clear all LRU/date caches
+    _toDtCache.clear();
+    _satLabelCache.clear();
+    _weekLabelCache.clear();
+
     // config: {exf_cut, etd_cut, output_cut, gb_cut, etd_packout_offset}
     let cfg = {
       exf_cut: (config && config.exf_cut) || 'Saturday',
@@ -503,8 +511,8 @@
       Object.entries(d).forEach(([pn, daily])=>{
         if (skuAttrs[pn]){
           newDict[pn]=daily;
-        } else {
-          let canon = pn.startsWith('GB-') ? toCanonicalGb(pn) : pn;
+        } else if (pn.startsWith('GB-')) {
+          let canon = toCanonicalGb(pn);
           if (newDict[canon]){
             Object.entries(daily).forEach(([ds, qty])=>{
               newDict[canon][ds] = (newDict[canon][ds]||0) + qty;
@@ -513,6 +521,7 @@
             newDict[canon] = Object.assign({}, daily);
           }
         }
+        // else: FR/LT/RT etc. ignored — only FG (SKU) and GB are needed
       });
       return newDict;
     }
@@ -520,6 +529,7 @@
       let newDict={};
       if (!d) return newDict;
       Object.entries(d).forEach(([pn, daily])=>{
+        if (!pn.startsWith('GB-')) return; // only GB-
         let canon = toCanonicalGb(pn);
         if (newDict[canon]){
           Object.entries(daily).forEach(([ds, qty])=>{
@@ -544,7 +554,7 @@
     [data.gated, data.ungated, data.ctb_gb].forEach(d=>{
       if (!d) return;
       Object.keys(d).forEach(pn=>{
-        if (!skuAttrs[pn]) allGbSet.add(pn);
+        if (!skuAttrs[pn] && pn.startsWith('GB-')) allGbSet.add(pn);
       });
     });
 

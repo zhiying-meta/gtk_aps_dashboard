@@ -143,6 +143,11 @@ def extract_weekly_cum(daily, cut_day):
 
 
 def process_uploaded_data(file_map, config):
+    # Every upload is treated as fresh — clear LRU caches to avoid cross-file reuse
+    _to_dt.cache_clear()
+    _to_saturday_label.cache_clear()
+    _date_to_week_label_cached.cache_clear()
+
     from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
     from app.modules.plan_merge.config import DEFAULT_ETD_PACKOUT_OFFSET
 
@@ -333,21 +338,19 @@ def process_uploaded_data(file_map, config):
                     return canon_gb
         return gb_pn
 
-    # Canonicalize daily dicts for GBs (merge case variants and alias)
+    # Canonicalize daily dicts for GBs (merge case variants and alias) — only GB-
     def canonicalize_gb_dict(d):
         new_dict = {}
         for pn, daily in d.items():
-            if pn.startswith("GB-"):
-                canon = to_canonical_gb(pn)
-                if canon in new_dict:
-                    # Merge daily quantities
-                    for ds, qty in daily.items():
-                        new_dict[canon][ds] = new_dict[canon].get(ds, 0.0) + float(qty)
-                else:
-                    new_dict[canon] = dict(daily)
+            if not pn.startswith("GB-"):
+                continue  # drop FR/LT/RT etc.
+            canon = to_canonical_gb(pn)
+            if canon in new_dict:
+                # Merge daily quantities
+                for ds, qty in daily.items():
+                    new_dict[canon][ds] = new_dict[canon].get(ds, 0.0) + float(qty)
             else:
-                # For non-GB (shouldn't happen here) keep as is
-                new_dict[pn] = daily
+                new_dict[canon] = dict(daily)
         return new_dict
 
     # Apply canonicalization to gated, ungated, ctb_gb (ctb_gb only contains GBs)
@@ -355,34 +358,35 @@ def process_uploaded_data(file_map, config):
     # For gated/ungated, they contain both SKU and GB; we need to keep SKU keys untouched, only GB keys canonicalized
     # So we handle separately: keep SKU entries as is, canonicalize GB entries and merge
     def canonicalize_mixed_dict(d):
-        # d is {PN: daily} where PN can be SKU or GB
+        # d is {PN: daily} where PN can be SKU or GB. FR/LT/RT are ignored (only FG and GB needed)
         new_dict = {}
         for pn, daily in d.items():
             if pn in sku_attrs:
                 # SKU, keep original PN
                 new_dict[pn] = daily
-            else:
-                # GB or other, canonicalize
-                canon = to_canonical_gb(pn) if pn.startswith("GB-") else pn
+            elif pn.startswith("GB-"):
+                # GB only, canonicalize
+                canon = to_canonical_gb(pn)
                 if canon in new_dict:
                     for ds, qty in daily.items():
                         new_dict[canon][ds] = new_dict[canon].get(ds, 0.0) + float(qty)
                 else:
                     new_dict[canon] = dict(daily)
+            # else: FR/LT/RT etc. dropped
         return new_dict
 
     plan_gated = canonicalize_mixed_dict(plan_gated)
     plan_ungated = canonicalize_mixed_dict(plan_ungated)
     ctb_gb = canonicalize_gb_dict(ctb_gb)
 
-    # ---- Build GB set: from mapping + any PN in gated/ungated/ctb_gb that is not a SKU ----
+    # ---- Build GB set: from mapping + any PN in gated/ungated/ctb_gb that is a GB (not FR/LT/RT) ----
     all_gb_set = set()
     for g in sku_to_gb.values():
         if g:
             all_gb_set.add(g)
     for source in (plan_gated, plan_ungated, ctb_gb):
         for pn in source.keys():
-            if pn not in sku_attrs:
+            if pn not in sku_attrs and pn.startswith("GB-"):
                 all_gb_set.add(pn)
 
     gb_groups = defaultdict(list)

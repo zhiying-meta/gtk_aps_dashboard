@@ -10,6 +10,7 @@
   const API_PIVOT = '/api/utilization/pivot';
   const API_UPLOAD = '/api/utilization/upload';
   const API_DEMO = '/api/utilization/demo/load';
+  const API_CLEAR = '/api/utilization/clear';
 
   let meta = null;
   let currentMode = 'day';
@@ -41,82 +42,117 @@
   }
 
   function statusBadgeHTML(status){
+    const versions = (status && status.versions) ? status.versions : [];
+    const filesFound = (status && status.files_found) ? status.files_found : [];
+    const details = (status && status.details) ? status.details : {};
+    let total = 0;
+    Object.values(details).forEach(d=> total+=d.records_shift||0);
+
+    const gatedReady = versions.includes('gated');
+    const ungatedReady = versions.includes('ungated');
+    const gatedFound = filesFound.includes('gated');
+    const ungatedFound = filesFound.includes('ungated');
+
+    const badge = (label, ready) => {
+      if(ready) return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">✅ ${label}: Ready</span>`;
+      else return `<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">❌ ${label}: Not Ready</span>`;
+    };
+
     if(status && status.loaded){
-      const vers = (status.versions||[]).join(', ')||'gated';
-      const details = status.details||{};
-      let total = 0;
-      Object.values(details).forEach(d=> total+=d.records_shift||0);
-      return `<span class="util-status-badge ready">✅ Ready: ${vers} — ${total} recs (truly ready)</span>`;
-    }else if(status && status.files_found && status.files_found.length>0){
-      const vers = status.files_found.join(', ');
-      return `<span class="util-status-badge empty" style="background:#fffbeb;color:#92400e;border-color:#fde68a">⚠️ Files found: ${vers} — not yet computed, click Apply/Reload to compute (first time ~40s, then cached 0.1s)</span>`;
+      if(gatedReady && ungatedReady){
+        return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">${badge('Gated', true)} ${badge('Ungated', true)} <span style="font-size:11px;color:#065f46;margin-left:4px">— ${total} recs — Showing both</span></span>`;
+      }else if(gatedReady && !ungatedReady){
+        return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">${badge('Gated', true)} ${badge('Ungated', false)} <span style="font-size:11px;color:#92400e;margin-left:4px">— ${total} recs — Showing Gated only (Ungated empty)</span></span>`;
+      }else if(!gatedReady && ungatedReady){
+        return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">${badge('Gated', false)} ${badge('Ungated', true)} <span style="font-size:11px;color:#92400e;margin-left:4px">— ${total} recs — Showing Ungated only (Gated empty)</span></span>`;
+      }else{
+        const vers = versions.join(', ')||'gated';
+        return `<span class="util-status-badge ready">✅ Ready: ${vers} — ${total} recs</span>`;
+      }
+    }else if(filesFound.length>0){
+      // Partial files but not yet computed
+      const gatedInfo = gatedFound ? (gatedReady ? 'Ready' : 'Files found, not computed') : 'Not Ready';
+      const ungatedInfo = ungatedFound ? (ungatedReady ? 'Ready' : 'Files found, not computed') : 'Not Ready';
+      return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;background:#fffbeb;border:1px solid #fde68a;padding:4px 8px;border-radius:12px">
+        ${gatedFound? `<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:10px;font-size:10px">⚠️ Gated: ${gatedInfo}</span>` : `<span style="background:#fef2f2;color:#991b1b;padding:2px 6px;border-radius:10px;font-size:10px">❌ Gated: Not Ready</span>`}
+        ${ungatedFound? `<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:10px;font-size:10px">⚠️ Ungated: ${ungatedInfo}</span>` : `<span style="background:#fef2f2;color:#991b1b;padding:2px 6px;border-radius:10px;font-size:10px">❌ Ungated: Not Ready</span>`}
+        <span style="font-size:10px;color:#92400e">— click Apply to compute (first time ~40s)</span></span>`;
     }else{
-      return `<span class="util-status-badge empty">No data — upload calendar+schedule, or zip, or demo (supports separate & one-click)</span>`;
+      return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">❌ Gated: Not Ready</span><span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">❌ Ungated: Not Ready</span><span style="font-size:11px;color:#64748b">No data — upload calendar+schedule, or zip, or demo</span></span>`;
     }
   }
 
   function buildUploadHTML(status){
-    const filesFound = (status && status.files_found) ? status.files_found.join(', ') : '';
+    const filesFound = (status && status.files_found) ? status.files_found : [];
+    const hasGated = filesFound.includes('gated');
+    const hasUngated = filesFound.includes('ungated');
+    const loadedVers = (status && status.versions) ? status.versions : [];
+    const isGatedReady = loadedVers.includes('gated');
+    const isUngatedReady = loadedVers.includes('ungated');
     return `
       <div class="section">
         <div class="section-header">
-          <span class="section-title">⚙️ Line Utilization — Upload</span>
+          <span class="section-title">⚙️ Line Utilization — Upload (Independent Modules)</span>
           <span id="util-status-badge">${statusBadgeHTML(status)}</span>
         </div>
-        <div style="padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#475569;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div><b>Formula:</b> <code>Capacity = UPH × Eff × WH</code> | <code>Load = Σ INPUT</code> | <code>Util% = Load / Capacity</code> capped at 100%</div>
-          <div style="font-size:11px">💡 Supports: separate files, one-click multi-file, zip, demo — like I/O Report</div>
+        <div style="padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;font-size:12px;color:#475569;margin-bottom:12px">
+          <div><b>Formula:</b> <code>Capacity = UPH × Efficiency × Working Hours</code> | <code>Load = Σ INPUT (schedule)</code> | <code>Util% = Load / Capacity</code> capped at 100% — Each module (Gated / Ungated) uploads independently. If only Gated uploaded, show Gated only, Ungated stays empty (Not Ready).</div>
         </div>
 
-        <!-- Quick Upload like I/O Report -->
-        <div class="util-upload-card" style="border:2px dashed #8b5cf6;background:#faf5ff;margin-bottom:12px">
-          <div class="util-upload-label">⚡ Quick Upload <span style="font-size:10px;background:#8b5cf6;color:#fff;padding:1px 6px;border-radius:8px">Recommended</span></div>
-          <div class="util-upload-hint">One-click: select 2 files (calendar+schedule) for gated, or 4 files for gated+ungated, or a .zip</div>
-          <input type="file" id="input-quick" accept=".xlsx,.zip" multiple style="margin:6px 0">
-          <div id="fname-quick" style="font-size:11px;color:#6d28d9;margin-top:6px;min-height:16px"></div>
-          <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
-            <button class="util-btn" id="btn-quick-upload" disabled>▶ Upload & Analyze</button>
-            <span id="msg-quick" style="font-size:11px;color:#64748b"></span>
+        <!-- What to upload & Schema — concise, View Schema is single source of truth -->
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#0c4a6e">📋 What to Upload — Required Files (English)</div>
+          <div style="font-size:12px;color:#334155;line-height:1.6">
+            <div>• <b>Per independent module (Gated / Ungated)</b> you need <b>2 files</b>: <code>Calendar (工作日历快照.xlsx)</code> + <code>Schedule (排产结果表.xlsx)</code> — or 1 zip containing both.</div>
+            <div>• <b>Calendar</b> defines capacity: <code>Capacity = UPH × Efficiency × Working Hours</code> per line/date/shift.</div>
+            <div>• <b>Schedule</b> defines load: <code>Load = Σ INPUT</code> per line/date/shift.</div>
+            <div>• <b>Utilization = Load / Capacity</b> capped at 100%. You can upload only Gated — matrix will show Gated only, Ungated stays <b>Not Ready (empty)</b>.</div>
           </div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fff;border:1px dashed #cbd5e1;border-radius:6px;padding:8px">
+            <b style="font-size:11px">📦 Download (no duplication):</b>
+            <a href="/api/utilization/templates/template" class="btn btn-sm">📦 Template Zip (Empty)</a>
+            <a href="/api/utilization/templates/demo" class="btn btn-sm" style="background:#fef3c7;border-color:#fde68a;color:#92400e">📦 Demo Zip (Gated) — Downloadable like Template</a>
+            <button id="btn-view-schema" class="btn btn-sm util-btn-outline">🔍 View Json Schema (Single Source of Truth)</button>
+            <span style="font-size:10px;color:#64748b">Template and Demo are downloadable like other modules. Click View Json Schema to see required columns and formulas — no duplicate schema shown elsewhere.</span>
+          </div>
+          <div id="schema-detail" style="display:none;margin-top:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;font-size:11px;max-height:400px;overflow:auto;white-space:pre-wrap"></div>
         </div>
 
-        <div style="font-size:11px;color:#94a3b8;margin:8px 0;text-align:center">— or upload separately —</div>
 
         <div class="util-upload-grid">
-          <div class="util-upload-card" id="card-gated">
-            <div class="util-upload-label">Gated Version</div>
-            <div class="util-upload-hint">Supports separate: calendar alone or schedule alone</div>
-            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-              <div><label style="font-size:11px">Calendar (工作日历快照.xlsx)</label><br><input type="file" id="file-gated-cal" accept=".xlsx"></div>
-              <div><label style="font-size:11px">Schedule (排产结果表.xlsx)</label><br><input type="file" id="file-gated-sched" accept=".xlsx"></div>
-            </div>
+          <!-- Gated independent one-click -->
+          <div class="util-upload-card" id="card-gated" style="border:2px dashed #f59e0b;background:#fffbeb">
+            <div class="util-upload-label">🟡 Gated — One-Click Upload <span style="font-size:10px;background:#f59e0b;color:#fff;padding:1px 6px;border-radius:8px">Independent</span></div>
+            <div class="util-upload-hint">Select 2 xlsx (calendar + schedule) or 1 zip containing both. Auto-detects type. After upload, matrix shows immediately; Ungated can be empty.</div>
+            <input type="file" id="input-gated" accept=".xlsx,.zip" multiple style="margin:8px 0">
+            <div id="fname-gated" style="font-size:11px;color:#92400e;margin-top:6px;min-height:16px;word-break:break-all"></div>
             <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
-              <button class="util-btn" id="btn-upload-gated-cal" style="padding:3px 8px;font-size:11px">Upload Calendar Only</button>
-              <button class="util-btn" id="btn-upload-gated-sched" style="padding:3px 8px;font-size:11px">Upload Schedule Only</button>
-              <button class="util-btn" id="btn-upload-gated">Upload Both</button>
+              <button class="util-btn" id="btn-upload-gated" disabled style="background:#f59e0b;border-color:#f59e0b">▶ Upload Gated</button>
+              <button class="util-btn util-btn-outline" id="btn-clear-gated" style="border-color:#ef4444;color:#ef4444" title="Clear Gated cache — will become Not Ready">🗑️ Clear Gated</button>
+              <span id="msg-gated" style="font-size:11px;color:#64748b"></span>
             </div>
-            <div style="margin-top:6px"><span id="msg-gated" style="font-size:11px;color:#64748b"></span></div>
-            <div id="status-gated-files" style="font-size:10px;color:#059669;margin-top:4px">${filesFound.includes('gated')? '✅ Files present for gated (truly ready only after compute)' : 'No files for gated'}</div>
+            <div id="status-gated-files" style="font-size:11px;margin-top:8px;padding:6px 8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : (hasGated? 'background:#fef3c7;color:#92400e;border:1px solid #fde68a' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca')}">
+              <span>${isGatedReady? '✅ Gated: Ready — computed and will be shown in matrix' : (hasGated? '⚠️ Gated: Partial — files present but not computed, re-upload to complete' : '❌ Gated: Not Ready — no files uploaded, matrix will show only Ungated if available')}</span>
+              <span style="font-size:10px;opacity:0.8">${isGatedReady? 'Status: Ready' : 'Status: Not Ready'}</span>
+            </div>
           </div>
-          <div class="util-upload-card" id="card-ungated">
-            <div class="util-upload-label">Ungated (optional)</div>
-            <div class="util-upload-hint">For compare — separate supported</div>
-            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-              <div><label style="font-size:11px">Calendar</label><br><input type="file" id="file-ungated-cal" accept=".xlsx"></div>
-              <div><label style="font-size:11px">Schedule</label><br><input type="file" id="file-ungated-sched" accept=".xlsx"></div>
-            </div>
+
+          <!-- Ungated independent one-click -->
+          <div class="util-upload-card" id="card-ungated" style="border:2px dashed #10b981;background:#ecfdf5">
+            <div class="util-upload-label">🟢 Ungated — One-Click Upload <span style="font-size:10px;background:#10b981;color:#fff;padding:1px 6px;border-radius:8px">Independent</span></div>
+            <div class="util-upload-hint">Same support: 2 files or zip one-click. Can be uploaded separately; if Gated missing, only Ungated will be displayed. If empty, matrix shows only uploaded version.</div>
+            <input type="file" id="input-ungated" accept=".xlsx,.zip" multiple style="margin:8px 0">
+            <div id="fname-ungated" style="font-size:11px;color:#065f46;margin-top:6px;min-height:16px;word-break:break-all"></div>
             <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
-              <button class="util-btn" id="btn-upload-ungated-cal" style="padding:3px 8px;font-size:11px">Upload Calendar Only</button>
-              <button class="util-btn" id="btn-upload-ungated-sched" style="padding:3px 8px;font-size:11px">Upload Schedule Only</button>
-              <button class="util-btn" id="btn-upload-ungated">Upload Both</button>
+              <button class="util-btn" id="btn-upload-ungated" disabled style="background:#10b981;border-color:#10b981">▶ Upload Ungated</button>
+              <button class="util-btn util-btn-outline" id="btn-clear-ungated" style="border-color:#ef4444;color:#ef4444" title="Clear Ungated cache — will become Not Ready">🗑️ Clear Ungated</button>
+              <span id="msg-ungated" style="font-size:11px;color:#64748b"></span>
             </div>
-            <div style="margin-top:6px"><span id="msg-ungated" style="font-size:11px;color:#64748b"></span></div>
-            <div id="status-ungated-files" style="font-size:10px;color:#059669;margin-top:4px">${filesFound.includes('ungated')? '✅ Files present for ungated' : 'No files for ungated'}</div>
+            <div id="status-ungated-files" style="font-size:11px;margin-top:8px;padding:6px 8px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : (hasUngated? 'background:#fef3c7;color:#92400e;border:1px solid #fde68a' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca')}">
+              <span>${isUngatedReady? '✅ Ungated: Ready — computed and will be shown' : (hasUngated? '⚠️ Ungated: Partial — files present but not computed' : '❌ Ungated: Not Ready — no files uploaded, matrix will show only Gated if available (empty allowed)')}</span>
+              <span style="font-size:10px;opacity:0.8">${isUngatedReady? 'Status: Ready' : 'Status: Not Ready'}</span>
+            </div>
           </div>
-        </div>
-        <div style="text-align:center;margin:12px 0">
-          <button class="util-btn util-btn-outline" id="btn-load-demo">📦 Load Demo (IVY20260721Gated) — One-click</button>
-          <span id="msg-demo" style="font-size:11px;margin-left:8px;color:#64748b"></span>
         </div>
       </div>
     `;
@@ -324,8 +360,30 @@
     const wrapper = document.getElementById('util-matrix-wrapper');
     if(!wrapper) return;
 
+    if(pivot.not_ready){
+      const reqVer = pivot.requested_version || 'requested version';
+      wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;margin:12px">
+        <div style="font-weight:600;margin-bottom:6px">❌ ${esc(reqVer.charAt(0).toUpperCase()+reqVer.slice(1))}: Not Ready</div>
+        <div style="font-size:12px;color:#92400e">${esc(pivot.message||'No data')}<br>Other module may be Ready — check upload status above. Matrix shows only Ready modules when Not Ready.</div>
+      </div>`;
+      // Also update badge to reflect not ready
+      const badge = document.getElementById('util-matrix-badge');
+      if(badge){
+        badge.innerHTML = `<span style="color:#991b1b">❌ ${esc(reqVer)}: Not Ready — empty</span> | <span style="color:#065f46">Ready modules: ${(meta&&meta.versions? meta.versions.join(', ') : 'none')}</span>`;
+      }
+      return;
+    }
+
     if(rows.length===0){
-      wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8">No matching data. Adjust filters.</div>`;
+      // Determine if it's because one module not ready
+      const readyVers = (meta && meta.versions) ? meta.versions : [];
+      const gatedReady = readyVers.map(v=>v.toLowerCase()).includes('gated');
+      const ungatedReady = readyVers.map(v=>v.toLowerCase()).includes('ungated');
+      let extraInfo = '';
+      if(!gatedReady || !ungatedReady){
+        extraInfo = `<div style="margin-top:8px;font-size:11px;color:#991b1b">Status: ${gatedReady? '✅ Gated: Ready' : '❌ Gated: Not Ready (empty)'} | ${ungatedReady? '✅ Ungated: Ready' : '❌ Ungated: Not Ready (empty)'} — Matrix shows only Ready modules.</div>`;
+      }
+      wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8">No matching data. Adjust filters.${extraInfo}</div>`;
       return;
     }
 
@@ -414,7 +472,21 @@
     const badge = document.getElementById('util-matrix-badge');
     if(badge){
       const truncInfo = pivot.truncated ? ` (showing first ${pivot.total_cols}/${pivot.total_cols_before} cols, use Date filters to see more)` : '';
-      badge.textContent = `${pivot.total_lines} rows × ${pivot.total_cols} cols${truncInfo} | Thick border per Line`;
+      // Determine ready status from meta or pivot.versions
+      const readyVers = (meta && meta.versions) ? meta.versions : (pivot.versions||[]);
+      const gatedReady = readyVers.map(v=>v.toLowerCase()).includes('gated');
+      const ungatedReady = readyVers.map(v=>v.toLowerCase()).includes('ungated');
+      let readyInfo = '';
+      if(gatedReady && ungatedReady){
+        readyInfo = '✅ Gated: Ready | ✅ Ungated: Ready — Showing both';
+      }else if(gatedReady && !ungatedReady){
+        readyInfo = '✅ Gated: Ready | ❌ Ungated: Not Ready (empty) — Showing Gated only';
+      }else if(!gatedReady && ungatedReady){
+        readyInfo = '❌ Gated: Not Ready (empty) | ✅ Ungated: Ready — Showing Ungated only';
+      }else if(pivot.rows && pivot.rows.length===0){
+        readyInfo = '❌ No data — upload at least one module';
+      }
+      badge.innerHTML = `${pivot.total_lines} rows × ${pivot.total_cols} cols${truncInfo} | Thick border per Line<br><span style="font-size:10px;color:#64748b">${readyInfo}</span>`;
     }
   }
 
@@ -457,6 +529,22 @@
     const root = getRoot();
     if(!root) return;
     const status = await checkStatus();
+
+    // Auto adjust selected version types based on ready status: show only ready modules
+    if(status && status.versions && status.versions.length>0){
+      // If only one version ready, select only that one -> matrix shows only that, other stays empty (Not Ready)
+      if(status.versions.length===1){
+        const v = status.versions[0];
+        selectedVersionTypes = new Set([v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()]);
+      }else{
+        // Both ready
+        selectedVersionTypes = new Set(status.versions.map(v=> v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()));
+      }
+    }else{
+      // No ready versions yet, keep both selected but will show empty
+      selectedVersionTypes = new Set(['Gated','Ungated']);
+    }
+
     let html = '';
     html += buildUploadHTML(status);
     html += buildMatrixSection();
@@ -468,120 +556,222 @@
     setupVersionTypeDropdown();
     setupLineDropdown(lines);
 
-    // Upload handlers - support separate and one-click like I/O Report
-    const bindUpload = (gated)=>{
-      const calId = gated ? 'file-gated-cal' : 'file-ungated-cal';
-      const schedId = gated ? 'file-gated-sched' : 'file-ungated-sched';
-      const btnBothId = gated ? 'btn-upload-gated' : 'btn-upload-ungated';
-      const btnCalOnlyId = gated ? 'btn-upload-gated-cal' : 'btn-upload-ungated-cal';
-      const btnSchedOnlyId = gated ? 'btn-upload-gated-sched' : 'btn-upload-ungated-sched';
-      const msgId = gated ? 'msg-gated' : 'msg-ungated';
-      const ver = gated ? 'gated' : 'ungated';
+    // ===== Independent one-click per version (Gated / Ungated) =====
+    const bindIndependentUpload = (ver) => {
+      const inputId = `input-${ver}`;
+      const btnId = `btn-upload-${ver}`;
+      const fnameId = `fname-${ver}`;
+      const msgId = `msg-${ver}`;
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(btnId);
+      const fnameEl = document.getElementById(fnameId);
+      const msgEl = document.getElementById(msgId);
+      let selectedFiles = [];
 
-      const uploadFiles = async (files, message)=>{
-        const msg = document.getElementById(msgId);
-        if(msg) msg.textContent = message || 'Uploading...';
-        try{
-          const fd = new FormData();
-          files.forEach(f=> fd.append('file', f));
-          // Also append version hint via filename if needed, backend will infer
-          const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
-          const j = await r.json();
-          if(!r.ok) throw new Error(j.error||'upload failed');
-          const res = j.results && j.results[ver] ? j.results[ver] : {};
-          if(res.ready){
-            if(msg) msg.textContent = `✅ Ready: ${res.lines||'?'} lines`;
-          }else if(res.partial){
-            if(msg) msg.textContent = `⚠️ Partial: cal=${res.has_calendar} sched=${res.has_schedule} — upload missing to complete`;
-          }else{
-            if(msg) msg.textContent = `✅ Uploaded — ${JSON.stringify(j.results||j)}`;
-          }
-          setTimeout(async ()=>{
-            const st = await checkStatus();
-            document.getElementById('util-status-badge').innerHTML = statusBadgeHTML(st);
-            if(st.loaded) applyPivot();
-          }, 800);
-        }catch(e){ if(document.getElementById(msgId)) document.getElementById(msgId).textContent='❌ '+e.message; }
-      };
+      if (!input || !btn) return;
 
-      // Both
-      document.getElementById(btnBothId)?.addEventListener('click', async ()=>{
-        const cal = document.getElementById(calId).files[0];
-        const sched = document.getElementById(schedId).files[0];
-        if(!cal && !sched){ alert('Select calendar and/or schedule'); return; }
-        const files = [];
-        if(cal) files.push(cal);
-        if(sched) files.push(sched);
-        uploadFiles(files, 'Uploading both...');
-      });
-      // Calendar only
-      document.getElementById(btnCalOnlyId)?.addEventListener('click', async ()=>{
-        const cal = document.getElementById(calId).files[0];
-        if(!cal){ alert('Select calendar file'); return; }
-        uploadFiles([cal], 'Uploading calendar only (partial)...');
-      });
-      // Schedule only
-      document.getElementById(btnSchedOnlyId)?.addEventListener('click', async ()=>{
-        const sched = document.getElementById(schedId).files[0];
-        if(!sched){ alert('Select schedule file'); return; }
-        uploadFiles([sched], 'Uploading schedule only (partial)...');
-      });
-    };
-    bindUpload(true);
-    bindUpload(false);
-
-    // Quick Upload (one-click) like I/O Report
-    const quickInput = document.getElementById('input-quick');
-    const quickBtn = document.getElementById('btn-quick-upload');
-    const quickMsg = document.getElementById('msg-quick');
-    const fnameQuick = document.getElementById('fname-quick');
-    let quickFiles = [];
-    if(quickInput){
-      quickInput.addEventListener('change', ()=>{
-        quickFiles = Array.from(quickInput.files||[]);
-        if(quickFiles.length===0){
-          if(fnameQuick) fnameQuick.textContent='';
-          if(quickBtn) quickBtn.disabled=true;
+      input.addEventListener('change', () => {
+        selectedFiles = Array.from(input.files || []);
+        if (selectedFiles.length === 0) {
+          if (fnameEl) fnameEl.textContent = '';
+          btn.disabled = true;
           return;
         }
-        const names = quickFiles.map(f=>f.name).join(', ');
-        if(fnameQuick) fnameQuick.textContent = `✓ ${quickFiles.length} files: ${names}`;
-        if(quickBtn) quickBtn.disabled=false;
+        const names = selectedFiles.map(f => f.name).join(', ');
+        if (fnameEl) fnameEl.textContent = `✓ ${selectedFiles.length} file(s): ${names}`;
+        btn.disabled = false;
       });
-    }
-    quickBtn?.addEventListener('click', async ()=>{
-      if(quickFiles.length===0){ alert('Select files or zip first'); return; }
-      if(quickMsg) quickMsg.textContent='Uploading... (supports zip & multi)';
+
+      btn.addEventListener('click', async () => {
+        if (selectedFiles.length === 0) {
+          alert('Please select files first (calendar + schedule or zip)');
+          return;
+        }
+        if (msgEl) msgEl.textContent = 'Uploading (independent module)...';
+        try {
+          const fd = new FormData();
+          selectedFiles.forEach(f => fd.append('file', f));
+          // Force version to this module, so backend only touches this version folder
+          const r = await fetch(`${API_UPLOAD}?version=${ver}`, { method: 'POST', body: fd });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || 'upload failed');
+          const res = j.results && j.results[ver] ? j.results[ver] : {};
+          if (res.ready) {
+            if (msgEl) msgEl.textContent = `✅ ${ver} Ready: ${res.lines || '?'} lines — can be displayed immediately, other module can stay empty`;
+          } else if (res.partial) {
+            if (msgEl) msgEl.textContent = `⚠️ Partial: cal=${res.has_calendar} sched=${res.has_schedule} — upload missing file to complete. Need both files to display`;
+          } else {
+            if (msgEl) msgEl.textContent = `✅ Uploaded — ${JSON.stringify(j.results || j)}`;
+          }
+          // Refresh status and matrix after upload
+          setTimeout(async () => {
+            try {
+              const st = await checkStatus();
+              const badge = document.getElementById('util-status-badge');
+              if (badge) badge.innerHTML = statusBadgeHTML(st);
+              if (st.loaded) {
+                await loadMeta();
+                const newLines = (meta && meta.lines) ? meta.lines : lines;
+                setupLineDropdown(newLines);
+                applyPivot();
+              } else {
+                // Even if partial, update status text per version
+                const gatedStatusEl = document.getElementById('status-gated-files');
+                const ungatedStatusEl = document.getElementById('status-ungated-files');
+                const filesFound = (st.files_found||[]);
+                if (gatedStatusEl) {
+                  if (filesFound.includes('gated')) {
+                    gatedStatusEl.textContent = st.versions && st.versions.includes('gated') ? '✅ Gated Ready' : '⚠️ Gated files present (partial or not computed)';
+                    gatedStatusEl.style.background = '#fef3c7';
+                  }
+                }
+                if (ungatedStatusEl) {
+                  if (filesFound.includes('ungated')) {
+                    ungatedStatusEl.textContent = st.versions && st.versions.includes('ungated') ? '✅ Ungated Ready' : '⚠️ Ungated files present';
+                    ungatedStatusEl.style.background = '#d1fae5';
+                  }
+                }
+              }
+            } catch (e) { console.warn(e); }
+          }, 800);
+        } catch (e) {
+          if (msgEl) msgEl.textContent = '❌ ' + e.message;
+        }
+      });
+    };
+
+    bindIndependentUpload('gated');
+    bindIndependentUpload('ungated');
+
+    // ===== Clear functionality — set module to Not Ready, support re-upload =====
+    const resetUploadInput = (ver) => {
+      const input = document.getElementById(`input-${ver}`);
+      const fname = document.getElementById(`fname-${ver}`);
+      const uploadBtn = document.getElementById(`btn-upload-${ver}`);
+      if(input) input.value = '';
+      if(fname) fname.textContent = '';
+      if(uploadBtn) uploadBtn.disabled = true;
+      // Also clear internal selectedFiles by triggering change event? We handle via closure reset in bindUpload, but we reset via input event
+      // For safety, set msg to hint re-upload
+      const msg = document.getElementById(`msg-${ver}`);
+      if(msg) msg.textContent = 'Cleared — you can re-select files and upload again';
+    };
+
+    const bindClear = (ver) => {
+      const btn = document.getElementById(`btn-clear-${ver}`);
+      if(!btn) return;
+      btn.addEventListener('click', async () => {
+        const confirmMsg = `Clear ${ver.toUpperCase()} module cache? It will become Not Ready (empty), matrix will show only remaining Ready module. After clear, you can re-upload new files for this module.`;
+        if(!confirm(confirmMsg)) return;
+        const msgEl = document.getElementById(`msg-${ver}`) || document.getElementById('msg-clear');
+        if(msgEl) msgEl.textContent = `Clearing ${ver}...`;
+        try{
+          const r = await fetch(`${API_CLEAR}?version=${ver}`, { method: 'POST' });
+          const j = await r.json();
+          if(!r.ok) throw new Error(j.error||'clear failed');
+          if(msgEl) msgEl.textContent = `✅ Cleared ${ver} — now Not Ready. You can re-upload new files.`;
+
+          // Immediately reset file input to allow re-upload of same or new files
+          resetUploadInput(ver);
+
+          // Refresh UI
+          setTimeout(async ()=>{
+            const st = await checkStatus();
+            const badge = document.getElementById('util-status-badge');
+            if(badge) badge.innerHTML = statusBadgeHTML(st);
+            // Update per-card status visually to Not Ready
+            const gatedEl = document.getElementById('status-gated-files');
+            const ungatedEl = document.getElementById('status-ungated-files');
+            if(st.versions && st.versions.length===0){
+              if(gatedEl){ gatedEl.style.background='#fef2f2'; gatedEl.style.border='1px solid #fecaca'; gatedEl.style.color='#991b1b'; gatedEl.innerHTML='<span>❌ Gated: Not Ready — cleared, no files. Re-upload supported.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready</span>'; }
+              if(ungatedEl){ ungatedEl.style.background='#fef2f2'; ungatedEl.style.border='1px solid #fecaca'; ungatedEl.style.color='#991b1b'; ungatedEl.innerHTML='<span>❌ Ungated: Not Ready — cleared, no files. Re-upload supported.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready</span>'; }
+            }else{
+              await loadMeta();
+              setupLineDropdown(meta?.lines||[]);
+              if(st.versions && st.versions.length>0){
+                if(st.versions.length===1){
+                  selectedVersionTypes = new Set([st.versions[0].charAt(0).toUpperCase()+st.versions[0].slice(1).toLowerCase()]);
+                }else{
+                  selectedVersionTypes = new Set(st.versions.map(v=> v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()));
+                }
+                setupVersionTypeDropdown();
+              }
+              applyPivot();
+              // If cleared version is current ver, ensure its status card shows Not Ready with re-upload hint
+              if(ver==='gated' && gatedEl){
+                if(!st.versions.includes('gated')){
+                  gatedEl.style.background='#fef2f2'; gatedEl.style.border='1px solid #fecaca'; gatedEl.style.color='#991b1b';
+                  gatedEl.innerHTML='<span>❌ Gated: Not Ready — cleared. Re-upload new files via above input (supports zip or 2 xlsx).</span><span style="font-size:10px;opacity:0.8">Status: Not Ready — Re-upload Ready</span>';
+                }
+              }
+              if(ver==='ungated' && ungatedEl){
+                if(!st.versions.includes('ungated')){
+                  ungatedEl.style.background='#fef2f2'; ungatedEl.style.border='1px solid #fecaca'; ungatedEl.style.color='#991b1b';
+                  ungatedEl.innerHTML='<span>❌ Ungated: Not Ready — cleared. Re-upload new files via above input.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready — Re-upload Ready</span>';
+                }
+              }
+            }
+            if(!st.loaded){
+              const wrapper = document.getElementById('util-matrix-wrapper');
+              if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">❌ All modules cleared — both Gated and Ungated are Not Ready (empty). You can re-upload new files for Gated or Ungated (independent one-click).</div>`;
+              const mbadge = document.getElementById('util-matrix-badge');
+              if(mbadge) mbadge.innerHTML = `<span style="color:#991b1b">❌ Gated: Not Ready | ❌ Ungated: Not Ready — empty — Re-upload supported</span>`;
+            }
+          }, 500);
+        }catch(e){
+          if(msgEl) msgEl.textContent = '❌ '+e.message;
+        }
+      });
+    };
+    bindClear('gated');
+    bindClear('ungated');
+
+    // View Schema — single source of truth, no duplicate schema elsewhere
+    // Download buttons Template Zip and Demo Zip are in top info box (no duplication)
+    document.getElementById('btn-view-schema')?.addEventListener('click', async ()=>{
+      const detailEl = document.getElementById('schema-detail');
+      if(!detailEl) return;
+      if(detailEl.style.display!=='none' && detailEl.textContent){
+        detailEl.style.display='none';
+        return;
+      }
+      detailEl.style.display='block';
+      detailEl.textContent='Loading schema...';
       try{
-        const fd = new FormData();
-        quickFiles.forEach(f=> fd.append('file', f));
-        const r = await fetch(API_UPLOAD, {method:'POST', body:fd});
-        const j = await r.json();
-        if(!r.ok) throw new Error(j.error||'upload failed');
-        if(quickMsg) quickMsg.textContent = `✅ ${JSON.stringify(j.results)} — Ready: ${j.saved_versions||''}`;
-        setTimeout(async ()=>{
-          const st = await checkStatus();
-          document.getElementById('util-status-badge').innerHTML = statusBadgeHTML(st);
-          if(st.loaded) applyPivot();
-        }, 800);
+        const schema = await fetchJSON('/api/utilization/templates/schema');
+        let html = '<div style="font-weight:600;margin-bottom:6px">📋 Detailed Schema (from /api/utilization/templates/schema)</div>';
+        const fmt = (obj)=>{
+          let s = `<div style="margin-bottom:10px"><b>${esc(obj.file||'File')}</b> — ${esc(obj.description||obj.note||'')}<br>`;
+          if(obj.formula) s+=`<div style="color:#059669">Formula: ${esc(obj.formula)}</div>`;
+          if(obj.fields){
+            s+='<table style="width:100%;border-collapse:collapse;margin-top:4px;font-size:11px"><tr style="background:#f1f5f9"><th style="border:1px solid #e2e8f0;padding:3px">Field</th><th style="border:1px solid #e2e8f0;padding:3px">Type</th><th style="border:1px solid #e2e8f0;padding:3px">Desc</th><th style="border:1px solid #e2e8f0;padding:3px">Example</th></tr>';
+            obj.fields.forEach(f=>{
+              s+=`<tr><td style="border:1px solid #e2e8f0;padding:3px"><code>${esc(f[0])}</code></td><td style="border:1px solid #e2e8f0;padding:3px">${esc(f[1])}</td><td style="border:1px solid #e2e8f0;padding:3px">${esc(f[2])}</td><td style="border:1px solid #e2e8f0;padding:3px">${esc(f[3]||'')}</td></tr>`;
+            });
+            s+='</table>';
+          }
+          if(obj.upload_requirements){
+            s+='<div style="margin-top:6px"><b>Upload Requirements:</b><br>';
+            Object.entries(obj.upload_requirements).forEach(([k,v])=>{ s+=`• <b>${esc(k)}</b>: ${esc(v)}<br>`; });
+            s+='</div>';
+          }
+          s+='</div>';
+          return s;
+        };
+        if(schema.calendar) html+=fmt(schema.calendar);
+        if(schema.schedule) html+=fmt(schema.schedule);
+        if(schema.upload_requirements){
+          html+=`<div style="margin-top:8px"><b>Upload Requirements</b>:<br>`;
+          Object.entries(schema.upload_requirements).forEach(([k,v])=>{ html+=`• ${esc(k)}: ${esc(v)}<br>`; });
+          html+=`</div>`;
+        }
+        detailEl.innerHTML = html;
       }catch(e){
-        if(quickMsg) quickMsg.textContent='❌ '+e.message;
+        detailEl.textContent='Failed to load schema: '+e.message;
       }
     });
 
-    document.getElementById('btn-load-demo')?.addEventListener('click', async ()=>{
-      const msg = document.getElementById('msg-demo');
-      if(msg) msg.textContent='Loading demo...';
-      try{
-        const r = await fetch(API_DEMO, {method:'POST'});
-        const j = await r.json();
-        if(!r.ok) throw new Error(j.error||'failed');
-        if(msg) msg.textContent=`✅ Demo loaded: ${j.lines} lines`;
-        setTimeout(async ()=>{ await loadMeta(); setupLineDropdown(meta.lines); applyPivot(); }, 800);
-      }catch(e){ if(msg) msg.textContent='❌ '+e.message; }
-    });
-
-    // Column dimension toggle (Day / Shift) like I/O Report
+    // Column dimension toggle (Day / Shift) like I/O Report — bottom Load Demo and Clear All removed per user request, only top independent modules kept
     const bindModeToggle = (id)=>{
       const btn = document.getElementById(id);
       if(!btn) return;

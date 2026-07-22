@@ -30,6 +30,21 @@ def _json_error(msg, code=500):
 def api_status():
     try:
         from app.modules.utilization_report.engine import _CACHES
+        import pathlib
+        base_path = pathlib.Path(DEFAULT_DATA_DIR)
+
+        # First, validate cache against filesystem — if user manually deletes gated/ungated folders,
+        # cache should be invalidated and not returned as Ready
+        # This explains: manually clear gated and ungated, but matrix still shows other version with no actual data
+        for k in list(_CACHES.keys()):
+            if k.startswith(DEFAULT_DATA_DIR + "::"):
+                ver = k.split("::")[-1]
+                util_dir = base_path / "utilization" / ver
+                cal = util_dir / "工作日历快照.xlsx"
+                sched = util_dir / "排产结果表.xlsx"
+                if not (util_dir.exists() and cal.exists() and sched.exists()):
+                    _CACHES.pop(k, None)
+
         cached_versions = {}
         for k in _CACHES.keys():
             if k.startswith(DEFAULT_DATA_DIR + "::"):
@@ -43,27 +58,15 @@ def api_status():
                     'records_day': len(c.records_day),
                 }
 
-        import pathlib
-        base_path = pathlib.Path(DEFAULT_DATA_DIR)
         files_found = []
         for ver in ['gated','ungated']:
             util_dir = base_path / "utilization" / ver
             if util_dir.exists() and (util_dir / "工作日历快照.xlsx").exists() and (util_dir / "排产结果表.xlsx").exists():
                 files_found.append(ver)
-        if not files_found:
-            for sub in base_path.iterdir():
-                if sub.is_dir() and ('Gated' in sub.name or 'gated' in sub.name.lower()):
-                    if (sub / "工作日历快照.xlsx").exists() and (sub / "排产结果表.xlsx").exists():
-                        files_found.append('gated')
-                        break
-            if not files_found:
-                for sub in base_path.iterdir():
-                    if sub.is_dir():
-                        if (sub / "工作日历快照.xlsx").exists() and (sub / "排产结果表.xlsx").exists():
-                            files_found.append('gated')
-                            break
+        # No fallback to IVY folders — after clear all, files_found should be empty, so UI shows Not Ready and matrix empty
+        # Only Ready if files exist AND cache exists (validated above)
 
-        # Truly ready only when cache exists
+        # Truly ready only when cache exists and files exist
         if cached_versions:
             return jsonify({
                 "loaded": True,
@@ -177,7 +180,21 @@ def api_pivot():
     try:
         caches = get_all_caches(DEFAULT_DATA_DIR)
         if not caches:
-            return _json_error("No data. Upload first.", 404)
+            # After clear all, no caches — return empty with not_ready flag so matrix shows no values (as user expects)
+            return jsonify({
+                "mode": request.args.get("mode", "day"),
+                "versions": [],
+                "requested_version": request.args.get("version", "all"),
+                "not_ready": True,
+                "columns": [],
+                "rows": [],
+                "detail": {},
+                "lines": [],
+                "total_lines": 0,
+                "total_cols": 0,
+                "message": "No data — both Gated and Ungated are Not Ready (empty). Upload at least one module.",
+                "all_cleared": True
+            })
 
         mode = request.args.get("mode", "day")
         version_param = request.args.get("version", "all")  # gated, ungated, all, compare
@@ -191,18 +208,46 @@ def api_pivot():
         # Determine which versions to include
         versions_to_include = []
         if version_param == "all" or version_param == "compare" or "," in version_param:
-            # Include all available caches
+            # Include all available caches - if only gated ready, show gated only (ungated empty)
             if version_param == "all" or version_param == "compare":
                 versions_to_include = list(caches.keys())
             else:
+                # e.g. version="gated,ungated" but filter only those that exist -> shows ready ones, missing ones remain not ready
                 versions_to_include = [v.strip() for v in version_param.split(",") if v.strip() in caches]
+                # If none of requested versions exist, return not_ready empty (explicit Not Ready display)
+                if not versions_to_include:
+                    return jsonify({
+                        "mode": mode,
+                        "versions": [],
+                        "requested_version": version_param,
+                        "not_ready": True,
+                        "columns": [],
+                        "rows": [],
+                        "detail": {},
+                        "lines": [],
+                        "total_lines": 0,
+                        "total_cols": 0,
+                        "message": f"{version_param} not ready — no data uploaded, other version may be ready"
+                    })
         else:
-            # Single version
+            # Single version explicit
             if version_param in caches:
                 versions_to_include = [version_param]
             else:
-                # fallback to first available
-                versions_to_include = [list(caches.keys())[0]]
+                # Version not ready -> return empty with not_ready flag so frontend can show "Not Ready" explicitly
+                return jsonify({
+                    "mode": mode,
+                    "versions": [],
+                    "requested_version": version_param,
+                    "not_ready": True,
+                    "columns": [],
+                    "rows": [],
+                    "detail": {},
+                    "lines": [],
+                    "total_lines": 0,
+                    "total_cols": 0,
+                    "message": f"{version_param} not ready — no data uploaded"
+                })
 
         # If version_type filter provided, further filter
         if version_filter:
@@ -329,20 +374,25 @@ def api_pivot():
 def api_upload():
     """
     Upload handler supporting:
+    - Separate per-version one-click: ?version=gated|ungated  (calendar+schedule or zip)
+      Allows uploading only one version and displaying it immediately, the other can be empty.
     - Separate upload: calendar alone or schedule alone (per version)
-    - One-click: calendar + schedule together (or zip)
-    - Multi-version: gated + ungated together (4 files or zip with both)
-    Like I/O Report: supports .xlsx, .zip, multiple files
+    - One-click: calendar + schedule together (or zip) for single version
+    - Multi-version (legacy): gated + ungated together (4 files or zip with both) when no version param
     """
     if not request.files:
         return _json_error("Expected calendar and schedule files (xlsx or zip)", 400)
+
+    # Forced version for independent one-click modules
+    forced_version = (request.args.get('version') or request.form.get('version') or '').strip().lower()
+    if forced_version not in ('gated', 'ungated'):
+        forced_version = None
 
     tmp_dir = tempfile.mkdtemp(prefix="util_upload_")
     try:
         import zipfile
 
-        # Collect all uploaded files, handle zip extraction
-        extracted_files = []  # list of paths in tmp_dir
+        extracted_files = []
 
         for key in request.files:
             for f in request.files.getlist(key):
@@ -354,7 +404,6 @@ def api_upload():
                 f.save(tmp_path)
 
                 if low.endswith('.zip'):
-                    # Extract zip
                     try:
                         with zipfile.ZipFile(tmp_path, 'r') as zf:
                             for info in zf.infolist():
@@ -362,18 +411,14 @@ def api_upload():
                                     continue
                                 if not info.filename.lower().endswith('.xlsx'):
                                     continue
-                                # Save with basename to avoid path traversal
                                 base = os.path.basename(info.filename)
-                                # Add prefix to avoid collision
                                 out_path = os.path.join(tmp_dir, f"zip_{base}")
                                 with zf.open(info) as src, open(out_path, 'wb') as dst:
                                     shutil.copyfileobj(src, dst)
                                 extracted_files.append(out_path)
-                        # Remove zip itself after extraction
                         os.remove(tmp_path)
                     except Exception as ze:
                         print(f"[util] zip extract failed {fname}: {ze}")
-                        # Keep zip as is? Skip
                         continue
                 else:
                     extracted_files.append(tmp_path)
@@ -381,11 +426,9 @@ def api_upload():
         if not extracted_files:
             return _json_error("No xlsx files found (including inside zip)", 400)
 
-        # Classify files into gated/ungated calendar/schedule
-        # Map: version -> {calendar: path, schedule: path}
-        def classify_file(path):
+        def classify_content_type(path):
+            """Return (is_calendar, is_schedule) based on name/content heuristic"""
             name = os.path.basename(path).lower()
-            # Check content hint if needed
             is_calendar = False
             is_schedule = False
             if "工作日历" in name or "calendar" in name or "日历" in name:
@@ -393,7 +436,6 @@ def api_upload():
             elif "排产结果" in name or "schedule" in name or "排产" in name:
                 is_schedule = True
             else:
-                # Try to guess by reading small sample for UPH/工时
                 try:
                     import pandas as pd
                     df = pd.read_excel(path, nrows=5, engine='openpyxl')
@@ -403,62 +445,59 @@ def api_upload():
                     else:
                         is_schedule = True
                 except:
-                    # Fallback: larger file likely calendar
-                    try:
-                        size = os.path.getsize(path)
-                        # Calendar is usually larger (18M vs 9M) but not reliable, assume first large is calendar
-                        pass
-                    except:
-                        pass
                     is_schedule = True
+            return is_calendar, is_schedule
 
-            # Determine version by filename
-            ver = "gated"  # default
+        def classify_file(path):
+            """Legacy helper for non-forced mode: also returns version hint"""
+            name = os.path.basename(path).lower()
+            is_cal, is_sched = classify_content_type(path)
+            ver = None
             if "ungated" in name or "ungate" in name:
                 ver = "ungated"
             elif "gated" in name:
                 ver = "gated"
-            else:
-                # If no hint, will be assigned later
-                ver = None
-
-            return ver, is_calendar, is_schedule
+            return ver, is_cal, is_sched
 
         # Group
-        version_groups = {
-            "gated": {"calendar": None, "schedule": None},
-            "ungated": {"calendar": None, "schedule": None},
-        }
+        if forced_version:
+            # Independent module: all files belong to forced_version
+            version_groups = {
+                forced_version: {"calendar": None, "schedule": None},
+            }
+            for p in extracted_files:
+                is_cal, is_sched = classify_content_type(p)
+                # If file is detected as both? prioritize not overwritten
+                if is_cal and not version_groups[forced_version]["calendar"]:
+                    version_groups[forced_version]["calendar"] = p
+                elif is_sched and not version_groups[forced_version]["schedule"]:
+                    version_groups[forced_version]["schedule"] = p
+                else:
+                    # Fallback: if classification ambiguous, fill remaining slot
+                    if not version_groups[forced_version]["calendar"]:
+                        version_groups[forced_version]["calendar"] = p
+                    elif not version_groups[forced_version]["schedule"]:
+                        version_groups[forced_version]["schedule"] = p
+        else:
+            # Legacy multi-version logic
+            version_groups = {
+                "gated": {"calendar": None, "schedule": None},
+                "ungated": {"calendar": None, "schedule": None},
+            }
+            unassigned = []
+            for p in extracted_files:
+                ver, is_cal, is_sched = classify_file(p)
+                if ver and is_cal and not version_groups[ver]["calendar"]:
+                    version_groups[ver]["calendar"] = p
+                elif ver and is_sched and not version_groups[ver]["schedule"]:
+                    version_groups[ver]["schedule"] = p
+                else:
+                    unassigned.append((p, is_cal, is_sched, ver))
 
-        # First pass: assign files with explicit version hint
-        unassigned = []
-        for p in extracted_files:
-            ver, is_cal, is_sched = classify_file(p)
-            if ver and is_cal and not version_groups[ver]["calendar"]:
-                version_groups[ver]["calendar"] = p
-            elif ver and is_sched and not version_groups[ver]["schedule"]:
-                version_groups[ver]["schedule"] = p
-            else:
-                unassigned.append((p, is_cal, is_sched, ver))
-
-        # Second pass: assign unassigned files to fill gaps
-        # Priority: fill gated first, then ungated
-        for p, is_cal, is_sched, ver_hint in unassigned:
-            # If ver_hint is None, try to assign to first version missing that type
-            target_vers = ["gated", "ungated"] if ver_hint is None else [ver_hint]
-            assigned = False
-            for tv in target_vers:
-                if is_cal and not version_groups[tv]["calendar"]:
-                    version_groups[tv]["calendar"] = p
-                    assigned = True
-                    break
-                if is_sched and not version_groups[tv]["schedule"]:
-                    version_groups[tv]["schedule"] = p
-                    assigned = True
-                    break
-            if not assigned:
-                # If still not assigned, try any missing slot
-                for tv in ["gated", "ungated"]:
+            for p, is_cal, is_sched, ver_hint in unassigned:
+                target_vers = ["gated", "ungated"] if ver_hint is None else [ver_hint]
+                assigned = False
+                for tv in target_vers:
                     if is_cal and not version_groups[tv]["calendar"]:
                         version_groups[tv]["calendar"] = p
                         assigned = True
@@ -467,20 +506,30 @@ def api_upload():
                         version_groups[tv]["schedule"] = p
                         assigned = True
                         break
+                if not assigned:
+                    for tv in ["gated", "ungated"]:
+                        if is_cal and not version_groups[tv]["calendar"]:
+                            version_groups[tv]["calendar"] = p
+                            assigned = True
+                            break
+                        if is_sched and not version_groups[tv]["schedule"]:
+                            version_groups[tv]["schedule"] = p
+                            assigned = True
+                            break
 
-        # Now we have version_groups with possibly partial (only calendar or only schedule)
-        # Save whatever we have to persist_dir, and for those versions where both exist, compute cache
+        # Save and compute
         results = {}
         any_saved = False
+        versions_to_process = [forced_version] if forced_version else ["gated", "ungated"]
 
-        for ver in ["gated", "ungated"]:
+        for ver in versions_to_process:
+            if ver not in version_groups:
+                continue
             cal_path = version_groups[ver]["calendar"]
             sched_path = version_groups[ver]["schedule"]
             persist_dir = os.path.join(DEFAULT_DATA_DIR, "utilization", ver)
             os.makedirs(persist_dir, exist_ok=True)
 
-            # If we have a file for this version, copy it to persist dir (even if partial)
-            # Keep existing file if new one not provided
             if cal_path:
                 dest = os.path.join(persist_dir, "工作日历快照.xlsx")
                 shutil.copyfile(cal_path, dest)
@@ -490,11 +539,9 @@ def api_upload():
                 shutil.copyfile(sched_path, dest)
                 any_saved = True
 
-            # Check if after saving, both files exist in persist_dir
             cal_persist = os.path.join(persist_dir, "工作日历快照.xlsx")
             sched_persist = os.path.join(persist_dir, "排产结果表.xlsx")
             if os.path.exists(cal_persist) and os.path.exists(sched_persist):
-                # Try to compute / validate
                 try:
                     cache = _compute_records(ver, cal_persist, sched_persist)
                     results[ver] = {
@@ -508,7 +555,6 @@ def api_upload():
                     traceback.print_exc()
                     results[ver] = {"ready": False, "error": str(ve)}
             else:
-                # Partial
                 has_cal = os.path.exists(cal_persist)
                 has_sched = os.path.exists(sched_persist)
                 if has_cal or has_sched:
@@ -520,13 +566,29 @@ def api_upload():
                         "message": f"Partial upload for {ver}: calendar={has_cal}, schedule={has_sched}. Upload missing file to complete.",
                     }
 
+        # If forced version uploaded but other version already exists, also include its status (so frontend knows overall)
+        if forced_version:
+            # Add info about the other version if files exist
+            other = "ungated" if forced_version == "gated" else "gated"
+            other_dir = os.path.join(DEFAULT_DATA_DIR, "utilization", other)
+            cal_other = os.path.join(other_dir, "工作日历快照.xlsx")
+            sched_other = os.path.join(other_dir, "排产结果表.xlsx")
+            if os.path.exists(cal_other) or os.path.exists(sched_other):
+                has_cal = os.path.exists(cal_other)
+                has_sched = os.path.exists(sched_other)
+                if has_cal and has_sched:
+                    # try to get cache info if already computed else mark partial
+                    if other not in results:
+                        results[other] = {"ready": True, "existing": True, "has_calendar": True, "has_schedule": True}
+                else:
+                    if other not in results:
+                        results[other] = {"ready": False, "partial": True, "has_calendar": has_cal, "has_schedule": has_sched, "existing": True}
+
         if not any_saved and not results:
             return _json_error("No valid calendar/schedule files classified. Please upload 工作日历快照.xlsx and 排产结果表.xlsx, or zip containing them.", 400)
 
-        # Reload caches
         reload_all(DEFAULT_DATA_DIR)
 
-        # Build response
         return jsonify({
             "ok": True,
             "results": results,
@@ -572,31 +634,268 @@ def api_demo_load():
         traceback.print_exc()
         return _json_error(str(e))
 
-# Templates
+
+@util_bp.route("/api/utilization/clear", methods=["POST", "DELETE"])
+def api_clear():
+    """
+    Clear cached data for a specific version or all.
+    If user doesn't want to see a previously loaded module, clear it so it becomes Not Ready.
+    Query param: version=gated|ungated|all (default all)
+    """
+    try:
+        version = (request.args.get('version') or request.form.get('version') or (request.json.get('version') if request.is_json else '') or '').strip().lower()
+        if not version:
+            version = request.args.get('ver') or ''
+            version = version.strip().lower() if version else 'all'
+
+        valid = {'gated', 'ungated', 'all'}
+        if version not in valid:
+            # If invalid, treat as all for safety, but return error if clearly wrong
+            if version == '':
+                version = 'all'
+            else:
+                return _json_error(f"Invalid version param: {version}. Use gated|ungated|all", 400)
+
+        from app.modules.utilization_report.engine import _CACHES
+
+        cleared = []
+        if version == 'all':
+            to_clear = ['gated', 'ungated']
+        else:
+            to_clear = [version]
+
+        for ver in to_clear:
+            persist_dir = pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / ver
+            # Remove cache pickle files and xlsx files
+            try:
+                if persist_dir.exists():
+                    # Remove all files inside, but keep dir for future uploads (or remove dir entirely)
+                    for f in persist_dir.glob("*"):
+                        try:
+                            if f.is_file():
+                                f.unlink()
+                            elif f.is_dir():
+                                shutil.rmtree(str(f))
+                        except Exception as e:
+                            print(f"[util] clear file failed {f}: {e}")
+                    # Optionally remove the directory itself to indicate Not Ready (empty)
+                    # Keep empty dir to avoid confusion, but it's okay to leave empty
+                    # If you want to remove dir entirely, uncomment:
+                    # shutil.rmtree(str(persist_dir), ignore_errors=True)
+            except Exception as e:
+                print(f"[util] clear dir failed {ver}: {e}")
+
+            # Clear from in-memory cache
+            # _CACHES keys are like "base_dir::version"
+            keys_to_remove = [k for k in list(_CACHES.keys()) if k.endswith(f"::{ver}")]
+            for k in keys_to_remove:
+                _CACHES.pop(k, None)
+            cleared.append(ver)
+
+        # After clearing, reload remaining caches (if any)
+        try:
+            reload_all(DEFAULT_DATA_DIR)
+        except Exception:
+            pass
+
+        # Get current status after clear
+        caches = get_all_caches(DEFAULT_DATA_DIR)
+        remaining = list(caches.keys())
+
+        return jsonify({
+            "ok": True,
+            "cleared": cleared,
+            "remaining_versions": remaining,
+            "message": f"Cleared {', '.join(cleared)}. Remaining: {', '.join(remaining) if remaining else 'none — all Not Ready'}"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Clear failed: {e}")
+
+# Templates - detailed schema and downloadable files
 @util_bp.route("/api/utilization/templates/schema", methods=["GET"])
 def api_schema():
     return jsonify({
         "calendar": {
             "file": "工作日历快照.xlsx",
+            "required": True,
+            "description": "Working calendar snapshot — defines capacity per line per shift",
             "fields": [
-                ["LINE_CODE", "String", "Line code", "AL1-PKG"],
-                ["PLAN_DATE", "Date", "Date", "2026/6/2"],
-                ["SHIFT_NAME", "String", "Shift", "白班 / 夜班"],
-                ["PLAN_TYPE", "String", "UPH / 工时 / 效率 / 良率", "UPH"],
-                ["PLAN_VALUE", "Number", "UPH=300, 工时=10, 效率=0.9", "320"],
-                ["PLAN_ITEM", "String", "INPUT", "INPUT"],
+                ["LINE_CODE", "String", "Line code", "AL1-PKG", "Required"],
+                ["PLAN_DATE", "Date", "Date (YYYY/MM/DD or YYYY-MM-DD)", "2026/6/2", "Required"],
+                ["SHIFT_NAME", "String", "Shift name, e.g. 白班 / 夜班 / Day / Night", "白班", "Required"],
+                ["PLAN_TYPE", "String", "Type: UPH / 工时 (working hours) / 效率 (efficiency) / 良率", "UPH", "Required"],
+                ["PLAN_VALUE", "Number", "Value: UPH=300, 工时=10, 效率=0.9", "320", "Required"],
+                ["PLAN_ITEM", "String", "Fixed INPUT — only INPUT rows are used for capacity", "INPUT", "Required"],
             ],
-            "note": "Capacity per shift = UPH * 效率 * 工时 where PLAN_ITEM=INPUT",
+            "formula": "Capacity per shift = UPH × 效率 × 工时 where PLAN_ITEM=INPUT",
+            "example": "For line AL1-PKG on 2026-06-02 白班: UPH=300, 效率=0.9, 工时=10 => Capacity=2700",
+            "note": "Must have 3 rows per line/date/shift (one per PLAN_TYPE). Missing UPH/效率/工时 defaults to 0 => capacity 0.",
         },
         "schedule": {
             "file": "排产结果表.xlsx",
+            "required": True,
+            "description": "Schedule result — defines load per line per shift",
             "fields": [
-                ["LINE_CODE", "String", "Line", "AL1-PKG"],
-                ["SHIFT_NAME", "String", "Shift", "白班"],
-                ["PLAN_ITEM", "String", "INPUT", "INPUT"],
-                ["PLAN_DATE", "Date", "Date", "2026/6/2"],
-                ["PLAN_VALUE", "Number", "Qty", "1000"],
+                ["LINE_CODE", "String", "Line", "AL1-PKG", "Required"],
+                ["SHIFT_NAME", "String", "Shift", "白班", "Required"],
+                ["PLAN_ITEM", "String", "Must be INPUT — only INPUT is summed as load", "INPUT", "Required"],
+                ["PLAN_DATE", "Date", "Date", "2026/6/2", "Required"],
+                ["PLAN_VALUE", "Number", "Qty", "1000", "Required"],
             ],
-            "note": "Load per shift = sum PLAN_VALUE where PLAN_ITEM=INPUT",
+            "formula": "Load per shift = sum PLAN_VALUE where PLAN_ITEM=INPUT",
+            "example": "If schedule has 1000 INPUT for AL1-PKG 2026-06-02 白班, Load=1000",
+            "note": "Utilization = Load / Capacity, capped at 100% for display, overload flagged if >100%",
+        },
+        "upload_requirements": {
+            "gated": "Independent module — can upload only Gated (calendar + schedule) and show Gated only, Ungated can be empty",
+            "ungated": "Independent module — can upload only Ungated and show Ungated only",
+            "files_per_module": "2 files per module: 1 calendar (工作日历快照.xlsx) + 1 schedule (排产结果表.xlsx), or 1 zip containing both",
+            "both_modules": "If both Gated and Ungated uploaded, matrix shows both with version_type column (Gated yellow, Ungated green)",
         }
     })
+
+
+def _util_xlsx_buf(header, rows=None):
+    import io
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(header)
+    for r in rows or []:
+        ws.append(r)
+    # Add some styling for header? keep simple
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def _util_zip_buf(empty=True, use_existing_demo=False):
+    """
+    Create zip with calendar and schedule
+    empty=True -> only headers
+    empty=False -> sample data or existing demo files if available
+    """
+    import io
+    import zipfile
+    import pathlib
+
+    cal_header = ["LINE_CODE", "PLAN_DATE", "SHIFT_NAME", "PLAN_TYPE", "PLAN_VALUE", "PLAN_ITEM"]
+    sched_header = ["LINE_CODE", "SHIFT_NAME", "PLAN_ITEM", "PLAN_DATE", "PLAN_VALUE"]
+
+    if empty:
+        cal_rows = []
+        sched_rows = []
+    else:
+        # Sample rows for demo
+        cal_rows = [
+            ["AL1-PKG", "2026/6/2", "白班", "UPH", 300, "INPUT"],
+            ["AL1-PKG", "2026/6/2", "白班", "工时", 10, "INPUT"],
+            ["AL1-PKG", "2026/6/2", "白班", "效率", 0.9, "INPUT"],
+            ["AL1-PKG", "2026/6/2", "夜班", "UPH", 280, "INPUT"],
+            ["AL1-PKG", "2026/6/2", "夜班", "工时", 10, "INPUT"],
+            ["AL1-PKG", "2026/6/2", "夜班", "效率", 0.85, "INPUT"],
+            ["AL1-FAT", "2026/6/2", "白班", "UPH", 320, "INPUT"],
+            ["AL1-FAT", "2026/6/2", "白班", "工时", 10, "INPUT"],
+            ["AL1-FAT", "2026/6/2", "白班", "效率", 0.92, "INPUT"],
+        ]
+        sched_rows = [
+            ["AL1-PKG", "白班", "INPUT", "2026/6/2", 1500],
+            ["AL1-PKG", "夜班", "INPUT", "2026/6/2", 1200],
+            ["AL1-FAT", "白班", "INPUT", "2026/6/2", 2000],
+            ["AL1-FAT", "白班", "INPUT", "2026/6/3", 1800],
+        ]
+
+    # Try to use existing demo files if use_existing_demo and files exist
+    if use_existing_demo and not empty:
+        # Look for IVY demo or utilization/gated demo
+        candidates = [
+            pathlib.Path(DEFAULT_DATA_DIR) / "IVY20260721Gated" / "工作日历快照.xlsx",
+            pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / "gated" / "工作日历快照.xlsx",
+            pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / "gated" / "工作日历快照.xlsx",
+        ]
+        # Actually for zip demo we might want to include real files if they exist
+        # For simplicity, if real files exist, we will zip those files directly (preserve content)
+        real_cal = None
+        real_sched = None
+        for p in [pathlib.Path(DEFAULT_DATA_DIR) / "IVY20260721Gated" / "工作日历快照.xlsx",
+                  pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / "gated" / "工作日历快照.xlsx"]:
+            if p.exists():
+                real_cal = p
+                break
+        for p in [pathlib.Path(DEFAULT_DATA_DIR) / "IVY20260721Gated" / "排产结果表.xlsx",
+                  pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / "gated" / "排产结果表.xlsx"]:
+            if p.exists():
+                real_sched = p
+                break
+        if real_cal and real_sched:
+            # Return zip with real files
+            zb = io.BytesIO()
+            with zipfile.ZipFile(zb, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(str(real_cal), arcname="工作日历快照.xlsx")
+                zf.write(str(real_sched), arcname="排产结果表.xlsx")
+            zb.seek(0)
+            return zb
+
+    zb = io.BytesIO()
+    with zipfile.ZipFile(zb, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("工作日历快照.xlsx", _util_xlsx_buf(cal_header, cal_rows).getvalue())
+        zf.writestr("排产结果表.xlsx", _util_xlsx_buf(sched_header, sched_rows).getvalue())
+    zb.seek(0)
+    return zb
+
+
+@util_bp.route("/api/utilization/templates/template", methods=["GET"])
+def api_template():
+    """Download empty templates zip (calendar + schedule with headers only)"""
+    from flask import send_file
+    return send_file(_util_zip_buf(empty=True), mimetype="application/zip", as_attachment=True, download_name="utilization_templates.zip")
+
+
+@util_bp.route("/api/utilization/templates/calendar", methods=["GET"])
+def api_template_calendar():
+    """Download single empty calendar template"""
+    from flask import send_file
+    header = ["LINE_CODE", "PLAN_DATE", "SHIFT_NAME", "PLAN_TYPE", "PLAN_VALUE", "PLAN_ITEM"]
+    return send_file(_util_xlsx_buf(header, []), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="工作日历快照_template.xlsx")
+
+
+@util_bp.route("/api/utilization/templates/schedule", methods=["GET"])
+def api_template_schedule():
+    """Download single empty schedule template"""
+    from flask import send_file
+    header = ["LINE_CODE", "SHIFT_NAME", "PLAN_ITEM", "PLAN_DATE", "PLAN_VALUE"]
+    return send_file(_util_xlsx_buf(header, []), mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="排产结果表_template.xlsx")
+
+
+@util_bp.route("/api/utilization/templates/demo", methods=["GET"])
+def api_demo_download():
+    """Download demo data zip - like template download, for Gated module (independent)"""
+    from flask import send_file
+    return send_file(_util_zip_buf(empty=False, use_existing_demo=True), mimetype="application/zip", as_attachment=True, download_name="utilization_demo_gated.zip")
+
+
+@util_bp.route("/api/utilization/templates/zip", methods=["GET"])
+@util_bp.route("/api/utilization/templates/input_template.xlsx", methods=["GET"])
+def api_combined_template():
+    """Combined template workbook with 2 sheets: calendar and schedule"""
+    import io
+    import openpyxl
+    from flask import send_file
+    wb = openpyxl.Workbook()
+    ws_cal = wb.active
+    ws_cal.title = "Calendar (工作日历快照)"
+    ws_cal.append(["LINE_CODE", "PLAN_DATE", "SHIFT_NAME", "PLAN_TYPE", "PLAN_VALUE", "PLAN_ITEM"])
+    ws_cal.append(["AL1-PKG", "2026/6/2", "白班", "UPH", 300, "INPUT"])
+    ws_cal.append(["AL1-PKG", "2026/6/2", "白班", "工时", 10, "INPUT"])
+    ws_cal.append(["AL1-PKG", "2026/6/2", "白班", "效率", 0.9, "INPUT"])
+    ws_sched = wb.create_sheet("Schedule (排产结果表)")
+    ws_sched.append(["LINE_CODE", "SHIFT_NAME", "PLAN_ITEM", "PLAN_DATE", "PLAN_VALUE"])
+    ws_sched.append(["AL1-PKG", "白班", "INPUT", "2026/6/2", 1500])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="utilization_template.xlsx")

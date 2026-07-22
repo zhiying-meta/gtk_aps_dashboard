@@ -352,24 +352,8 @@ def load_data_for_version(base_dir: str, version: str) -> UtilizationCache:
         if calendar_path and schedule_path:
             break
 
-    # Fallback: search recursively for exact filenames (first)
     if not calendar_path or not schedule_path:
-        # Search for 工作日历快照.xlsx and 排产结果表.xlsx in base_path
-        for f in base_path.rglob("工作日历快照.xlsx"):
-            calendar_path = str(f)
-            break
-        for f in base_path.rglob("排产结果表.xlsx"):
-            # Take one that is in same parent as calendar if possible
-            if calendar_path and pathlib.Path(f).parent == pathlib.Path(calendar_path).parent:
-                schedule_path = str(f)
-                break
-        if not schedule_path:
-            for f in base_path.rglob("排产结果表.xlsx"):
-                schedule_path = str(f)
-                break
-
-    if not calendar_path or not schedule_path:
-        raise FileNotFoundError(f"Need calendar and schedule xlsx. Found calendar={calendar_path}, schedule={schedule_path} in {base_dir} version={version}")
+        raise FileNotFoundError(f"Need calendar and schedule xlsx. Found calendar={calendar_path}, schedule={schedule_path} in {base_dir} version={version}. After clear, no fallback to IVY — matrix should be empty.")
 
     return _compute_records(version, calendar_path, schedule_path)
 
@@ -391,13 +375,23 @@ def get_all_caches(base_dir: str) -> Dict[str, UtilizationCache]:
     result = {}
     base_path = pathlib.Path(base_dir)
 
-    # Check cache first
-    for k, v in _CACHES.items():
+    # Check cache first, but validate files still exist — if user manually deletes gated/ungated folders, cache should be invalidated
+    # This fixes: manually clear gated and ungated, but matrix still shows other version with no actual data
+    for k in list(_CACHES.keys()):
         if k.startswith(base_dir + "::"):
             ver = k.split("::")[-1]
-            result[ver] = v
+            util_dir = base_path / "utilization" / ver
+            cal = util_dir / "工作日历快照.xlsx"
+            sched = util_dir / "排产结果表.xlsx"
+            # If files missing (manual clear), remove from cache — becomes Not Ready
+            if not (util_dir.exists() and cal.exists() and sched.exists()):
+                _CACHES.pop(k, None)
+                continue
+            # Files exist, keep cache
+            result[ver] = _CACHES[k]
 
-    # Check explicit utilization folders for any missing versions
+    # Check explicit utilization folders for any missing versions — only check exact files, no fallback to IVY or rglob
+    # After clear, folders will be empty, so result stays empty and matrix shows no values (as user expects)
     for ver in ['gated', 'ungated']:
         if ver in result:
             continue
@@ -410,63 +404,15 @@ def get_all_caches(base_dir: str) -> Dict[str, UtilizationCache]:
                     c = _compute_records(ver, str(cal), str(sched))
                     result[ver] = c
                     _CACHES[f"{base_dir}::{ver}"] = c
-                else:
-                    try:
-                        c = load_data_for_version(str(util_dir), ver)
-                        result[ver] = c
-                        _CACHES[f"{base_dir}::{ver}"] = c
-                    except:
-                        pass
             except Exception:
                 continue
 
     if result:
         return result
 
-    if not result:
-        # Try generic search: look for data/IVY*Gated folder as gated only
-        for sub in base_path.iterdir():
-            if sub.is_dir() and ('Gated' in sub.name or 'gated' in sub.name.lower()):
-                try:
-                    cal = sub / "工作日历快照.xlsx"
-                    sched = sub / "排产结果表.xlsx"
-                    if cal.exists() and sched.exists():
-                        c = _compute_records('gated', str(cal), str(sched))
-                        result['gated'] = c
-                        _CACHES[f"{base_dir}::gated"] = c
-                        break
-                except:
-                    continue
-
-    if not result:
-        # Last fallback: scan for first pair anywhere under base_dir (limit to data/IVY* to avoid scanning entire data)
-        # Only search one level deep for speed: look for IVY folders
-        candidates = []
-        for sub in base_path.iterdir():
-            if sub.is_dir():
-                cal = sub / "工作日历快照.xlsx"
-                sched = sub / "排产结果表.xlsx"
-                if cal.exists() and sched.exists():
-                    candidates.append((cal, sched))
-        # If still none, do limited rglob (first match)
-        if not candidates:
-            for cal_path in base_path.rglob("工作日历快照.xlsx"):
-                sched_path = cal_path.parent / "排产结果表.xlsx"
-                if sched_path.exists():
-                    candidates.append((cal_path, sched_path))
-                    break
-                if len(candidates) >= 1:
-                    break
-        for cal_path, sched_path in candidates[:1]:
-            try:
-                c = _compute_records('gated', str(cal_path), str(sched_path))
-                result['gated'] = c
-                _CACHES[f"{base_dir}::gated"] = c
-                break
-            except Exception as e:
-                print(f"[util] fallback load failed for {cal_path}: {e}")
-                continue
-
+    # No fallback to IVY folders — after clear, should be truly empty (no values).
+    # Demo must be explicitly loaded via /api/utilization/demo/load which copies IVY files into utilization/gated.
+    # This ensures clear all results in empty matrix, as user expects.
     return result
 
 def reload_all(base_dir: str):
