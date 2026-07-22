@@ -6,6 +6,8 @@
 <title>Production Plan Review</title>
 <link rel="stylesheet" href="/static/global/style.css">
 <link rel="stylesheet" href="/static/modules/plan_merge/style.css">
+<link rel="stylesheet" href="/static/modules/v2v/style.css">
+<link rel="stylesheet" href="/static/modules/io_report/style.css">
 </head>
 <body>
 <div class="app-layout">
@@ -27,6 +29,10 @@
         <span class="nav-icon">📊</span>
         <span class="nav-text">Gated/Ungated/CTB</span>
       </a>
+      <a href="#" class="nav-item" data-module="v2v">
+        <span class="nav-icon">🔍</span>
+        <span class="nav-text">V2V Comparison</span>
+      </a>
       <div class="nav-category">Single Version</div>
       <a href="#" class="nav-item" data-module="io-report">
         <span class="nav-icon">📈</span>
@@ -46,6 +52,8 @@
       </div>
     </header>
 
+    <!-- ===== Plan Merge Module ===== -->
+    <div id="module-plan-merge" class="module-section active">
     <!-- ===== Upload Section ===== -->
     <div class="section" id="upload-section">
       <div class="section-header">
@@ -200,19 +208,118 @@
         <table id="report-table"><thead id="table-head"></thead><tbody id="table-body"></tbody></table>
       </div>
     </div>
+    </div> <!-- end module-plan-merge -->
 
-    <!-- ===== I/O Report Section (Ported from Go aps-report) ===== -->
-    <div id="io-report-section" style="display:none">
-      <!-- Content rendered by static/modules/io_report/app.js -->
-      <div style="text-align:center;padding:40px;color:#94a3b8">Loading I/O Report...</div>
+    <!-- ===== V2V Module ===== -->
+    <div id="module-v2v" class="module-section">
+      <div id="v2v-restore-banner" style="display:none;flex-direction:column;gap:4px;background:#eff6ff;border:1px solid #bfdbfe;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:12px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
+        <button id="v2v-btn-download" class="btn btn-sm" style="background:#0f172a;color:white">📥 Download Current View</button>
+        <button id="v2v-btn-export-html" class="btn btn-sm" style="background:#2563eb;color:white">📄 Export HTML Report</button>
+      </div>
+      <div class="v2v-section" id="v2v-upload-section">
+        <div class="v2v-section-header">
+          <span class="v2v-section-title">Select Version</span>
+          <span style="font-size:12px;color:#64748b">Auto-scan folders | <span id="v2v-scan-time" style="color:#94a3b8"></span></span>
+        </div>
+        <div class="v2v-server-selector">
+          <div class="config-item">
+            <label style="font-size:12px">Previous Version</label>
+            <select id="v2v-server-a" class="v2v-select"><option>Loading...</option></select>
+          </div>
+          <div class="config-item">
+            <label style="font-size:12px">Latest Version</label>
+            <select id="v2v-server-b" class="v2v-select"><option>Loading...</option></select>
+          </div>
+          <button id="v2v-btn-refresh" class="btn btn-sm" style="height:36px" title="Re-scan folders">🔄 Refresh</button>
+          <button id="v2v-btn-load-server" class="btn btn-lg" style="height:36px;background:#0f172a;color:white">▶ Compare</button>
+        </div>
+        <div style="font-size:11px;color:#64748b;margin-top:8px">💡 Put version folders in project root, v2v_data/, data/, or input_files/. Click Refresh after adding new folder.</div>
+        <div id="v2v-status" style="margin-top:12px"></div>
+      </div>
+      <div class="v2v-section" id="v2v-detail-section" style="display:none">
+        <div class="v2v-section-header">
+          <span class="v2v-section-title">Detail Comparison</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="v2v-granularity-toggle">
+              <button data-granularity="monthly">Month</button>
+              <button data-granularity="week" class="active">Week</button>
+              <button data-granularity="day">Day</button>
+            </div>
+          </div>
+        </div>
+        <div id="v2v-breadcrumb" class="v2v-breadcrumb"></div>
+        <div class="v2v-detail-tabs" id="v2v-detail-tabs"></div>
+        <div class="v2v-toolbar">
+          <div class="v2v-toolbar-left" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px">Change Type:
+              <select id="v2v-filter-changetype" class="v2v-select" style="width:120px">
+                <option value="ALL">All</option>
+                <option value="ADDED">Added</option>
+                <option value="DELETED">Deleted</option>
+                <option value="MODIFY">Modified</option>
+              </select>
+            </label>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px" id="v2v-sku-filter-label">
+              <span style="white-space:nowrap">SKU Category:</span>
+              <div class="v2v-multi-select" id="v2v-sku-multi">
+                <button class="v2v-multi-btn" id="v2v-sku-btn" type="button">All SKU ▾</button>
+                <div class="v2v-multi-menu" id="v2v-sku-menu" style="display:none">
+                  <label><input type="checkbox" value="ALL" checked> All SKU</label>
+                  <label><input type="checkbox" value="MATERIAL"> 1- Material (3010*)</label>
+                  <label><input type="checkbox" value="FRAME"> 2- Frame (FR-*)</label>
+                  <label><input type="checkbox" value="GB"> 3- GB (GB-*)</label>
+                  <label><input type="checkbox" value="LT"> 4- LT (LT-*)</label>
+                  <label><input type="checkbox" value="RT"> 5- RT (RT-*)</label>
+                  <label><input type="checkbox" value="FG"> 6- FG (SK-*)</label>
+                </div>
+              </div>
+            </div>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px" id="v2v-line-filter-label">
+              <span style="white-space:nowrap">Line Category:</span>
+              <div class="v2v-multi-select" id="v2v-line-multi">
+                <button class="v2v-multi-btn" id="v2v-line-btn" type="button">All Lines ▾</button>
+                <div class="v2v-multi-menu" id="v2v-line-menu" style="display:none">
+                  <label><input type="checkbox" value="ALL" checked> All Lines</label>
+                  <label><input type="checkbox" value="AL1"> 1- AL1 (AL1-*)</label>
+                  <label><input type="checkbox" value="AL2"> 2- AL2 (AL2-*)</label>
+                  <label><input type="checkbox" value="AL3"> 3- AL3 (AL3-*)</label>
+                  <label><input type="checkbox" value="AL4"> 4- AL4 (AL4-*)</label>
+                  <label><input type="checkbox" value="AL5"> 5- AL5 (AL5-*)</label>
+                  <label><input type="checkbox" value="AL6"> 6- AL6 (AL6-*)</label>
+                  <label><input type="checkbox" value="AL7"> 7- AL7 (AL7-*)</label>
+                  <label><input type="checkbox" value="AL8"> 8- AL8 (AL8-*)</label>
+                  <label><input type="checkbox" value="AL9"> 9- AL9 (AL9-*)</label>
+                  <label><input type="checkbox" value="AL10"> 10- AL10 (AL10-*)</label>
+                  <label><input type="checkbox" value="ML2"> 11- ML2 (ML2-*)</label>
+                  <label><input type="checkbox" value="ML5"> 12- ML5 (ML5-*)</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="v2v-detail-content"></div>
+      </div>
+    </div>
+
+    <!-- ===== IO Report Module ===== -->
+    <div id="module-io-report" class="module-section">
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">📈 I/O Report</span>
+          <span style="font-size:12px;color:#64748b">Single Version - Line/PN view</span>
+        </div>
+        <div id="io-report-content">
+          <div style="padding:20px;text-align:center;color:#64748b">Loading I/O Report...</div>
+        </div>
+      </div>
     </div>
 
     <div id="loading" class="loading" style="display:none">
       <div class="spinner"></div>
-      <p>Loading...</p>
+      <p>Generating report...</p>
     </div>
 
-    <!-- ===== Schema Modal ===== -->
     <div id="schema-modal" class="modal" style="display:none">
       <div class="modal-backdrop"></div>
       <div class="modal-content">
@@ -223,16 +330,36 @@
         <div class="modal-body" id="schema-body"></div>
       </div>
     </div>
+
+    <div id="v2v-bom-modal" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="document.getElementById('v2v-bom-modal').style.display='none'"></div>
+      <div class="modal-content" style="max-width:800px;width:90%">
+        <div class="modal-header">
+          <span class="modal-title" id="v2v-bom-title">BOM Children</span>
+          <button class="modal-close" onclick="document.getElementById('v2v-bom-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="v2v-bom-body"></div>
+      </div>
+    </div>
+
+    <div id="v2v-breakdown-modal" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="document.getElementById('v2v-breakdown-modal').style.display='none'"></div>
+      <div class="modal-content" style="max-width:900px;width:90%">
+        <div class="modal-header">
+          <span class="modal-title" id="v2v-breakdown-title">Line/Shift Breakdown</span>
+          <button class="modal-close" onclick="document.getElementById('v2v-breakdown-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="v2v-breakdown-body"></div>
+      </div>
+    </div>
   </main>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="/static/modules/plan_merge/engine.js?v=20260717_2"></script>
-<script src="/static/modules/io_report/engine.js?v=20260717_2"></script>
-<script src="/static/global/app.js?v=20260717_2"></script>
-<script src="/static/modules/plan_merge/app.js?v=20260717_2"></script>
-<script src="/static/modules/io_report/app.js?v=20260717_2"></script>
-<link rel="stylesheet" href="/static/modules/io_report/style.css?v=20260717_1">
-<link rel="stylesheet" href="/static/modules/plan_merge/style.css?v=20260717_1">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/global/app.js?v=20260722_04"></script>
+<script src="/static/modules/plan_merge/app.js?v=20260722_04"></script>
+<script src="/static/modules/v2v/app.js?v=20260722_04"></script>
+<script src="/static/modules/io_report/app.js?v=20260722_04"></script>
+<script src="/static/modules/io_report/engine.js?v=20260722_04"></script>
 </body>
 </html>

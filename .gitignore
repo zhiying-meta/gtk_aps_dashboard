@@ -42,3 +42,12 @@ app/static/meta.json
 opencode.json
 
 dist/
+
+# V2V local test data - do not push large xlsx
+Ivy-*
+v2v_data/
+input_files/
+snapshot/
+# V2V Report exports
+V2V_Report_*.html
+BTO-Dashboard-*.html
