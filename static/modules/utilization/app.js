@@ -824,50 +824,213 @@
       applyPivot();
     });
 
-    // Download Static HTML — snapshot of current matrix for sharing
-    document.getElementById('btn-download-static-util')?.addEventListener('click', ()=>{
+    // Download Static HTML with flexible filtering — full interactive offline version
+    document.getElementById('btn-download-static-util')?.addEventListener('click', async ()=>{
+      const btn = document.getElementById('btn-download-static-util');
+      const origText = btn ? btn.textContent : '';
       try{
-        const wrapper = document.getElementById('util-matrix-wrapper');
-        const badge = document.getElementById('util-matrix-badge');
-        const tableHtml = wrapper ? wrapper.innerHTML : '<div>No data</div>';
-        const statusHtml = document.getElementById('util-status-badge') ? document.getElementById('util-status-badge').innerHTML : '';
-        const badgeHtml = badge ? badge.innerHTML : '';
+        if(btn){ btn.textContent='⏳ Preparing static HTML...'; btn.disabled=true; }
+        // Fetch full data for static export
+        const [statusData, metaData, pivotDay, pivotShift] = await Promise.all([
+          fetchJSON(API_STATUS).catch(()=>({})),
+          fetchJSON(API_META).catch(()=>({})),
+          fetchJSON(`${API_PIVOT}?mode=day&version=all`).catch(()=>({columns:[],rows:[]})),
+          fetchJSON(`${API_PIVOT}?mode=shift&version=all`).catch(()=>({columns:[],rows:[]}))
+        ]);
         const now = new Date().toLocaleString();
+        const staticData = {status: statusData, meta: metaData, pivotDay: pivotDay, pivotShift: pivotShift, currentMode: currentMode};
+
+        // Build static HTML with embedded data and filtering logic
         const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Line Utilization - Static Report - ${now}</title>
 <style>
-body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
-h1{font-size:18px;color:#1e293b}
-.status{margin:10px 0;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
-.badge{font-size:12px;color:#475569}
-.table-wrapper{overflow:auto;max-height:none;border:1px solid #e2e8f0;border-radius:6px;background:#fff}
+body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc;color:#1e293b}
+h1{font-size:18px;margin-bottom:4px}
+.sub{font-size:11px;color:#64748b;margin-bottom:10px}
+.status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}
+.filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.filter-group{display:flex;flex-direction:column;gap:4px;min-width:160px}
+.filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
+.filter-group input, .filter-group select{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
+.btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
+.btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
+.table-wrapper{overflow:auto;max-height:80vh;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:10px}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
-th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
+th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2;border-right:1px solid #334155}
 td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:center;min-width:68px}
 td.frozen{position:sticky;left:0;background:#fff;z-index:1;min-width:68px;text-align:left;font-weight:500}
+td.frozen.divider-col{background:#475569 !important;width:5px;min-width:5px;max-width:5px;padding:0 !important}
+th.frozen{left:0;z-index:3;background:#1e293b}
+th.divider-col{background:#475569 !important;width:5px;min-width:5px;max-width:5px}
 .util-cell-zero{color:#cbd5e1}
 .util-cell-red{background:#fef2f2;color:#991b1b}
 .util-cell-yellow{background:#fffbeb;color:#92400e}
 .util-cell-green{background:#ecfdf5;color:#065f46;font-weight:600}
-.type-Gated{background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px}
-.type-Ungated{background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:4px}
-.util-status-badge{padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600}
-.util-status-badge.ready{background:#dcfce7;color:#065f46;border:1px solid #86efac}
+.type-Gated{background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:11px}
+.type-Ungated{background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:4px;font-size:11px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin-right:4px}
+.badge-ready{background:#dcfce7;color:#065f46;border:1px solid #86efac}
+.badge-notready{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
 </style></head><body>
-<h1>⚙️ Line Utilization — Static Report</h1>
-<div style="font-size:11px;color:#64748b">Generated: ${now} | Mode: ${currentMode} | Filter: Version=${Array.from(selectedVersionTypes).join(',')} Lines=${Array.from(selectedLines).join(',')||'All'}</div>
-<div class="status"><b>Status:</b> ${statusHtml}<br><span class="badge">${badgeHtml}</span></div>
-<div class="table-wrapper">${tableHtml}</div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from Line Utilization dashboard. Data embedded at export time: ${pivotCache ? pivotCache.total_lines+' rows × '+pivotCache.total_cols+' cols' : ''}. Open this HTML directly to view.</div>
+<h1>⚙️ Line Utilization — Static Report (Interactive)</h1>
+<div class="sub">Generated: ${now} | Interactive filtering works offline — data embedded at export time. | Day cols: \${(staticData.pivotDay.columns||[]).length}, Shift cols: \${(staticData.pivotShift.columns||[]).length}, Lines: \${(staticData.meta.lines||[]).length}</div>
+<div class="status" id="static-status"></div>
+<div class="filters">
+  <div class="filter-group"><label>Version Type</label>
+    <div><label><input type="checkbox" id="f-gated" checked> Gated</label> <label><input type="checkbox" id="f-ungated" checked> Ungated</label></div>
+  </div>
+  <div class="filter-group"><label>Line (comma separated, empty=All)</label><input type="text" id="f-line" placeholder="e.g. AL1-PKG,AL1-FAT"></div>
+  <div class="filter-group"><label>Date From</label><input type="date" id="f-from"></div>
+  <div class="filter-group"><label>Date To</label><input type="date" id="f-to"></div>
+  <div class="filter-group"><label>Mode</label><div><button class="btn" id="f-mode-day">Day</button> <button class="btn btn-outline" id="f-mode-shift">Shift</button></div></div>
+  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply Filters</button> <button class="btn btn-outline" id="f-clear">Clear</button></div></div>
+</div>
+<div style="font-size:11px;color:#64748b">Formula: Capacity=UPH×Eff×WH | Load=Σ INPUT | Util%=Load/Capacity capped at 100% | Thick border per Line | Gated yellow, Ungated green</div>
+<div id="static-badge" style="margin:8px 0;font-size:11px"></div>
+<div class="table-wrapper" id="static-wrapper"><div style="text-align:center;padding:30px;color:#94a3b8">Loading...</div></div>
+<script>
+const STATIC_DATA = ${JSON.stringify(staticData).replace(/</g,'\\u003c')};
+
+function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+let currentMode = STATIC_DATA.currentMode || 'day';
+let selectedVersions = new Set(['Gated','Ungated']);
+let filterLine = '';
+let dateFrom = '';
+let dateTo = '';
+
+function getPivot(){
+  return currentMode==='day' ? STATIC_DATA.pivotDay : STATIC_DATA.pivotShift;
+}
+
+function renderStatus(){
+  const st = STATIC_DATA.status;
+  const versions = (st && st.versions) ? st.versions : [];
+  const gatedReady = versions.includes('gated');
+  const ungatedReady = versions.includes('ungated');
+  let html = '';
+  if(gatedReady && ungatedReady) html = '<span class="badge badge-ready">✅ Gated: Ready</span><span class="badge badge-ready">✅ Ungated: Ready</span> — Showing both';
+  else if(gatedReady) html = '<span class="badge badge-ready">✅ Gated: Ready</span><span class="badge badge-notready">❌ Ungated: Not Ready (empty)</span> — Showing Gated only';
+  else if(ungatedReady) html = '<span class="badge badge-notready">❌ Gated: Not Ready</span><span class="badge badge-ready">✅ Ungated: Ready</span> — Showing Ungated only';
+  else html = '<span class="badge badge-notready">❌ Gated: Not Ready</span><span class="badge badge-notready">❌ Ungated: Not Ready</span> — No data, re-upload needed';
+  document.getElementById('static-status').innerHTML = html;
+}
+
+function renderMatrix(){
+  const pivot = getPivot();
+  const cols = pivot.columns || [];
+  const rows = pivot.rows || [];
+  const detail = pivot.detail || {};
+  const wrapper = document.getElementById('static-wrapper');
+  if(!rows || rows.length===0){
+    wrapper.innerHTML = '<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">No data — both modules Not Ready or filtered out</div>';
+    document.getElementById('static-badge').textContent = '0 rows';
+    return;
+  }
+  // Filter rows by version and line
+  const lineFilter = filterLine.toLowerCase().split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  let filteredRows = rows.filter(r=>{
+    const v = (r.version_type||'').toLowerCase();
+    if(v==='gated' && !selectedVersions.has('Gated')) return false;
+    if(v==='ungated' && !selectedVersions.has('Ungated')) return false;
+    if(lineFilter.length>0){
+      const lc = (r.line_code||'').toLowerCase();
+      if(!lineFilter.some(f=> lc.includes(f))) return false;
+    }
+    return true;
+  });
+  // Filter columns by date
+  let filteredCols = cols;
+  if(dateFrom || dateTo){
+    filteredCols = cols.filter(c=>{
+      let d = c;
+      if(c.includes('|')) d = c.split('|')[0];
+      if(dateFrom && d < dateFrom) return false;
+      if(dateTo && d > dateTo) return false;
+      return true;
+    });
+  }
+
+  // Build header
+  const frozenCols = [{key:'line_code',label:'Line',width:130},{key:'version_type',label:'Version Type',width:110}];
+  let left=0; frozenCols.forEach(c=>{ c._left=left; left+=c.width; });
+  const dividerLeft = left;
+  let thead = '<tr>';
+  frozenCols.forEach(c=>{ thead += '<th class="frozen" style="left:'+c._left+'px;min-width:'+c.width+'px">'+esc(c.label)+'</th>'; });
+  thead += '<th class="frozen divider-col" style="left:'+dividerLeft+'px;min-width:5px"></th>';
+  filteredCols.forEach(col=>{
+    let label = col;
+    let sub='';
+    if(col.includes('|')){ const parts=col.split('|'); label=parts[0]; sub=parts[1]; try{ const d=new Date(label); if(!isNaN(d)) label=(d.getMonth()+1)+'/'+d.getDate(); }catch(e){} }else{ try{ const d=new Date(col); if(!isNaN(d)) label=(d.getMonth()+1)+'/'+d.getDate(); }catch(e){} }
+    thead += '<th style="min-width:68px" title="'+esc(col)+'">'+esc(label)+(sub?'<br><span style="font-size:9px;color:#cbd5e1">'+esc(sub)+'</span>':'')+'</th>';
+  });
+  thead += '</tr>';
+
+  let tbody='';
+  let lastLine=null;
+  filteredRows.forEach(r=>{
+    const isNewLine = r.line_code !== lastLine;
+    lastLine = r.line_code;
+    const vType = r.version_type||'';
+    tbody += '<tr class="'+(isNewLine?'row-new-line':'')+'">';
+    frozenCols.forEach(c=>{
+      const isLast = c===frozenCols[frozenCols.length-1];
+      const extra = isLast ? ' frozen-last' : '';
+      let val='';
+      if(c.key==='line_code') val=esc(r.line_code);
+      else if(c.key==='version_type') val='<span class="type-'+esc(vType)+'">'+esc(vType)+'</span>';
+      tbody += '<td class="frozen data-cell'+extra+'" style="left:'+c._left+'px;min-width:'+c.width+'px">'+val+'</td>';
+    });
+    tbody += '<td class="divider-col frozen" style="left:'+dividerLeft+'px"></td>';
+    filteredCols.forEach(col=>{
+      const keyStr = r.line_code+'||'+vType;
+      const cellDetail = detail[keyStr] && detail[keyStr][col];
+      const cellVal = r[col];
+      if(cellVal==null){ tbody += '<td class="data-cell" style="background:#f8fafc"></td>'; }
+      else{
+        let cls='';
+        if(cellVal===0) cls='util-cell-zero';
+        else if(cellVal<60) cls='util-cell-red';
+        else if(cellVal<80) cls='util-cell-yellow';
+        else cls='util-cell-green';
+        tbody += '<td class="data-cell '+cls+'">'+Math.round(cellVal)+'%</td>';
+      }
+    });
+    tbody += '</tr>';
+  });
+
+  wrapper.innerHTML = '<table><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table>';
+  document.getElementById('static-badge').textContent = filteredRows.length+' rows × '+filteredCols.length+' cols (filtered from '+rows.length+' rows × '+cols.length+' cols) | Thick border per Line';
+}
+
+document.getElementById('f-gated').addEventListener('change', (e)=>{ if(e.target.checked) selectedVersions.add('Gated'); else selectedVersions.delete('Gated'); });
+document.getElementById('f-ungated').addEventListener('change', (e)=>{ if(e.target.checked) selectedVersions.add('Ungated'); else selectedVersions.delete('Ungated'); });
+document.getElementById('f-line').addEventListener('input', (e)=>{ filterLine = e.target.value; });
+document.getElementById('f-from').addEventListener('change', (e)=>{ dateFrom = e.target.value; });
+document.getElementById('f-to').addEventListener('change', (e)=>{ dateTo = e.target.value; });
+document.getElementById('f-mode-day').addEventListener('click', ()=>{ currentMode='day'; document.getElementById('f-mode-day').className='btn'; document.getElementById('f-mode-shift').className='btn btn-outline'; renderMatrix(); });
+document.getElementById('f-mode-shift').addEventListener('click', ()=>{ currentMode='shift'; document.getElementById('f-mode-shift').className='btn'; document.getElementById('f-mode-day').className='btn btn-outline'; renderMatrix(); });
+document.getElementById('f-apply').addEventListener('click', renderMatrix);
+document.getElementById('f-clear').addEventListener('click', ()=>{ selectedVersions=new Set(['Gated','Ungated']); filterLine=''; dateFrom=''; dateTo=''; document.getElementById('f-gated').checked=true; document.getElementById('f-ungated').checked=true; document.getElementById('f-line').value=''; document.getElementById('f-from').value=''; document.getElementById('f-to').value=''; currentMode='day'; renderMatrix(); });
+
+renderStatus();
+renderMatrix();
+</script>
 </body></html>`;
+
         const blob = new Blob([staticHtml], {type:'text/html'});
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'utilization_static_'+ new Date().toISOString().slice(0,10) + '.html';
+        a.download = 'utilization_static_interactive_'+ new Date().toISOString().slice(0,10) + '.html';
         a.click();
         setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
-      }catch(e){ alert('Download static HTML failed: '+e.message); }
+      }catch(e){
+        alert('Download static HTML failed: '+e.message);
+        console.error(e);
+      }finally{
+        if(btn){ btn.textContent=origText; btn.disabled=false; }
+      }
     });
 
     if(status.loaded){

@@ -586,32 +586,81 @@ function downloadStaticPackout(){
     const status = document.getElementById('upload-status')?.textContent || '';
     const fileName = document.getElementById('file-name-main')?.textContent || '';
     const now = new Date().toLocaleString();
+    // Embed current data for flexible filtering
+    const embeddedRows = filteredRows.length>0 ? filteredRows : allRows;
+    const staticData = {rows: embeddedRows.slice(0,2000), allRowsCount: allRows.length, filteredCount: filteredRows.length, activeDim: activeDim, weeks: allWeeks, weekLabels: weekLabels};
     const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Packout Report - Static - ${now}</title>
 <style>
-body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}
 h1{font-size:18px;color:#1e293b}
+.sub{font-size:11px;color:#64748b;margin-bottom:8px}
 .status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}
-.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;max-height:none}
+.filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.filter-group{display:flex;flex-direction:column;gap:4px;min-width:140px}
+.filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
+.filter-group input{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
+.btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
+.btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;max-height:80vh}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
 th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
 td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right;min-width:70px}
 td.frozen{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}
 </style></head><body>
-<h1>📦 ExF vs ETD vs Packout vs CTB — Static Report</h1>
-<div style="font-size:11px;color:#64748b">Generated: ${now} | Dim: ${activeDim} | Rows: ${filteredRows.length} / ${allRows.length}</div>
+<h1>📦 ExF vs ETD vs Packout vs CTB — Static Report (Interactive)</h1>
+<div class="sub">Generated: ${now} | Dim: ${activeDim} | Rows: ${filteredRows.length} / ${allRows.length} | Flexible filtering works offline</div>
 <div class="status"><b>Status:</b> ${esc(status)}<br><b>File:</b> ${esc(fileName)}</div>
-<div class="table-wrapper">${reportWrapper}</div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from Packout dashboard. Open directly in browser.</div>
+<div class="filters">
+  <div class="filter-group"><label>Search PN / Usage / Style / Color (flexible)</label><input type="text" id="f-search" placeholder="e.g. PN123, Usage, Style..."></div>
+  <div class="filter-group"><label>Version-Type</label><input type="text" id="f-vtype" placeholder="ExF, Gated, Ungated, CTB"></div>
+  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
+</div>
+<div class="table-wrapper" id="static-wrapper">${reportWrapper}</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static interactive report from Packout dashboard. Filtering works offline via embedded data (${embeddedRows.length} rows embedded). Open directly in browser and share.</div>
+<script>
+const STATIC_DATA = ${JSON.stringify(staticData).replace(/</g,'\\u003c')};
+function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+function applyFilter(){
+  const search = document.getElementById('f-search').value.toLowerCase();
+  const vtype = document.getElementById('f-vtype').value.toLowerCase();
+  const wrapper = document.getElementById('static-wrapper');
+  const tbody = wrapper.querySelector('tbody');
+  if(!tbody){ return; }
+  let visible = 0;
+  const rows = tbody.querySelectorAll('tr');
+  rows.forEach(tr=>{
+    const text = tr.textContent.toLowerCase();
+    let show = true;
+    if(search && !text.includes(search)) show = false;
+    if(vtype && !text.includes(vtype)) show = false;
+    tr.style.display = show ? '' : 'none';
+    if(show) visible++;
+  });
+  document.getElementById('f-count').textContent = visible + ' / ' + rows.length + ' rows';
+}
+
+document.getElementById('f-apply')?.addEventListener('click', applyFilter);
+document.getElementById('f-clear')?.addEventListener('click', ()=>{
+  document.getElementById('f-search').value='';
+  document.getElementById('f-vtype').value='';
+  applyFilter();
+});
+document.getElementById('f-search')?.addEventListener('input', applyFilter);
+document.getElementById('f-vtype')?.addEventListener('input', applyFilter);
+// Initial count
+setTimeout(applyFilter, 100);
+</script>
 </body></html>`;
     const blob = new Blob([staticHtml], {type:'text/html'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'packout_static_'+ new Date().toISOString().slice(0,10) + '.html';
+    a.download = 'packout_static_interactive_'+ new Date().toISOString().slice(0,10) + '.html';
     a.click();
     setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
-  }catch(e){ alert('Download static HTML failed: '+e.message); }
+  }catch(e){ alert('Download static HTML failed: '+e.message); console.error(e); }
 }
 document.getElementById('btn-download-static-packout')?.addEventListener('click', downloadStaticPackout);
 document.getElementById('btn-download-static-packout-config')?.addEventListener('click', downloadStaticPackout);

@@ -367,35 +367,66 @@ function attachUploadLogic(isCompact){
   });
   document.getElementById('btnDownloadStaticIO_'+suffix)?.addEventListener('click', ()=>{
     try{
-      const reportContent = document.getElementById('ioReportContent')?.innerHTML || '<div>No data loaded yet</div>';
-      const uploadSection = document.getElementById('io-upload-bar')?.outerHTML || document.getElementById('io-upload-section')?.outerHTML || '';
+      const reportContent = document.getElementById('ioReportContent')?.innerHTML || document.getElementById('io-main-section')?.innerHTML || '<div>No data loaded yet — upload first</div>';
       const statusBadge = document.getElementById('ioMainStatusBadge')?.innerHTML || document.getElementById('ioStatusBadge_'+suffix)?.innerHTML || '';
       const now = new Date().toLocaleString();
       const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>I/O Report - Static Snapshot - ${now}</title>
+<title>I/O Report - Static Interactive - ${now}</title>
 <style>
-body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}
 h1{font-size:18px;color:#1e293b}
+.sub{font-size:11px;color:#64748b;margin-bottom:8px}
 .status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
-.table-wrapper{overflow:auto;max-height:none;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px}
+.filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.filter-group{display:flex;flex-direction:column;gap:4px;min-width:140px}
+.filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
+.filter-group input{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
+.btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
+.btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:80vh}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
 th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
 td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}
 td.frozen{position:sticky;left:0;background:#fff;z-index:1;min-width:80px;text-align:left;font-weight:500}
-.num-pos{color:#059669}.num-zero{color:#94a3b8}
 </style></head><body>
-<h1>📈 I/O Report — Static Snapshot</h1>
-<div style="font-size:11px;color:#64748b">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM} | Filters: Line=${filterVals.lineCode||'All'} PN=${filterVals.itemNo||'All'} Style=${filterVals.style||'All'}</div>
+<h1>📈 I/O Report — Static Interactive</h1>
+<div class="sub">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM} | Filters: Line=${filterVals.lineCode||'All'} PN=${filterVals.itemNo||'All'} Style=${filterVals.style||'All'} | Flexible filtering works offline</div>
 <div class="status"><b>Status:</b> ${statusBadge}</div>
-<div>${uploadSection}</div>
+<div class="filters">
+  <div class="filter-group"><label>Search (Line / PN / Style / any text)</label><input type="text" id="f-search" placeholder="e.g. Line01, FG001, Style-A"></div>
+  <div class="filter-group"><label>Group</label><select id="f-group"><option>FG</option><option>GB</option><option>FR</option><option>LT</option><option>RT</option></select></div>
+  <div class="filter-group"><label>Col Dim</label><select id="f-coldim"><option>shift</option><option selected>day</option><option>week</option><option>month</option></select></div>
+  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
+</div>
 <div id="ioReportContent">${reportContent}</div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from I/O Report dashboard. Open this HTML directly to view. Data at export time.</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static interactive snapshot from I/O Report dashboard. Filtering works offline via embedded data. Open directly in browser and share.</div>
+<script>
+function applyFilter(){
+  const search = document.getElementById('f-search').value.toLowerCase();
+  const content = document.getElementById('ioReportContent');
+  if(!content) return;
+  let visible=0, total=0;
+  content.querySelectorAll('tr').forEach(tr=>{
+    if(tr.querySelector('th')) return; // skip header
+    total++;
+    const text = tr.textContent.toLowerCase();
+    const show = !search || text.includes(search);
+    tr.style.display = show ? '' : 'none';
+    if(show) visible++;
+  });
+  document.getElementById('f-count').textContent = visible+' / '+total+' rows';
+}
+document.getElementById('f-apply')?.addEventListener('click', applyFilter);
+document.getElementById('f-clear')?.addEventListener('click', ()=>{ document.getElementById('f-search').value=''; applyFilter(); });
+document.getElementById('f-search')?.addEventListener('input', applyFilter);
+setTimeout(applyFilter, 200);
+</script>
 </body></html>`;
       const blob = new Blob([staticHtml], {type:'text/html'});
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'io_report_static_'+ new Date().toISOString().slice(0,10) + '.html';
+      a.download = 'io_report_static_interactive_'+ new Date().toISOString().slice(0,10) + '.html';
       a.click();
       setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
     }catch(e){ alert('Download static HTML failed: '+e.message); }
@@ -539,22 +570,54 @@ function initReportsPage(){
       const now = new Date().toLocaleString();
       const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>I/O Report - Static - ${now}</title>
+<title>I/O Report - Static Interactive - ${now}</title>
 <style>
-body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}
 h1{font-size:18px;color:#1e293b}
+.sub{font-size:11px;color:#64748b;margin-bottom:8px}
 .status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
-.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px}
+.filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.filter-group{display:flex;flex-direction:column;gap:4px;min-width:140px}
+.filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
+.filter-group input{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
+.btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
+.btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:80vh}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
 th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0}
 td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}
 td.frozen{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}
 </style></head><body>
-<h1>📈 I/O Report — Static Snapshot</h1>
-<div style="font-size:11px;color:#64748b">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM}</div>
+<h1>📈 I/O Report — Static Interactive</h1>
+<div class="sub">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM} | Filters: Line=${filterVals.lineCode||'All'} PN=${filterVals.itemNo||'All'} Style=${filterVals.style||'All'} | Flexible filtering works offline</div>
 <div class="status"><b>Status:</b> ${statusBadge}</div>
+<div class="filters">
+  <div class="filter-group"><label>Search (Line / PN / Style)</label><input type="text" id="f-search" placeholder="e.g. Line01, FG001"></div>
+  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
+</div>
 <div id="ioReportContent">${reportContent}</div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from I/O Report dashboard. Open directly.</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static interactive snapshot from I/O Report dashboard. Filtering works offline. Open directly and share.</div>
+<script>
+function applyFilter(){
+  const search = document.getElementById('f-search').value.toLowerCase();
+  const content = document.getElementById('ioReportContent');
+  if(!content) return;
+  let visible=0, total=0;
+  content.querySelectorAll('tr').forEach(tr=>{
+    if(tr.querySelector('th')) return;
+    total++;
+    const text = tr.textContent.toLowerCase();
+    const show = !search || text.includes(search);
+    tr.style.display = show ? '' : 'none';
+    if(show) visible++;
+  });
+  document.getElementById('f-count').textContent = visible+' / '+total+' rows';
+}
+document.getElementById('f-apply')?.addEventListener('click', applyFilter);
+document.getElementById('f-clear')?.addEventListener('click', ()=>{ document.getElementById('f-search').value=''; applyFilter(); });
+document.getElementById('f-search')?.addEventListener('input', applyFilter);
+setTimeout(applyFilter, 200);
+</script>
 </body></html>`;
       const blob = new Blob([staticHtml], {type:'text/html'});
       const a = document.createElement('a');
