@@ -960,6 +960,50 @@
         const staticData = {status: statusData, meta: metaData, pivotDay: pivotDay, pivotShift: pivotShift, currentMode: currentMode};
 
         // Build static HTML with embedded data and filtering logic
+        // Exact copy of original module's filter UI from buildMatrixSection — preserves format
+        const originalFilterHtml = document.querySelector('#utilization-section .toolbar') ? document.querySelector('#utilization-section .toolbar').outerHTML : `
+        <div class="toolbar" style="border:none;padding:8px 0">
+          <div class="panels-row">
+            <div class="panel panel-filter">
+              <div class="panel-label">🔍 Filters <span style="font-weight:400;text-transform:none;color:#94a3b8"> — Filter functionality: version type & line</span> <span id="btn-clear-util-filters" style="font-size:10px;font-weight:400;cursor:pointer;color:#64748b;margin-left:6px;padding:1px 6px;border:1px solid #cbd5e1;border-radius:3px">✕ Clear</span></div>
+              <div class="filter-row">
+                <div class="filter-group dropdown-filter">
+                  <label>Version Type <span id="util-vtype-count" class="tag-count"></span></label>
+                  <button class="dropdown-btn" id="util-vtype-btn">All</button>
+                  <div class="dropdown-menu" id="util-vtype-menu"></div>
+                </div>
+                <div class="filter-group dropdown-filter">
+                  <label>Line <span id="util-line-count" class="tag-count"></span></label>
+                  <button class="dropdown-btn" id="util-line-btn">All</button>
+                  <div class="dropdown-menu" id="util-line-menu"></div>
+                </div>
+                <div class="filter-group">
+                  <label>Date From</label>
+                  <input type="date" id="util-filter-from" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">
+                </div>
+                <div class="filter-group">
+                  <label>Date To</label>
+                  <input type="date" id="util-filter-to" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">
+                </div>
+                <div class="filter-group">
+                  <label>&nbsp;</label>
+                  <button class="util-btn" id="btn-apply-pivot">Apply</button>
+                </div>
+              </div>
+            </div>
+            <div class="panel panel-cols">
+              <div class="panel-label">📋 Columns <span style="font-weight:400;text-transform:none;color:#94a3b8"> — Column dimension: Day / Shift like I/O Report</span></div>
+              <div class="cols-row" style="align-items:center">
+                <div class="util-toggle-group">
+                  <button id="btn-mode-day" class="active">Day</button>
+                  <button id="btn-mode-shift" class="">Shift</button>
+                </div>
+                <span style="font-size:11px;color:#64748b;margin-left:8px">Switches date columns between daily aggregated and per-shift</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+
         const staticHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Line Utilization - Static Report - ${now}</title>
@@ -968,12 +1012,21 @@ body{font-family:Arial,sans-serif;margin:16px;background:#f8fafc;color:#1e293b}
 h1{font-size:18px;margin-bottom:4px}
 .sub{font-size:11px;color:#64748b;margin-bottom:10px}
 .status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}
-.filters{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
-.filter-group{display:flex;flex-direction:column;gap:4px;min-width:160px}
+.toolbar{border:none;padding:8px 0}
+.panels-row{display:flex;flex-wrap:wrap;gap:12px}
+.panel{flex:1;min-width:260px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px}
+.panel-label{font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;margin-bottom:6px}
+.filter-row{display:flex;flex-wrap:wrap;gap:10px}
+.filter-group{position:relative;display:flex;flex-direction:column;gap:4px;min-width:140px}
 .filter-group label{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}
-.filter-group input, .filter-group select{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}
-.btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
-.btn-outline{background:#fff;color:#64748b;border-color:#cbd5e1}
+.dropdown-btn{padding:5px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer;font-size:12px;text-align:left}
+.dropdown-menu{position:absolute;top:100%;left:0;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:6px;display:none;z-index:100;max-height:250px;overflow:auto;min-width:180px;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+.dropdown-menu.open{display:block}
+.dropdown-search input{width:100%;padding:4px 8px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px}
+.util-btn{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}
+.util-toggle-group{display:inline-flex;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden}
+.util-toggle-group button{padding:5px 12px;font-size:12px;border:none;background:#fff;cursor:pointer;border-right:1px solid #cbd5e1}
+.util-toggle-group button.active{background:#3b82f6;color:#fff}
 .table-wrapper{overflow:auto;max-height:80vh;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:10px}
 table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
 th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2;border-right:1px solid #334155}
@@ -991,21 +1044,13 @@ th.divider-col{background:#475569 !important;width:5px;min-width:5px;max-width:5
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin-right:4px}
 .badge-ready{background:#dcfce7;color:#065f46;border:1px solid #86efac}
 .badge-notready{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+.tag-count{background:#f1f5f9;padding:1px 5px;border-radius:8px;font-size:9px}
 </style></head><body>
-<h1>⚙️ Line Utilization — Static Report (Interactive)</h1>
-<div class="sub">Generated: ${now} | Interactive filtering works offline — data embedded at export time. | Day cols: \${(staticData.pivotDay.columns||[]).length}, Shift cols: \${(staticData.pivotShift.columns||[]).length}, Lines: \${(staticData.meta.lines||[]).length}</div>
+<h1>⚙️ Line Utilization — Static Report (Exact Copy of Below Module)</h1>
+<div class="sub">Generated: ${now} | Exact copy of below module — format and filtering preserved like campus-planning-system/frontend/dist | Day cols: \${(staticData.pivotDay.columns||[]).length}, Shift cols: \${(staticData.pivotShift.columns||[]).length}, Lines: \${(staticData.meta.lines||[]).length}</div>
 <div class="status" id="static-status"></div>
-<div class="filters">
-  <div class="filter-group"><label>Version Type</label>
-    <div><label><input type="checkbox" id="f-gated" checked> Gated</label> <label><input type="checkbox" id="f-ungated" checked> Ungated</label></div>
-  </div>
-  <div class="filter-group"><label>Line (comma separated, empty=All)</label><input type="text" id="f-line" placeholder="e.g. AL1-PKG,AL1-FAT"></div>
-  <div class="filter-group"><label>Date From</label><input type="date" id="f-from"></div>
-  <div class="filter-group"><label>Date To</label><input type="date" id="f-to"></div>
-  <div class="filter-group"><label>Mode</label><div><button class="btn" id="f-mode-day">Day</button> <button class="btn btn-outline" id="f-mode-shift">Shift</button></div></div>
-  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply Filters</button> <button class="btn btn-outline" id="f-clear">Clear</button></div></div>
-</div>
-<div style="font-size:11px;color:#64748b">Formula: Capacity=UPH×Eff×WH | Load=Σ INPUT | Util%=Load/Capacity capped at 100% | Thick border per Line | Gated yellow, Ungated green</div>
+${originalFilterHtml}
+<div style="font-size:11px;color:#64748b;margin:4px 0">Formula: Capacity=UPH×Eff×WH | Load=Σ INPUT | Util%=Load/Capacity capped at 100% | Thick border per Line | Gated yellow, Ungated green</div>
 <div id="static-badge" style="margin:8px 0;font-size:11px"></div>
 <div class="table-wrapper" id="static-wrapper"><div style="text-align:center;padding:30px;color:#94a3b8">Loading...</div></div>
 <script>
@@ -1015,12 +1060,110 @@ function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
 
 let currentMode = STATIC_DATA.currentMode || 'day';
 let selectedVersions = new Set(['Gated','Ungated']);
-let filterLine = '';
+let selectedLines = new Set();
 let dateFrom = '';
 let dateTo = '';
 
-function getPivot(){
-  return currentMode==='day' ? STATIC_DATA.pivotDay : STATIC_DATA.pivotShift;
+function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
+
+function getPivot(){ return currentMode==='day' ? STATIC_DATA.pivotDay : STATIC_DATA.pivotShift; }
+
+function setupVersionTypeDropdown(){
+  const btn = document.getElementById('util-vtype-btn');
+  const menu = document.getElementById('util-vtype-menu');
+  const cnt = document.getElementById('util-vtype-count');
+  if(!btn||!menu) return;
+  const allTypes = ['Gated','Ungated'];
+  function renderMenu(){
+    const total = allTypes.length;
+    const selected = selectedVersions.size;
+    const isAll = selected===total;
+    if(cnt) cnt.textContent = isAll ? '' : ''+selected;
+    btn.textContent = isAll ? 'All '+total : (selected===0?'(none)':selected+' selected');
+    let html = '<div class="dropdown-all"><label><input type="checkbox" id="vtype-all" '+(isAll?'checked':'')+'> All ('+total+')</label></div>';
+    allTypes.forEach(v=>{
+      const checked = selectedVersions.has(v);
+      html += '<label><input type="checkbox" data-val="'+escAttr(v)+'" '+(checked?'checked':'')+'> <span class="type-badge type-'+esc(v)+'">'+esc(v)+'</span></label>';
+    });
+    menu.innerHTML = html;
+    const allCb = menu.querySelector('#vtype-all');
+    if(allCb){
+      allCb.addEventListener('change', (e)=>{
+        if(e.target.checked){ selectedVersions = new Set(allTypes); }else{ selectedVersions.clear(); }
+        renderMenu();
+      });
+    }
+    menu.querySelectorAll('input[data-val]').forEach(cb=>{
+      cb.addEventListener('change', (e)=>{
+        const v = e.target.dataset.val;
+        if(e.target.checked) selectedVersions.add(v);
+        else selectedVersions.delete(v);
+        renderMenu();
+      });
+    });
+  }
+  btn.onclick = (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); renderMenu(); };
+  document.addEventListener('click', ()=> menu.classList.remove('open'));
+  menu.onclick = (e)=> e.stopPropagation();
+  renderMenu();
+}
+
+function setupLineDropdown(){
+  const btn = document.getElementById('util-line-btn');
+  const menu = document.getElementById('util-line-menu');
+  const cnt = document.getElementById('util-line-count');
+  if(!btn||!menu) return;
+  const allLines = (STATIC_DATA.meta && STATIC_DATA.meta.lines) ? STATIC_DATA.meta.lines : [];
+  let searchTerm = '';
+  function renderMenu(){
+    const total = allLines.length;
+    const isAll = selectedLines.size===0;
+    if(cnt) cnt.textContent = isAll ? '' : ''+selectedLines.size;
+    btn.textContent = isAll ? 'All '+total : selectedLines.size+' selected';
+    const filtered = searchTerm ? allLines.filter(l=> l.toLowerCase().includes(searchTerm.toLowerCase())) : allLines;
+    let html = '<div class="dropdown-search"><input type="text" id="line-search" placeholder="Search line..." value="'+escAttr(searchTerm)+'"></div>';
+    html += '<div class="dropdown-all"><label><input type="checkbox" id="line-all" '+(isAll?'checked':'')+'> All ('+total+')</label></div>';
+    filtered.forEach(l=>{
+      const checked = isAll || selectedLines.has(l);
+      html += '<label><input type="checkbox" data-val="'+escAttr(l)+'" '+(checked?'checked':'')+'> '+esc(l)+'</label>';
+    });
+    menu.innerHTML = html;
+    const sInput = menu.querySelector('#line-search');
+    if(sInput){ sInput.focus(); sInput.addEventListener('input', (e)=>{ searchTerm = e.target.value; renderMenu(); }); sInput.addEventListener('click', (e)=> e.stopPropagation()); }
+    const allCb = menu.querySelector('#line-all');
+    if(allCb){
+      allCb.addEventListener('change', (e)=>{
+        if(e.target.checked){ selectedLines.clear(); }else{ selectedLines = new Set(allLines); }
+        renderMenu();
+      });
+    }
+    menu.querySelectorAll('input[data-val]').forEach(cb=>{
+      cb.addEventListener('change', (e)=>{
+        const v = e.target.dataset.val;
+        if(e.target.checked){
+          if(selectedLines.size===0){ }else{ selectedLines.add(v); if(selectedLines.size===allLines.length) selectedLines.clear(); }
+        }else{
+          if(selectedLines.size===0){ selectedLines = new Set(allLines); selectedLines.delete(v); }else{ selectedLines.delete(v); }
+        }
+        renderMenu();
+      });
+    });
+  }
+  btn.onclick = (e)=>{ e.stopPropagation(); menu.classList.toggle('open'); if(menu.classList.contains('open')) renderMenu(); };
+  document.addEventListener('click', ()=> menu.classList.remove('open'));
+  menu.onclick = (e)=> e.stopPropagation();
+  renderMenu();
+}
+
+function bindModeToggle(id){
+  const btn = document.getElementById(id);
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.util-toggle-group button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = id.includes('day') ? 'day' : 'shift';
+    renderMatrix();
+  });
 }
 
 function renderStatus(){
@@ -1047,19 +1190,17 @@ function renderMatrix(){
     document.getElementById('static-badge').textContent = '0 rows';
     return;
   }
-  // Filter rows by version and line
-  const lineFilter = filterLine.toLowerCase().split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  // Filter rows by version and line — exact copy of original filtering logic
   let filteredRows = rows.filter(r=>{
     const v = (r.version_type||'').toLowerCase();
     if(v==='gated' && !selectedVersions.has('Gated')) return false;
     if(v==='ungated' && !selectedVersions.has('Ungated')) return false;
-    if(lineFilter.length>0){
-      const lc = (r.line_code||'').toLowerCase();
-      if(!lineFilter.some(f=> lc.includes(f))) return false;
+    if(selectedLines.size>0){
+      if(!selectedLines.has(r.line_code)) return false;
     }
     return true;
   });
-  // Filter columns by date
+  // Filter columns by date — exact copy
   let filteredCols = cols;
   if(dateFrom || dateTo){
     filteredCols = cols.filter(c=>{
@@ -1123,15 +1264,37 @@ function renderMatrix(){
   document.getElementById('static-badge').textContent = filteredRows.length+' rows × '+filteredCols.length+' cols (filtered from '+rows.length+' rows × '+cols.length+' cols) | Thick border per Line';
 }
 
-document.getElementById('f-gated').addEventListener('change', (e)=>{ if(e.target.checked) selectedVersions.add('Gated'); else selectedVersions.delete('Gated'); });
-document.getElementById('f-ungated').addEventListener('change', (e)=>{ if(e.target.checked) selectedVersions.add('Ungated'); else selectedVersions.delete('Ungated'); });
-document.getElementById('f-line').addEventListener('input', (e)=>{ filterLine = e.target.value; });
-document.getElementById('f-from').addEventListener('change', (e)=>{ dateFrom = e.target.value; });
-document.getElementById('f-to').addEventListener('change', (e)=>{ dateTo = e.target.value; });
-document.getElementById('f-mode-day').addEventListener('click', ()=>{ currentMode='day'; document.getElementById('f-mode-day').className='btn'; document.getElementById('f-mode-shift').className='btn btn-outline'; renderMatrix(); });
-document.getElementById('f-mode-shift').addEventListener('click', ()=>{ currentMode='shift'; document.getElementById('f-mode-shift').className='btn'; document.getElementById('f-mode-day').className='btn btn-outline'; renderMatrix(); });
-document.getElementById('f-apply').addEventListener('click', renderMatrix);
-document.getElementById('f-clear').addEventListener('click', ()=>{ selectedVersions=new Set(['Gated','Ungated']); filterLine=''; dateFrom=''; dateTo=''; document.getElementById('f-gated').checked=true; document.getElementById('f-ungated').checked=true; document.getElementById('f-line').value=''; document.getElementById('f-from').value=''; document.getElementById('f-to').value=''; currentMode='day'; renderMatrix(); });
+function bindModeToggle(id){
+  const btn = document.getElementById(id);
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.util-toggle-group button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMode = id.includes('day') ? 'day' : 'shift';
+    renderMatrix();
+  });
+}
+
+document.getElementById('util-filter-from')?.addEventListener('change', (e)=>{ dateFrom = e.target.value; });
+document.getElementById('util-filter-to')?.addEventListener('change', (e)=>{ dateTo = e.target.value; });
+document.getElementById('btn-apply-pivot')?.addEventListener('click', ()=>{ renderMatrix(); });
+document.getElementById('btn-clear-util-filters')?.addEventListener('click', ()=>{
+  selectedVersions = new Set(['Gated','Ungated']);
+  selectedLines.clear();
+  dateFrom=''; dateTo='';
+  const fromEl = document.getElementById('util-filter-from');
+  const toEl = document.getElementById('util-filter-to');
+  if(fromEl) fromEl.value='';
+  if(toEl) toEl.value='';
+  setupVersionTypeDropdown();
+  setupLineDropdown();
+  renderMatrix();
+});
+
+setupVersionTypeDropdown();
+setupLineDropdown();
+bindModeToggle('btn-mode-day');
+bindModeToggle('btn-mode-shift');
 
 renderStatus();
 renderMatrix();
