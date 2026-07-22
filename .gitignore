@@ -40,3 +40,5 @@ app/static/meta.json
 
 # Local config
 opencode.json
+
+dist/

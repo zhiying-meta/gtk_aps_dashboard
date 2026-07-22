@@ -4,6 +4,7 @@ Plan merge engine: process uploaded xlsx data → report rows + generate formatt
 import io
 from datetime import datetime, timedelta
 from collections import defaultdict
+from functools import lru_cache
 
 from app.modules.plan_merge.config import DEFAULT_PALLET_QTY
 
@@ -20,8 +21,9 @@ _DATE_FORMATS = [
     "%Y%m%d",
 ]
 
+@lru_cache(maxsize=2048)
 def _to_dt(s):
-    """Parse date string with multiple format support."""
+    """Parse date string with multiple format support (cached)."""
     s = str(s).strip()
     for fmt in _DATE_FORMATS:
         try:
@@ -31,6 +33,7 @@ def _to_dt(s):
     raise ValueError(f"unrecognized date: {s}")
 
 
+@lru_cache(maxsize=2048)
 def _to_saturday_label(ds):
     try: dt = _to_dt(ds)
     except: return ds
@@ -38,24 +41,27 @@ def _to_saturday_label(ds):
     sat = dt + timedelta(days=5 - dow)
     return sat.strftime("%Y-%m-%d")
 
+# cache for week label per (ds, cut_day)
+@lru_cache(maxsize=4096)
+def _date_to_week_label_cached(ds, cut_day):
+    td_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
+    td = td_map.get(cut_day, 5)
+    dt = _to_dt(ds)
+    cd = dt.weekday()
+    diff = (td - cd) % 7
+    week_end = dt + timedelta(days=diff)
+    return _to_saturday_label(week_end.strftime("%Y-%m-%d"))
+
 
 def aggregate_cumulative(daily, cut_day):
-    """Compute cumulative sum up to each cut_day."""
-    dow_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
-    td = dow_map.get(cut_day, 5)
+    """Compute cumulative sum up to each cut_day (cached)."""
     date_list = sorted(daily.keys())
     if not date_list:
         return {}
 
     def date_to_week_label(ds):
-        dt = _to_dt(ds)
-        cd = dt.weekday()
-        diff = (td - cd) % 7
-        week_end = dt + timedelta(days=diff)
-        return _to_saturday_label(week_end.strftime("%Y-%m-%d"))
+        return _date_to_week_label_cached(ds, cut_day)
 
-    first_dt = _to_dt(date_list[0])
-    last_dt = _to_dt(date_list[-1])
     first_wl = date_to_week_label(date_list[0])
     last_wl = date_to_week_label(date_list[-1])
 
@@ -137,6 +143,11 @@ def extract_weekly_cum(daily, cut_day):
 
 
 def process_uploaded_data(file_map, config):
+    # Every upload is treated as fresh — clear LRU caches to avoid cross-file reuse
+    _to_dt.cache_clear()
+    _to_saturday_label.cache_clear()
+    _date_to_week_label_cached.cache_clear()
+
     from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
     from app.modules.plan_merge.config import DEFAULT_ETD_PACKOUT_OFFSET
 
@@ -269,40 +280,469 @@ def process_uploaded_data(file_map, config):
         rows.append({**base, "Version-Type": "Gated", "Version-Detail": "Packout vs ExF", "Cut Day": cfg["output_cut"], **fill(diff(gp, exf))})
         rows.append({**base, "Version-Type": "CTB", "Version-Detail": "", "Cut Day": "", **fill(ctb)})
 
+    # ---- Build canonical GB mapping (SKU master is source of truth, case-insensitive) ----
+    # Map lower -> canonical SKU master GB
+    sku_gb_lower_to_canonical = {}
+    for g in sku_to_gb.values():
+        if g:
+            low = g.lower()
+            # Keep first occurrence as canonical (SKU master naming)
+            if low not in sku_gb_lower_to_canonical:
+                sku_gb_lower_to_canonical[low] = g
+    # Also include gb_style_color keys (same set but ensure)
+    for g in gb_style_color.keys():
+        low = g.lower()
+        if low not in sku_gb_lower_to_canonical:
+            sku_gb_lower_to_canonical[low] = g
+
+    def to_canonical_gb(gb_pn):
+        if not gb_pn:
+            return gb_pn
+        low = gb_pn.lower()
+        if low in sku_gb_lower_to_canonical:
+            return sku_gb_lower_to_canonical[low]
+        # Alias handling: try to find SKU master GB with same Style+Color (for DEEP BLACK vs Black (low cost))
+        # Parse GB-Style-Color
+        rest = gb_pn[3:] if gb_pn.upper().startswith("GB-") else gb_pn
+        idx = rest.rfind("-")
+        if idx != -1:
+            parsed_style = rest[:idx].strip()
+            parsed_color = rest[idx+1:].strip()
+            # Map abbreviation to full style
+            style_map_local = {
+                "rec m": "Rectangle M",
+                "rec l": "Rectangle L",
+                "rec": "Rectangle M",
+                "panthos m": "Panthos M",
+                "panthos s": "Panthos S",
+                "pantos s": "Pantos S",
+                "bold": "Bold",
+                "slim": "Slim",
+                "cateye": "Cateye",
+            }
+            full_parsed_style = style_map_local.get(parsed_style.lower(), parsed_style)
+            # Try to find matching canonical GB by Style+Color
+            for canon_gb in sku_gb_lower_to_canonical.values():
+                sc = gb_style_color.get(canon_gb)
+                if not sc:
+                    continue
+                # Color match: exact or both low cost
+                cmatch = False
+                if sc[1].lower() == parsed_color.lower():
+                    cmatch = True
+                elif "low cost" in parsed_color.lower() and "low cost" in sc[1].lower():
+                    cmatch = True
+                if not cmatch:
+                    continue
+                if full_parsed_style.lower() in sc[0].lower() or sc[0].lower() in full_parsed_style.lower():
+                    return canon_gb
+        return gb_pn
+
+    # Canonicalize daily dicts for GBs (merge case variants and alias) — only GB-
+    def canonicalize_gb_dict(d):
+        new_dict = {}
+        for pn, daily in d.items():
+            if not pn.startswith("GB-"):
+                continue  # drop FR/LT/RT etc.
+            canon = to_canonical_gb(pn)
+            if canon in new_dict:
+                # Merge daily quantities
+                for ds, qty in daily.items():
+                    new_dict[canon][ds] = new_dict[canon].get(ds, 0.0) + float(qty)
+            else:
+                new_dict[canon] = dict(daily)
+        return new_dict
+
+    # Apply canonicalization to gated, ungated, ctb_gb (ctb_gb only contains GBs)
+    # Keep original for SKU daily (they are not GB), but for GB keys we canonicalize
+    # For gated/ungated, they contain both SKU and GB; we need to keep SKU keys untouched, only GB keys canonicalized
+    # So we handle separately: keep SKU entries as is, canonicalize GB entries and merge
+    def canonicalize_mixed_dict(d):
+        # d is {PN: daily} where PN can be SKU or GB. FR/LT/RT are ignored (only FG and GB needed)
+        new_dict = {}
+        for pn, daily in d.items():
+            if pn in sku_attrs:
+                # SKU, keep original PN
+                new_dict[pn] = daily
+            elif pn.startswith("GB-"):
+                # GB only, canonicalize
+                canon = to_canonical_gb(pn)
+                if canon in new_dict:
+                    for ds, qty in daily.items():
+                        new_dict[canon][ds] = new_dict[canon].get(ds, 0.0) + float(qty)
+                else:
+                    new_dict[canon] = dict(daily)
+            # else: FR/LT/RT etc. dropped
+        return new_dict
+
+    plan_gated = canonicalize_mixed_dict(plan_gated)
+    plan_ungated = canonicalize_mixed_dict(plan_ungated)
+    ctb_gb = canonicalize_gb_dict(ctb_gb)
+
+    # ---- Build GB set: from mapping + any PN in gated/ungated/ctb_gb that is a GB (not FR/LT/RT) ----
+    all_gb_set = set()
+    for g in sku_to_gb.values():
+        if g:
+            all_gb_set.add(g)
+    for source in (plan_gated, plan_ungated, ctb_gb):
+        for pn in source.keys():
+            if pn not in sku_attrs and pn.startswith("GB-"):
+                all_gb_set.add(pn)
+
     gb_groups = defaultdict(list)
     for sku in all_skus:
         g = sku_to_gb.get(sku, "")
-        if g: gb_groups[g].append(sku)
+        if g:
+            # Also canonicalize the GB mapping? sku_to_gb values are already canonical SKU master names,
+            # but ensure we use canonical
+            g_canon = to_canonical_gb(g)
+            gb_groups[g_canon].append(sku)
+    # Ensure every GB in set has entry even if no SKU maps
+    for gb in all_gb_set:
+        if gb not in gb_groups:
+            gb_groups[gb] = []
 
     sku_data = {(r["PN"], r["Version-Type"], r["Version-Detail"]): {w: r.get(w) for w in all_weeks} for r in rows}
 
+    # Helper: infer GB Style/Color when exact mapping missing (e.g. Black (low cost) vs DEEP BLACK)
+    def _infer_gb_style_color(gb_pn):
+        # 1. exact
+        if gb_pn in gb_style_color:
+            return gb_style_color[gb_pn]
+        # 2. case-insensitive
+        low = gb_pn.lower()
+        for k, v in gb_style_color.items():
+            if k.lower() == low:
+                return v
+        # 3. alias: try to parse GB-Style-Color and find matching SKU by color
+        #    e.g. GB-Rec M-Black (low cost) -> style_raw=Rec M, color_raw=Black (low cost)
+        #    Should map to DEEP BLACK entries: Color Black (low cost)
+        parsed_style = ""
+        parsed_color = ""
+        rest = gb_pn[3:] if gb_pn.upper().startswith("GB-") else gb_pn
+        idx = rest.rfind("-")
+        if idx != -1:
+            parsed_style = rest[:idx].strip()
+            parsed_color = rest[idx+1:].strip()
+        else:
+            parsed_style = rest.strip()
+
+        # Try to find SKU whose Color matches parsed_color (case-insensitive)
+        if parsed_color:
+            # For style matching, map abbreviation to full
+            style_map_local = {
+                "rec m": "Rectangle M",
+                "rec l": "Rectangle L",
+                "rec": "Rectangle M",
+            }
+            full_style_local = style_map_local.get(parsed_style.lower(), parsed_style)
+
+            # 1. Exact color match + style match if possible
+            # First try with style matching
+            for sku, attrs in sku_attrs.items():
+                c = attrs.get("Color", "")
+                s = attrs.get("Style", "")
+                if c.lower() == parsed_color.lower():
+                    if full_style_local.lower() in s.lower() or s.lower() in full_style_local.lower() or \
+                       parsed_style.lower() in s.lower() or s.lower() in parsed_style.lower():
+                        return (s, c)
+            # Then any exact color match
+            for sku, attrs in sku_attrs.items():
+                c = attrs.get("Color", "")
+                if c.lower() == parsed_color.lower():
+                    return (attrs.get("Style", full_style_local), c)
+
+            # 2. Black (low cost) special: gated uses "Black (low cost)", sku_master uses DEEP BLACK but color is Black (low cost)
+            if "low cost" in parsed_color.lower():
+                # Find canonical low cost color with style match
+                for sku, attrs in sku_attrs.items():
+                    c = attrs.get("Color", "")
+                    if "low cost" in c.lower():
+                        s = attrs.get("Style", "")
+                        if full_style_local.lower() in s.lower() or s.lower() in full_style_local.lower():
+                            return (s, c)
+                # Fallback
+                for sku, attrs in sku_attrs.items():
+                    c = attrs.get("Color", "")
+                    if "low cost" in c.lower():
+                        return (full_style_local, c)
+            # 3. For "Black Ice" vs "Black Ice (translucent)" - allow contains but require style match
+            for sku, attrs in sku_attrs.items():
+                c = attrs.get("Color", "")
+                s = attrs.get("Style", "")
+                # Require style to match as well to avoid BLACK matching Black Ice
+                style_match = parsed_style.lower() in s.lower() or s.lower() in parsed_style.lower()
+                if not style_match:
+                    continue
+                if parsed_color.lower() in c.lower() or c.lower() in parsed_color.lower():
+                    # e.g. Black Ice vs Black Ice (translucent)
+                    return (s, c)
+
+        # Fallback: use parsed as is, try to map style abbreviation to full name
+        full_style = parsed_style
+        # Map abbreviations: Rec M -> Rectangle M, Rec L -> Rectangle L
+        style_map = {
+            "rec m": "Rectangle M",
+            "rec l": "Rectangle L",
+            "rec": "Rectangle M",
+            "panthos m": "Panthos M",
+            "panthos s": "Panthos S",
+            "pantos s": "Pantos S",
+            "bold": "Bold",
+            "slim": "Slim",
+            "cateye": "Cateye",
+        }
+        low_style = parsed_style.lower()
+        if low_style in style_map:
+            full_style = style_map[low_style]
+        else:
+            # Try to find best matching full style from existing sku_attrs
+            for sku, attrs in sku_attrs.items():
+                s = attrs.get("Style", "")
+                if low_style in s.lower() or s.lower() in low_style:
+                    full_style = s
+                    break
+
+        return (full_style, parsed_color)
+
+    def _infer_gb_usage(gb_pn, skus_list, parsed_color=None):
+        # Try from direct SKUs first
+        for s in skus_list:
+            u = sku_attrs.get(s, {}).get("Usage", "")
+            if u:
+                return u
+        # Try to infer from color/style matching
+        if parsed_color is None:
+            rest = gb_pn[3:] if gb_pn.upper().startswith("GB-") else gb_pn
+            idx = rest.rfind("-")
+            parsed_color = rest[idx+1:].strip() if idx != -1 else ""
+        if parsed_color:
+            # Exact
+            for sku, attrs in sku_attrs.items():
+                c = attrs.get("Color", "")
+                if c.lower() == parsed_color.lower():
+                    u = attrs.get("Usage", "")
+                    if u:
+                        return u
+            # Low cost
+            for sku, attrs in sku_attrs.items():
+                c = attrs.get("Color", "")
+                if "low cost" in parsed_color.lower() and "low cost" in c.lower():
+                    u = attrs.get("Usage", "")
+                    if u:
+                        return u
+            # Contains (e.g. Black Ice vs Black Ice (translucent))
+            for sku, attrs in sku_attrs.items():
+                c = attrs.get("Color", "")
+                if parsed_color.lower() in c.lower() or c.lower() in parsed_color.lower():
+                    u = attrs.get("Usage", "")
+                    if u:
+                        return u
+        # Fallback: MP is default for most
+        return "MP"
+
     for gb, skus in gb_groups.items():
-        sc = gb_style_color.get(gb, ("",""))
+        sc = _infer_gb_style_color(gb)
+        # If still blank and skus exist, try first sku's style/color
+        if (not sc[0] or not sc[1]) and skus:
+            for s in skus:
+                attrs = sku_attrs.get(s, {})
+                if attrs.get("Style") or attrs.get("Color"):
+                    sc = (sc[0] or attrs.get("Style",""), sc[1] or attrs.get("Color",""))
+                    if sc[0] and sc[1]:
+                        break
+
         gb_usage = ""
         for s in skus:
             u = sku_attrs.get(s, {}).get("Usage", "")
-            if u: gb_usage = u; break
+            if u:
+                gb_usage = u
+                break
+        if not gb_usage:
+            gb_usage = _infer_gb_usage(gb, skus)
+
         base = {"PN": gb, "Usage": gb_usage, "Style": sc[0], "Color": sc[1],
                 "GB_PN": gb, "Pallet_Qty": DEFAULT_PALLET_QTY, "_dim": "GB"}
-        for vt, vd in [("ExF",""),
-                       ("Ungated","Packout"), ("Ungated","Packout vs ExF"),
-                       ("Gated","Packout"), ("Gated","Packout vs ExF"),
-                       ("CTB","")]:
-            if vt == "CTB":
-                sc_key = gb
-                if sc_key and sc_key in ctb_gb:
-                    vals = {w: round(ctb_gb[sc_key].get(w,0),0) for w in all_weeks if ctb_gb[sc_key].get(w)}
-                else:
-                    vals = {}
-                    for w in all_weeks:
-                        s = sum(sku_data.get((s,"CTB",""),{}).get(w,0) or 0 for s in skus)
-                        if s > 0: vals[w] = round(s,0)
-            else:
-                vals = {}
-                for w in all_weeks:
-                    s = sum(sku_data.get((s,vt,vd),{}).get(w,0) or 0 for s in skus)
-                    if s > 0: vals[w] = round(s,0)
-            cd = "" if vt == "CTB" else cfg["gb_cut"]
+
+        # ---- ExF: sum SKU ExF (GB has no direct ExF) ----
+        exf_vals = {}
+        for w in all_weeks:
+            s = 0
+            has = False
+            for sku in skus:
+                v = sku_data.get((sku, "ExF", ""), {}).get(w)
+                if v is not None:
+                    has = True
+                    s += v or 0
+            if s > 0:
+                exf_vals[w] = round(s, 0)
+            elif has:
+                # keep 0 if needed? but original kept only >0, we keep >0 only for simplicity, but allow 0 diff logic later
+                pass
+
+        # ---- Direct daily for GB ----
+        gated_daily = plan_gated.get(gb, {})
+        ungated_daily = plan_ungated.get(gb, {})
+
+        def get_gb_pack(daily):
+            if not daily:
+                return {}
+            return aggregate_cumulative(daily, cfg["gb_cut"])
+
+        def get_gb_etd(daily):
+            if not daily:
+                return {}
+            raw = aggregate_etd_from_packout(daily, cfg["gb_cut"], offset_n)
+            rounded = {}
+            for wk, v in raw.items():
+                if v and v > 0:
+                    rounded[wk] = (int(v) // DEFAULT_PALLET_QTY) * DEFAULT_PALLET_QTY
+            return rounded
+
+        # Gated Packout direct, else fallback sum SKU
+        if gated_daily:
+            gp_vals = get_gb_pack(gated_daily)
+        else:
+            gp_vals = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Gated", "Packout"), {}).get(w, 0) or 0 for s in skus)
+                if s > 0:
+                    gp_vals[w] = round(s, 0)
+
+        # Ungated Packout
+        if ungated_daily:
+            up_vals = get_gb_pack(ungated_daily)
+        else:
+            up_vals = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Ungated", "Packout"), {}).get(w, 0) or 0 for s in skus)
+                if s > 0:
+                    up_vals[w] = round(s, 0)
+
+        # Gated ETD
+        if gated_daily:
+            ge_vals = get_gb_etd(gated_daily)
+        else:
+            ge_vals = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Gated", "ETD"), {}).get(w, 0) or 0 for s in skus)
+                if s > 0:
+                    ge_vals[w] = round(s, 0)
+
+        # Ungated ETD
+        if ungated_daily:
+            ue_vals = get_gb_etd(ungated_daily)
+        else:
+            ue_vals = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Ungated", "ETD"), {}).get(w, 0) or 0 for s in skus)
+                if s > 0:
+                    ue_vals[w] = round(s, 0)
+
+        # Diffs: direct GB vs ExF = (base - exf) where either exists
+        def direct_vs(base_vals, exf_v):
+            res = {}
+            for w in all_weeks:
+                b = base_vals.get(w)
+                e = exf_v.get(w)
+                if b is None and e is None:
+                    continue
+                res[w] = round((b or 0) - (e or 0), 0)
+            return res
+
+        gp_vs = direct_vs(gp_vals, exf_vals) if gated_daily else {}
+        up_vs = direct_vs(up_vals, exf_vals) if ungated_daily else {}
+        ge_vs = direct_vs(ge_vals, exf_vals) if gated_daily else {}
+        ue_vs = direct_vs(ue_vals, exf_vals) if ungated_daily else {}
+
+        # Fallback vs logic for GB without direct daily (sum SKU diffs with has_data)
+        if not gated_daily:
+            gp_vs = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Gated", "Packout vs ExF"), {}).get(w, 0) or 0 for s in skus)
+                has_data = False
+                for sku in skus:
+                    if sku_data.get((sku, "Gated", "Packout vs ExF"), {}).get(w) is not None:
+                        has_data = True
+                        break
+                    if sku_data.get((sku, "Gated", "Packout"), {}).get(w) is not None:
+                        has_data = True
+                        break
+                    if sku_data.get((sku, "ExF", ""), {}).get(w) is not None:
+                        has_data = True
+                        break
+                if has_data:
+                    gp_vs[w] = round(s, 0)
+        if not ungated_daily:
+            up_vs = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Ungated", "Packout vs ExF"), {}).get(w, 0) or 0 for s in skus)
+                has_data = False
+                for sku in skus:
+                    if sku_data.get((sku, "Ungated", "Packout vs ExF"), {}).get(w) is not None:
+                        has_data = True
+                        break
+                    if sku_data.get((sku, "Ungated", "Packout"), {}).get(w) is not None:
+                        has_data = True
+                        break
+                    if sku_data.get((sku, "ExF", ""), {}).get(w) is not None:
+                        has_data = True
+                        break
+                if has_data:
+                    up_vs[w] = round(s, 0)
+        if not gated_daily:
+            ge_vs = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Gated", "ETD vs ExF"), {}).get(w, 0) or 0 for s in skus)
+                has_data = False
+                for sku in skus:
+                    if sku_data.get((sku, "Gated", "ETD vs ExF"), {}).get(w) is not None or \
+                       sku_data.get((sku, "Gated", "ETD"), {}).get(w) is not None or \
+                       sku_data.get((sku, "ExF", ""), {}).get(w) is not None:
+                        has_data = True
+                        break
+                if has_data:
+                    ge_vs[w] = round(s, 0)
+        if not ungated_daily:
+            ue_vs = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "Ungated", "ETD vs ExF"), {}).get(w, 0) or 0 for s in skus)
+                has_data = False
+                for sku in skus:
+                    if sku_data.get((sku, "Ungated", "ETD vs ExF"), {}).get(w) is not None or \
+                       sku_data.get((sku, "Ungated", "ETD"), {}).get(w) is not None or \
+                       sku_data.get((sku, "ExF", ""), {}).get(w) is not None:
+                        has_data = True
+                        break
+                if has_data:
+                    ue_vs[w] = round(s, 0)
+
+        # CTB
+        if gb in ctb_gb:
+            ctb_vals_raw = extract_weekly_cum(ctb_gb[gb], cfg["etd_cut"])
+            ctb_vals = {w: round(v, 0) for w, v in ctb_vals_raw.items() if v and v > 0}
+        else:
+            ctb_vals = {}
+            for w in all_weeks:
+                s = sum(sku_data.get((s, "CTB", ""), {}).get(w, 0) or 0 for s in skus)
+                if s > 0:
+                    ctb_vals[w] = round(s, 0)
+
+        # Build rows: include ETD as well to match direct availability
+        version_defs = [
+            ("ExF", "", exf_vals, cfg["exf_cut"]),
+            ("Ungated", "ETD", ue_vals, cfg["gb_cut"]),
+            ("Ungated", "ETD vs ExF", ue_vs, cfg["gb_cut"]),
+            ("Ungated", "Packout", up_vals, cfg["gb_cut"]),
+            ("Ungated", "Packout vs ExF", up_vs, cfg["gb_cut"]),
+            ("Gated", "ETD", ge_vals, cfg["gb_cut"]),
+            ("Gated", "ETD vs ExF", ge_vs, cfg["gb_cut"]),
+            ("Gated", "Packout", gp_vals, cfg["gb_cut"]),
+            ("Gated", "Packout vs ExF", gp_vs, cfg["gb_cut"]),
+            ("CTB", "", ctb_vals, ""),
+        ]
+
+        for vt, vd, vals, cd in version_defs:
             rows.append({**base, "Version-Type": vt, "Version-Detail": vd, "Cut Day": cd, **fill(vals)})
 
     wl = {}
