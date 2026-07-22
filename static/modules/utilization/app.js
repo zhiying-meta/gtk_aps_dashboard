@@ -82,6 +82,43 @@
     }
   }
 
+  function updateCardStatuses(status){
+    // Update per-card status divs based on latest status — ensures after clear/upload, card shows correct Ready/Not Ready
+    const filesFound = (status && status.files_found) ? status.files_found : [];
+    const loadedVers = (status && status.versions) ? status.versions : [];
+    const hasGated = filesFound.includes('gated');
+    const hasUngated = filesFound.includes('ungated');
+    const isGatedReady = loadedVers.includes('gated');
+    const isUngatedReady = loadedVers.includes('ungated');
+
+    const gatedEl = document.getElementById('status-gated-files');
+    const ungatedEl = document.getElementById('status-ungated-files');
+    if(gatedEl){
+      if(isGatedReady){
+        gatedEl.style.background='#dcfce7'; gatedEl.style.border='1px solid #86efac'; gatedEl.style.color='#065f46';
+        gatedEl.innerHTML='<span>✅ Gated: Ready — computed and will be shown in matrix</span><span style="font-size:10px;opacity:0.8">Status: Ready</span>';
+      }else if(hasGated){
+        gatedEl.style.background='#fef3c7'; gatedEl.style.border='1px solid #fde68a'; gatedEl.style.color='#92400e';
+        gatedEl.innerHTML='<span>⚠️ Gated: Partial — files present but not computed, re-upload to complete</span><span style="font-size:10px;opacity:0.8">Status: Partial</span>';
+      }else{
+        gatedEl.style.background='#fef2f2'; gatedEl.style.border='1px solid #fecaca'; gatedEl.style.color='#991b1b';
+        gatedEl.innerHTML='<span>❌ Gated: Not Ready — no files uploaded, matrix will show only Ungated if available. Re-upload supported.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready</span>';
+      }
+    }
+    if(ungatedEl){
+      if(isUngatedReady){
+        ungatedEl.style.background='#dcfce7'; ungatedEl.style.border='1px solid #86efac'; ungatedEl.style.color='#065f46';
+        ungatedEl.innerHTML='<span>✅ Ungated: Ready — computed and will be shown</span><span style="font-size:10px;opacity:0.8">Status: Ready</span>';
+      }else if(hasUngated){
+        ungatedEl.style.background='#fef3c7'; ungatedEl.style.border='1px solid #fde68a'; ungatedEl.style.color='#92400e';
+        ungatedEl.innerHTML='<span>⚠️ Ungated: Partial — files present but not computed</span><span style="font-size:10px;opacity:0.8">Status: Partial</span>';
+      }else{
+        ungatedEl.style.background='#fef2f2'; ungatedEl.style.border='1px solid #fecaca'; ungatedEl.style.color='#991b1b';
+        ungatedEl.innerHTML='<span>❌ Ungated: Not Ready — no files uploaded, matrix will show only Gated if available (empty allowed). Re-upload supported.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready</span>';
+      }
+    }
+  }
+
   function buildUploadHTML(status){
     const filesFound = (status && status.files_found) ? status.files_found : [];
     const hasGated = filesFound.includes('gated');
@@ -603,34 +640,34 @@
           } else {
             if (msgEl) msgEl.textContent = `✅ Uploaded — ${JSON.stringify(j.results || j)}`;
           }
-          // Refresh status and matrix after upload
+          // Refresh status and matrix after upload — ensure per-card Ready/Not Ready updated correctly
           setTimeout(async () => {
             try {
               const st = await checkStatus();
               const badge = document.getElementById('util-status-badge');
               if (badge) badge.innerHTML = statusBadgeHTML(st);
+              // Update per-card status divs using single source helper
+              updateCardStatuses(st);
               if (st.loaded) {
                 await loadMeta();
                 const newLines = (meta && meta.lines) ? meta.lines : lines;
                 setupLineDropdown(newLines);
+                // Adjust selectedVersionTypes to remaining ready modules for correct matrix display
+                if(st.versions && st.versions.length>0){
+                  if(st.versions.length===1){
+                    selectedVersionTypes = new Set([st.versions[0].charAt(0).toUpperCase()+st.versions[0].slice(1).toLowerCase()]);
+                  }else{
+                    selectedVersionTypes = new Set(st.versions.map(v=> v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()));
+                  }
+                  setupVersionTypeDropdown();
+                }
                 applyPivot();
               } else {
-                // Even if partial, update status text per version
-                const gatedStatusEl = document.getElementById('status-gated-files');
-                const ungatedStatusEl = document.getElementById('status-ungated-files');
-                const filesFound = (st.files_found||[]);
-                if (gatedStatusEl) {
-                  if (filesFound.includes('gated')) {
-                    gatedStatusEl.textContent = st.versions && st.versions.includes('gated') ? '✅ Gated Ready' : '⚠️ Gated files present (partial or not computed)';
-                    gatedStatusEl.style.background = '#fef3c7';
-                  }
-                }
-                if (ungatedStatusEl) {
-                  if (filesFound.includes('ungated')) {
-                    ungatedStatusEl.textContent = st.versions && st.versions.includes('ungated') ? '✅ Ungated Ready' : '⚠️ Ungated files present';
-                    ungatedStatusEl.style.background = '#d1fae5';
-                  }
-                }
+                // No ready versions yet — show empty matrix with Not Ready hint
+                const wrapper = document.getElementById('util-matrix-wrapper');
+                if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">❌ No Ready modules. Upload at least one module (Gated or Ungated).<br><span style="font-size:11px;color:#92400e">Current status: ${st.files_found && st.files_found.length>0 ? 'Files found but not computed — re-upload to complete' : 'No files'}</span></div>`;
+                const mbadge = document.getElementById('util-matrix-badge');
+                if(mbadge) mbadge.innerHTML = `<span style="color:#991b1b">❌ Gated: Not Ready | ❌ Ungated: Not Ready — empty</span>`;
               }
             } catch (e) { console.warn(e); }
           }, 800);
@@ -674,48 +711,34 @@
           // Immediately reset file input to allow re-upload of same or new files
           resetUploadInput(ver);
 
-          // Refresh UI
+          // Refresh UI — use single source helper for card statuses to avoid Ready/Not Ready mismatch
           setTimeout(async ()=>{
             const st = await checkStatus();
             const badge = document.getElementById('util-status-badge');
             if(badge) badge.innerHTML = statusBadgeHTML(st);
-            // Update per-card status visually to Not Ready
-            const gatedEl = document.getElementById('status-gated-files');
-            const ungatedEl = document.getElementById('status-ungated-files');
+            // Update per-card status divs correctly
+            updateCardStatuses(st);
+
             if(st.versions && st.versions.length===0){
-              if(gatedEl){ gatedEl.style.background='#fef2f2'; gatedEl.style.border='1px solid #fecaca'; gatedEl.style.color='#991b1b'; gatedEl.innerHTML='<span>❌ Gated: Not Ready — cleared, no files. Re-upload supported.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready</span>'; }
-              if(ungatedEl){ ungatedEl.style.background='#fef2f2'; ungatedEl.style.border='1px solid #fecaca'; ungatedEl.style.color='#991b1b'; ungatedEl.innerHTML='<span>❌ Ungated: Not Ready — cleared, no files. Re-upload supported.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready</span>'; }
-            }else{
-              await loadMeta();
-              setupLineDropdown(meta?.lines||[]);
-              if(st.versions && st.versions.length>0){
-                if(st.versions.length===1){
-                  selectedVersionTypes = new Set([st.versions[0].charAt(0).toUpperCase()+st.versions[0].slice(1).toLowerCase()]);
-                }else{
-                  selectedVersionTypes = new Set(st.versions.map(v=> v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()));
-                }
-                setupVersionTypeDropdown();
-              }
-              applyPivot();
-              // If cleared version is current ver, ensure its status card shows Not Ready with re-upload hint
-              if(ver==='gated' && gatedEl){
-                if(!st.versions.includes('gated')){
-                  gatedEl.style.background='#fef2f2'; gatedEl.style.border='1px solid #fecaca'; gatedEl.style.color='#991b1b';
-                  gatedEl.innerHTML='<span>❌ Gated: Not Ready — cleared. Re-upload new files via above input (supports zip or 2 xlsx).</span><span style="font-size:10px;opacity:0.8">Status: Not Ready — Re-upload Ready</span>';
-                }
-              }
-              if(ver==='ungated' && ungatedEl){
-                if(!st.versions.includes('ungated')){
-                  ungatedEl.style.background='#fef2f2'; ungatedEl.style.border='1px solid #fecaca'; ungatedEl.style.color='#991b1b';
-                  ungatedEl.innerHTML='<span>❌ Ungated: Not Ready — cleared. Re-upload new files via above input.</span><span style="font-size:10px;opacity:0.8">Status: Not Ready — Re-upload Ready</span>';
-                }
-              }
-            }
-            if(!st.loaded){
+              // Both cleared — show empty matrix, no values
+              await loadMeta().catch(()=>{});
+              setupLineDropdown([]);
+              setupVersionTypeDropdown();
               const wrapper = document.getElementById('util-matrix-wrapper');
               if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">❌ All modules cleared — both Gated and Ungated are Not Ready (empty). You can re-upload new files for Gated or Ungated (independent one-click).</div>`;
               const mbadge = document.getElementById('util-matrix-badge');
               if(mbadge) mbadge.innerHTML = `<span style="color:#991b1b">❌ Gated: Not Ready | ❌ Ungated: Not Ready — empty — Re-upload supported</span>`;
+            }else{
+              // One module remains — show only that, other stays Not Ready (empty)
+              await loadMeta();
+              setupLineDropdown(meta?.lines||[]);
+              if(st.versions.length===1){
+                selectedVersionTypes = new Set([st.versions[0].charAt(0).toUpperCase()+st.versions[0].slice(1).toLowerCase()]);
+              }else{
+                selectedVersionTypes = new Set(st.versions.map(v=> v.charAt(0).toUpperCase()+v.slice(1).toLowerCase()));
+              }
+              setupVersionTypeDropdown();
+              applyPivot();
             }
           }, 500);
         }catch(e){
