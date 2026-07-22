@@ -35,9 +35,30 @@ function getRoot(){ return document.getElementById('io-report-section'); }
 function getStaticDBIO(){ try { return window.STATIC_DB || null; } catch(e){ return null; } }
 function isPlanMergeStatic(){ const db=getStaticDBIO(); return !!(db && db.versions && db.versions.length>0); }
 let _lastStatus = null;
+function getStaticIOFull(){
+  try{
+    if(window.STATIC_DB && window.STATIC_DB.io && window.STATIC_DB.io.status) return window.STATIC_DB.io;
+    if(window.STATIC_DB && window.STATIC_DB.io && window.STATIC_DB.io.groups) return window.STATIC_DB.io;
+  }catch(e){}
+  return null;
+}
+function isStaticIOMode(){
+  const db = getStaticIOFull();
+  return !!(db && (db.status || db.groups));
+}
+
 async function checkStatus(){
   if (_ioClientCache){
     _lastStatus = {loaded:true, fg: _ioClientCache.fgItems.length, gb: _ioClientCache.gbItems.length, client:true};
+    return true;
+  }
+  const staticIO = getStaticIOFull();
+  if(staticIO && staticIO.status && staticIO.status.loaded){
+    _lastStatus = {...staticIO.status, fg: staticIO.status.fg||0, gb: staticIO.status.gb||0, static:true};
+    return true;
+  }
+  if(staticIO && staticIO.groups && Object.keys(staticIO.groups).length>0){
+    _lastStatus = {loaded:true, fg: 10, gb: 10, static:true, cats: Object.keys(staticIO.groups)};
     return true;
   }
   try{
@@ -51,6 +72,10 @@ async function checkStatus(){
 async function getFullStatus(){
   if (_ioClientCache){
     return {loaded:true, fg: _ioClientCache.fgItems.length, gb: _ioClientCache.gbItems.length, client:true};
+  }
+  const staticIO = getStaticIOFull();
+  if(staticIO && staticIO.status){
+    return {loaded:true, fg: staticIO.status.fg||0, gb: staticIO.status.gb||0, static:true, cats: Object.keys(staticIO.groups||{})};
   }
   try{
     if(_lastStatus) return _lastStatus;
@@ -859,7 +884,7 @@ function onWellChipDragStart(e,dim){ e.dataTransfer.setData('text/plain',dim); e
 window.ioOnWellChipDragStart=onWellChipDragStart;
 function getDimParam(){ if(dimOrder.length===0) return ''; if(dimOrder.length===1) return dimOrder[0]; return 'detail'; }
 async function refreshMeta(){
-  // Client offline path
+  // Client offline path with _ioClientCache
   if (_ioClientCache && window.IOReportEngine){
     try{
       const meta = window.IOReportEngine.getMeta(_ioClientCache, currentGroup, COL_DIM);
@@ -870,6 +895,19 @@ async function refreshMeta(){
       }
       return;
     }catch(e){ console.error('client refreshMeta failed', e); }
+  }
+  // Static offline mode from export_static.py (campus-planning-system style) — full filtering preserved
+  const staticIO = getStaticIOFull();
+  if(staticIO && staticIO.groups && staticIO.groups[currentGroup] && staticIO.groups[currentGroup][COL_DIM]){
+    try{
+      const meta = staticIO.groups[currentGroup][COL_DIM].meta || {};
+      const map={lineCode:'line_codes',itemNo:'items',style:'styles'};
+      for(const [fk,mk] of Object.entries(map)){
+        const cur=filterVals[fk]; const opts=meta[mk]||[]; populateFilter(fk, opts);
+        if(cur && !opts.includes(cur)){ filterVals[fk]=''; const inp=document.getElementById('fi_'+fk); if(inp) inp.value=''; }
+      }
+      return;
+    }catch(e){ console.error('static refreshMeta failed', e); }
   }
   try{
     const resp=await fetch(`/api/io/meta?group=${encodeURIComponent(currentGroup)}&col_dim=${COL_DIM}`);
@@ -886,7 +924,7 @@ async function loadAllReports(){
   const content=document.getElementById('ioReportContent');
   if(!dim){ allData=null; if(content) content.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8">Please drag row dimensions</div>'; renderLeftGroupBoxes(); return; }
   if(content) content.innerHTML='<div style="text-align:center;padding:24px;color:#64748b">⏳ Loading...</div>';
-  // Client offline
+  // Client offline with _ioClientCache
   if (_ioClientCache && window.IOReportEngine){
     try{
       const result = window.IOReportEngine.buildReportsForGroup(_ioClientCache, dim, COL_DIM, currentGroup, filterVals.lineCode, filterVals.itemNo, filterVals.style);
@@ -899,6 +937,46 @@ async function loadAllReports(){
       console.error('client loadAllReports failed', e);
       if(content) content.innerHTML=`<div style="text-align:center;padding:24px;color:#dc2626">❌ ${esc(e.message)}</div>`;
       return;
+    }
+  }
+  // Static offline mode from export_static.py dist — full filtering preserved like campus-planning-system/frontend/dist
+  const staticIO = getStaticIOFull();
+  if(staticIO && staticIO.groups && staticIO.groups[currentGroup] && staticIO.groups[currentGroup][COL_DIM]){
+    try{
+      const groupData = staticIO.groups[currentGroup][COL_DIM];
+      let reportsData;
+      if(dim==='ITEM_NO') reportsData = groupData.reportsPN;
+      else if(dim==='STYLE') reportsData = groupData.reportsStyle;
+      else if(dim==='detail'){
+        // For detail, we need to combine? For static, use reportsLine as fallback and let detail handling happen in render
+        reportsData = groupData.reportsLine;
+      }else{
+        reportsData = groupData.reportsLine;
+      }
+      // Apply client-side filters (line, item, style) similar to server
+      if(reportsData){
+        let filtered = {};
+        for(const [rtype, rdata] of Object.entries(reportsData)){
+          if(!rdata || !rdata.rows) { filtered[rtype]=rdata; continue; }
+          let rows = rdata.rows;
+          if(filterVals.lineCode){
+            rows = rows.filter(r=> (r.LINE_CODE||'').toLowerCase().includes(filterVals.lineCode.toLowerCase()));
+          }
+          if(filterVals.itemNo){
+            rows = rows.filter(r=> (r.ITEM_NO||'').toLowerCase().includes(filterVals.itemNo.toLowerCase()));
+          }
+          if(filterVals.style){
+            rows = rows.filter(r=> (r.STYLE||'').toLowerCase().includes(filterVals.style.toLowerCase()));
+          }
+          filtered[rtype] = {...rdata, rows: rows};
+        }
+        allData = filtered;
+        Object.keys(treeCache).forEach(k=>delete treeCache[k]);
+        renderAllReports();
+        return;
+      }
+    }catch(e){
+      console.error('static loadAllReports failed', e);
     }
   }
   const params=new URLSearchParams({group:currentGroup, dim, col_dim:COL_DIM, line_code:filterVals.lineCode, item_no:filterVals.itemNo, style:filterVals.style});

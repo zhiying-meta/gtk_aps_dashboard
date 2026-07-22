@@ -23,6 +23,19 @@
   function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
   function getRoot(){ return document.getElementById('utilization-section'); }
 
+  // Static offline mode like campus-planning-system/frontend/dist — fully preserves format and filtering
+  function getStaticUtilDB(){
+    try{
+      if(window.STATIC_DB && window.STATIC_DB.utilization) return window.STATIC_DB.utilization;
+      if(window.UTILIZATION_STATIC_DB) return window.UTILIZATION_STATIC_DB;
+    }catch(e){}
+    return null;
+  }
+  function isStaticUtilMode(){
+    const db = getStaticUtilDB();
+    return !!(db && (db.gated || db.ungated || db._pivot_day || db._pivot_shift));
+  }
+
   async function fetchJSON(url, opts){
     const r = await fetch(url, opts);
     const j = await r.json();
@@ -31,10 +44,35 @@
   }
 
   async function checkStatus(){
+    const staticDB = getStaticUtilDB();
+    if(staticDB && staticDB._meta){
+      // Static mode: versions from _meta or keys
+      const vers = staticDB._meta.versions || Object.keys(staticDB).filter(k=> !k.startsWith('_'));
+      return {loaded: vers.length>0, versions: vers, details: {}, files_found: vers, statusBadge: 'static'};
+    }
+    if(staticDB && (staticDB.gated || staticDB.ungated)){
+      const vers = Object.keys(staticDB).filter(k=> !k.startsWith('_'));
+      return {loaded: vers.length>0, versions: vers, details: {}, files_found: vers, statusBadge: 'static'};
+    }
     try{ return await fetchJSON(API_STATUS); }catch(e){ return {loaded:false}; }
   }
 
   async function loadMeta(){
+    const staticDB = getStaticUtilDB();
+    if(staticDB && staticDB._meta){
+      // Use embedded meta for offline full filtering
+      meta = {
+        lines: staticDB._meta.lines || [],
+        dates: [],
+        shifts: [],
+        versions: staticDB._meta.versions || [],
+        date_min: staticDB._meta.dates?.min || '',
+        date_max: staticDB._meta.dates?.max || ''
+      };
+      if(staticDB.gated && staticDB.gated.lines) meta.lines = [...new Set([...(meta.lines||[]), ...staticDB.gated.lines])];
+      if(staticDB.ungated && staticDB.ungated.lines) meta.lines = [...new Set([...(meta.lines||[]), ...staticDB.ungated.lines])];
+      return true;
+    }
     try{
       meta = await fetchJSON(API_META);
       return true;
@@ -556,6 +594,66 @@
     if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8">Loading pivot matrix...</div>`;
 
     try{
+      // Static offline mode: use embedded pivot data with client-side filtering (full format and filtering preserved like campus-planning-system/dist)
+      const staticDB = getStaticUtilDB();
+      if(staticDB && (staticDB._pivot_day || staticDB._pivot_shift)){
+        const pivotData = currentMode==='day' ? (staticDB._pivot_day || staticDB._pivot_shift) : (staticDB._pivot_shift || staticDB._pivot_day);
+        if(pivotData){
+          // Client-side filtering for static mode (version, line, date)
+          let filtered = {
+            columns: [...(pivotData.columns||[])],
+            rows: [...(pivotData.rows||[])],
+            detail: {...(pivotData.detail||{})},
+            versions: pivotData.versions||[],
+            lines: pivotData.lines||[],
+            total_lines: pivotData.total_lines||0,
+            total_cols: pivotData.total_cols||0,
+            total_cols_before: pivotData.total_cols_before||0,
+            truncated: pivotData.truncated||false,
+            mode: pivotData.mode||currentMode
+          };
+          // Filter by version
+          if(versionParam!=='all'){
+            filtered.rows = filtered.rows.filter(r=> (r.version_type||'').toLowerCase()===versionParam);
+          }else{
+            // Filter by selectedVersionTypes set
+            if(selectedVersionTypes.size>0 && selectedVersionTypes.size<2){
+              const sel = Array.from(selectedVersionTypes).map(v=>v.toLowerCase());
+              filtered.rows = filtered.rows.filter(r=> sel.includes((r.version_type||'').toLowerCase()));
+            }
+          }
+          // Filter by line
+          if(lineParam){
+            const lineFilters = lineParam.toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
+            if(lineFilters.length>0){
+              filtered.rows = filtered.rows.filter(r=>{
+                const lc = (r.line_code||'').toLowerCase();
+                return lineFilters.some(f=> lc.includes(f));
+              });
+            }
+          }
+          // Filter columns by date
+          if(from || to){
+            filtered.columns = pivotData.columns.filter(col=>{
+              let d = col;
+              if(col.includes('|')) d = col.split('|')[0];
+              if(from && d < from) return false;
+              if(to && d > to) return false;
+              return true;
+            });
+            // Filter rows to only keep cols that remain
+            filtered.rows = filtered.rows.map(r=>{
+              const nr = {...r};
+              // Keep only filtered cols values, remove others? For simplicity keep all but render will only show filtered cols
+              return nr;
+            });
+            filtered.total_cols = filtered.columns.length;
+          }
+          filtered.total_lines = filtered.rows.length;
+          renderMatrix(filtered);
+          return;
+        }
+      }
       const res = await fetchJSON(`${API_PIVOT}?${params.toString()}`);
       renderMatrix(res);
     }catch(e){

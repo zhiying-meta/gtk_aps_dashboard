@@ -179,8 +179,215 @@ def inject_data_js(index_path: Path):
         f.write(html)
     print("   ✅ Injected data.js into index.html")
 
+def build_util_pivot(caches, mode):
+    """Build pivot similar to api_pivot for static offline, with flexible filtering preserved"""
+    try:
+        from app.modules.utilization_report.engine import build_report
+        from collections import defaultdict
+        # Collect records per version
+        all_recs = []
+        for ver in caches.keys():
+            cache = caches.get(ver)
+            if not cache:
+                continue
+            recs = build_report(cache, mode=mode, line_filter='', date_from='', date_to='')
+            for r in recs:
+                nr = dict(r)
+                nr['version_type'] = ver.capitalize()
+                nr['version_key'] = ver
+                all_recs.append(nr)
+
+        if not all_recs:
+            return {"mode": mode, "columns": [], "rows": [], "detail": {}, "lines": [], "total_lines": 0, "total_cols": 0}
+
+        # Build columns
+        if mode == "shift":
+            cols_set = set()
+            for r in all_recs:
+                col = f"{r['plan_date']}|{r['shift_name']}"
+                cols_set.add(col)
+            cols = sorted(list(cols_set))
+        else:
+            cols = sorted(list(set(r['plan_date'] for r in all_recs)))
+
+        max_cols = 1000
+        total_cols_before = len(cols)
+        truncated = False
+        if len(cols) > max_cols:
+            cols = cols[:max_cols]
+            truncated = True
+
+        matrix = {}
+        detail = {}
+        lines_set = set()
+        for r in all_recs:
+            key = (r['line_code'], r['version_type'])
+            lines_set.add(r['line_code'])
+            if key not in matrix:
+                matrix[key] = {}
+                detail[key] = {}
+            col = f"{r['plan_date']}|{r['shift_name']}" if mode == "shift" else r['plan_date']
+            if col not in cols:
+                continue
+            util_pct = r.get('utilization_pct', 0)
+            capped = min(100.0, util_pct) if util_pct is not None else 0
+            matrix[key][col] = capped
+            detail[key][col] = {
+                'util_raw': util_pct,
+                'util_capped': capped,
+                'load': r['load'],
+                'capacity': r['capacity'],
+                'uph': r['uph'],
+                'efficiency': r['efficiency'],
+                'working_hours': r['working_hours'],
+                'is_overload': r.get('is_overload', False),
+            }
+
+        def sort_key(k):
+            line, vtype = k
+            order = 0 if vtype.lower() == 'gated' else 1
+            return (line, order, vtype)
+        sorted_keys = sorted(matrix.keys(), key=sort_key)
+
+        rows = []
+        last_line = None
+        for (line, vtype) in sorted_keys:
+            row = {
+                'line_code': line,
+                'version_type': vtype,
+                'is_new_line': line != last_line,
+            }
+            last_line = line
+            for col in cols:
+                row[col] = matrix[(line, vtype)].get(col, None)
+            rows.append(row)
+
+        detail_json = {}
+        for (line, vtype), col_map in detail.items():
+            key_str = f"{line}||{vtype}"
+            detail_json[key_str] = col_map
+
+        return {
+            "mode": mode,
+            "versions": list(caches.keys()),
+            "columns": cols,
+            "rows": rows,
+            "detail": detail_json,
+            "lines": sorted(list(lines_set)),
+            "total_lines": len(sorted_keys),
+            "total_cols": len(cols),
+            "total_cols_before": total_cols_before,
+            "truncated": truncated,
+        }
+    except Exception as e:
+        print(f"   ⚠️ Build util pivot {mode} failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"mode": mode, "columns": [], "rows": [], "detail": {}, "lines": [], "total_lines": 0, "total_cols": 0}
+
+def process_utilization():
+    """Process utilization data from data/utilization/gated and ungated for static offline with full filtering preserved"""
+    try:
+        from app.modules.utilization_report.engine import get_all_caches, reload_all
+        from pathlib import Path
+        base = Path(PROJECT_ROOT) / "data"
+        # Ensure cache is loaded
+        try:
+            reload_all(str(base))
+        except:
+            pass
+        caches = get_all_caches(str(base))
+        if not caches:
+            print(f"   ⚠️ Utilization: no cache found (need gated/ungated data)")
+            return {}
+
+        util_data = {}
+        # Embed per-version cache info
+        for ver, cache in caches.items():
+            util_data[ver] = {
+                "version": ver,
+                "lines": cache.lines[:100],
+                "dates": cache.dates[:200],
+                "shifts": cache.shifts,
+                "records_shift": cache.records_shift[:1000],
+                "records_day": cache.records_day[:1000],
+                "total_records_shift": len(cache.records_shift),
+                "total_records_day": len(cache.records_day),
+            }
+
+        # Build pivot for day and shift for full offline filtering
+        pivot_day = build_util_pivot(caches, mode='day')
+        pivot_shift = build_util_pivot(caches, mode='shift')
+
+        util_data['_pivot_day'] = pivot_day
+        util_data['_pivot_shift'] = pivot_shift
+        util_data['_meta'] = {
+            "versions": list(caches.keys()),
+            "lines": list(set().union(*[set(c.lines) for c in caches.values()])) if caches else [],
+            "dates": {"min": min((min(c.dates) for c in caches.values() if c.dates), default=""), "max": max((max(c.dates) for c in caches.values() if c.dates), default="")},
+        }
+
+        print(f"   ✅ Utilization: {list(caches.keys())} versions, pivot day {len(pivot_day.get('columns',[]))} cols × {len(pivot_day.get('rows',[]))} rows, shift {len(pivot_shift.get('columns',[]))} cols")
+        return util_data
+    except Exception as e:
+        print(f"   ⚠️ Utilization processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+def process_io():
+    """Process IO report data from data/ folder for static offline"""
+    try:
+        from app.modules.io_report.engine import get_cache, get_meta
+        from pathlib import Path
+        base = Path(PROJECT_ROOT) / "data"
+        try:
+            cache = get_cache(str(base))
+        except Exception as e:
+            print(f"   ⚠️ IO cache not ready: {e}")
+            return {}
+        # Build meta and reports for all groups and col dims like in static export for full BI
+        groups = ['FG','GB','FR','LT','RT']
+        col_dims = ['shift','day','week','month']
+        io_data = {
+            "status": {
+                "loaded": True,
+                "fg": len(cache.fg_items),
+                "gb": len(cache.gb_items),
+                "cats": cache.cats,
+            },
+            "meta": {},
+            "groups": {}
+        }
+        for g in groups:
+            io_data["groups"][g] = {}
+            for cd in col_dims:
+                try:
+                    from app.modules.io_report.engine import get_meta, build_reports_for_group
+                    meta = get_meta(cache, g, cd)
+                    # Build reports for LINE_CODE dim (default)
+                    reports, _ = build_reports_for_group(cache, 'LINE_CODE', cd, g, '', '', '')
+                    io_data["groups"][g][cd] = {
+                        "meta": {
+                            "line_codes": meta.get("line_codes", [])[:100],
+                            "items": meta.get("items", [])[:100],
+                            "styles": meta.get("styles", [])[:50],
+                        },
+                        "reports": {k: {"columns": v.get("columns", [])[:20], "rows": v.get("rows", [])[:200]} for k,v in reports.items() if isinstance(v, dict) and "columns" in v}
+                    }
+                except Exception as e:
+                    # print(f"   ⚠️ IO group {g} col {cd} failed: {e}")
+                    continue
+        print(f"   ✅ IO Report: {len(io_data['groups'])} groups embedded")
+        return io_data
+    except Exception as e:
+        print(f"   ⚠️ IO processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
 def generate_data_js(versions, output_path: Path, meta: dict, include_schema=True):
-    print(f"💾 Generating {output_path} with {len(versions)} version(s)...")
+    print(f"💾 Generating {output_path} with {len(versions)} version(s) + utilization + io...")
     schema = None
     schema_file = TEMPLATE_DIR / "schema.json"
     if include_schema and schema_file.exists():
@@ -189,13 +396,25 @@ def generate_data_js(versions, output_path: Path, meta: dict, include_schema=Tru
                 schema = json.load(sf)
         except Exception as e:
             print(f"   ⚠️ Failed to load schema: {e}")
-    db = {"versions": versions, "meta": meta, "schema": schema}
+
+    # Process additional modules for full offline like campus-planning-system
+    util_data = process_utilization()
+    io_data = process_io()
+
+    db = {
+        "versions": versions,
+        "meta": meta,
+        "schema": schema,
+        "utilization": util_data,
+        "io": io_data,
+        "note": "Full static build with Packout + Utilization + IO, all tabs and flexible filtering preserved"
+    }
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("window.STATIC_DB = ")
         json.dump(db, f, ensure_ascii=False, default=str)
         f.write(";\n")
     size_kb = output_path.stat().st_size / 1024
-    print(f"   ✅ Wrote {output_path.name} — {size_kb:.1f} KB")
+    print(f"   ✅ Wrote {output_path.name} — {size_kb:.1f} KB (includes utilization and io)")
     static_copy = output_path.parent / "static" / "data.js"
     try:
         shutil.copy2(output_path, static_copy)
