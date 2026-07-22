@@ -351,7 +351,12 @@ function attachUploadLogic(isCompact){
     if(prog) prog.textContent='Clearing...';
     try{
       const r=await fetch('/api/io/clear',{method:'POST'});
-      const j=await r.json();
+      const text = await r.text();
+      let j;
+      try{ j=JSON.parse(text); }catch{
+        // If not JSON (e.g., 404 HTML), throw with status and snippet
+        throw new Error(`Clear failed: HTTP ${r.status} — ${text.slice(0,200)} — Please restart server to load new clear endpoint`);
+      }
       if(!r.ok) throw new Error(j.error||'clear failed');
       if(prog) prog.innerHTML=`<span style="color:#059669">✅ Cleared — ${j.message} — Now Not Ready, re-upload supported</span>`;
       try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
@@ -479,7 +484,11 @@ function initReportsPage(){
     if(!confirm('Clear IO Report cache and files? It will become Not Ready, you can re-upload new files.')) return;
     try{
       const r=await fetch('/api/io/clear',{method:'POST'});
-      const j=await r.json();
+      const text = await r.text();
+      let j;
+      try{ j=JSON.parse(text); }catch{
+        throw new Error(`Clear failed: HTTP ${r.status} — ${text.slice(0,200)} — Please restart server`);
+      }
       if(!r.ok) throw new Error(j.error||'clear failed');
       alert('✅ Cleared IO Report — now Not Ready. Re-upload supported.');
       try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
