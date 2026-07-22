@@ -208,6 +208,7 @@
               <span style="background:#fffbeb;color:#92400e;padding:2px 6px;border-radius:10px">60-80% yellow</span>
               <span style="background:#ecfdf5;color:#065f46;padding:2px 6px;border-radius:10px">80%+ green</span>
             </span>
+            <button id="btn-download-static-util" class="btn btn-sm btn-outline" style="margin-left:8px">📥 Download Static HTML</button>
           </div>
         </div>
 
@@ -821,6 +822,52 @@
       setupVersionTypeDropdown();
       setupLineDropdown(lines);
       applyPivot();
+    });
+
+    // Download Static HTML — snapshot of current matrix for sharing
+    document.getElementById('btn-download-static-util')?.addEventListener('click', ()=>{
+      try{
+        const wrapper = document.getElementById('util-matrix-wrapper');
+        const badge = document.getElementById('util-matrix-badge');
+        const tableHtml = wrapper ? wrapper.innerHTML : '<div>No data</div>';
+        const statusHtml = document.getElementById('util-status-badge') ? document.getElementById('util-status-badge').innerHTML : '';
+        const badgeHtml = badge ? badge.innerHTML : '';
+        const now = new Date().toLocaleString();
+        const staticHtml = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Line Utilization - Static Report - ${now}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+h1{font-size:18px;color:#1e293b}
+.status{margin:10px 0;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
+.badge{font-size:12px;color:#475569}
+.table-wrapper{overflow:auto;max-height:none;border:1px solid #e2e8f0;border-radius:6px;background:#fff}
+table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
+th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
+td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:center;min-width:68px}
+td.frozen{position:sticky;left:0;background:#fff;z-index:1;min-width:68px;text-align:left;font-weight:500}
+.util-cell-zero{color:#cbd5e1}
+.util-cell-red{background:#fef2f2;color:#991b1b}
+.util-cell-yellow{background:#fffbeb;color:#92400e}
+.util-cell-green{background:#ecfdf5;color:#065f46;font-weight:600}
+.type-Gated{background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px}
+.type-Ungated{background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:4px}
+.util-status-badge{padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600}
+.util-status-badge.ready{background:#dcfce7;color:#065f46;border:1px solid #86efac}
+</style></head><body>
+<h1>⚙️ Line Utilization — Static Report</h1>
+<div style="font-size:11px;color:#64748b">Generated: ${now} | Mode: ${currentMode} | Filter: Version=${Array.from(selectedVersionTypes).join(',')} Lines=${Array.from(selectedLines).join(',')||'All'}</div>
+<div class="status"><b>Status:</b> ${statusHtml}<br><span class="badge">${badgeHtml}</span></div>
+<div class="table-wrapper">${tableHtml}</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from Line Utilization dashboard. Data embedded at export time: ${pivotCache ? pivotCache.total_lines+' rows × '+pivotCache.total_cols+' cols' : ''}. Open this HTML directly to view.</div>
+</body></html>`;
+        const blob = new Blob([staticHtml], {type:'text/html'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'utilization_static_'+ new Date().toISOString().slice(0,10) + '.html';
+        a.click();
+        setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+      }catch(e){ alert('Download static HTML failed: '+e.message); }
     });
 
     if(status.loaded){

@@ -165,6 +165,7 @@ function buildUploadSectionHTML(isCompact){
           <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled>▶ Upload & Analyze</button>
           <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck</button>
           <button class="btn btn-outline btn-sm" id="btnClearIO_${isCompact?'compact':'full'}" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button>
+          <button class="btn btn-outline btn-sm" id="btnDownloadStaticIO_${isCompact?'compact':'full'}">📥 Download Static HTML</button>
           <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
         </div>
       </div>
@@ -364,6 +365,41 @@ function attachUploadLogic(isCompact){
       setTimeout(()=>{ renderUploadPage(); }, 800);
     }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; }
   });
+  document.getElementById('btnDownloadStaticIO_'+suffix)?.addEventListener('click', ()=>{
+    try{
+      const reportContent = document.getElementById('ioReportContent')?.innerHTML || '<div>No data loaded yet</div>';
+      const uploadSection = document.getElementById('io-upload-bar')?.outerHTML || document.getElementById('io-upload-section')?.outerHTML || '';
+      const statusBadge = document.getElementById('ioMainStatusBadge')?.innerHTML || document.getElementById('ioStatusBadge_'+suffix)?.innerHTML || '';
+      const now = new Date().toLocaleString();
+      const staticHtml = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I/O Report - Static Snapshot - ${now}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+h1{font-size:18px;color:#1e293b}
+.status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
+.table-wrapper{overflow:auto;max-height:none;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px}
+table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
+th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
+td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}
+td.frozen{position:sticky;left:0;background:#fff;z-index:1;min-width:80px;text-align:left;font-weight:500}
+.num-pos{color:#059669}.num-zero{color:#94a3b8}
+</style></head><body>
+<h1>📈 I/O Report — Static Snapshot</h1>
+<div style="font-size:11px;color:#64748b">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM} | Filters: Line=${filterVals.lineCode||'All'} PN=${filterVals.itemNo||'All'} Style=${filterVals.style||'All'}</div>
+<div class="status"><b>Status:</b> ${statusBadge}</div>
+<div>${uploadSection}</div>
+<div id="ioReportContent">${reportContent}</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from I/O Report dashboard. Open this HTML directly to view. Data at export time.</div>
+</body></html>`;
+      const blob = new Blob([staticHtml], {type:'text/html'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'io_report_static_'+ new Date().toISOString().slice(0,10) + '.html';
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+    }catch(e){ alert('Download static HTML failed: '+e.message); }
+  });
   if(isCompact) document.getElementById('toggleUploadBar')?.addEventListener('click', ()=>{ const c=document.getElementById('uploadBarContent'); if(!c) return; const hid=c.style.display==='none'; c.style.display=hid?'block':'none'; document.getElementById('toggleUploadBar').textContent=hid?'▼ Collapse':'▶ Expand'; });
 }
 function renderUploadPage(){ ioRoot.innerHTML=buildUploadSectionHTML(false); attachUploadLogic(false); }
@@ -380,7 +416,7 @@ function renderReportsPage(){
           <span id="ioMainStatusBadge">${_badge}</span>
           <span id="ioMainPersistent" style="font-size:11px;color:#059669;font-weight:500">${_persistText}</span>
         </div>
-        <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button><button id="io-clear-all" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button></div>
+        <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button><button id="io-clear-all" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button><button id="io-download-static" class="btn btn-sm btn-outline">📥 Download Static HTML</button></div>
       </div>
       <div class="dim-tabs" id="io-group-tabs">
         <button class="dim-tab active" data-group="FG">FG (SKU)</button>
@@ -495,6 +531,38 @@ function initReportsPage(){
       _ioClientCache=null;
       renderUploadPage();
     }catch(e){ alert('❌ Clear failed: '+e.message); }
+  });
+  document.getElementById('io-download-static')?.addEventListener('click', ()=>{
+    try{
+      const reportContent = document.getElementById('ioReportContent')?.innerHTML || '<div>No data</div>';
+      const statusBadge = document.getElementById('ioMainStatusBadge')?.innerHTML || '';
+      const now = new Date().toLocaleString();
+      const staticHtml = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I/O Report - Static - ${now}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+h1{font-size:18px;color:#1e293b}
+.status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px}
+table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
+th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0}
+td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}
+td.frozen{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}
+</style></head><body>
+<h1>📈 I/O Report — Static Snapshot</h1>
+<div style="font-size:11px;color:#64748b">Generated: ${now} | Group: ${currentGroup} | Col: ${COL_DIM}</div>
+<div class="status"><b>Status:</b> ${statusBadge}</div>
+<div id="ioReportContent">${reportContent}</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from I/O Report dashboard. Open directly.</div>
+</body></html>`;
+      const blob = new Blob([staticHtml], {type:'text/html'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'io_report_static_'+ new Date().toISOString().slice(0,10) + '.html';
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+    }catch(e){ alert('Download static HTML failed: '+e.message); }
   });
 }
 

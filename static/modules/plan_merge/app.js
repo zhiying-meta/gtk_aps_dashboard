@@ -580,6 +580,42 @@ function clearPackout(clearMsg) {
 document.getElementById('btn-clear-packout')?.addEventListener('click', ()=> clearPackout());
 document.getElementById('btn-clear-packout-report')?.addEventListener('click', ()=> clearPackout());
 
+function downloadStaticPackout(){
+  try{
+    const reportWrapper = document.getElementById('report-table-wrapper')?.innerHTML || document.getElementById('report-section')?.innerHTML || '<div>No data</div>';
+    const status = document.getElementById('upload-status')?.textContent || '';
+    const fileName = document.getElementById('file-name-main')?.textContent || '';
+    const now = new Date().toLocaleString();
+    const staticHtml = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Packout Report - Static - ${now}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;background:#f8fafc}
+h1{font-size:18px;color:#1e293b}
+.status{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}
+.table-wrapper{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;max-height:none}
+table{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}
+th{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}
+td{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right;min-width:70px}
+td.frozen{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}
+</style></head><body>
+<h1>📦 ExF vs ETD vs Packout vs CTB — Static Report</h1>
+<div style="font-size:11px;color:#64748b">Generated: ${now} | Dim: ${activeDim} | Rows: ${filteredRows.length} / ${allRows.length}</div>
+<div class="status"><b>Status:</b> ${esc(status)}<br><b>File:</b> ${esc(fileName)}</div>
+<div class="table-wrapper">${reportWrapper}</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static snapshot from Packout dashboard. Open directly in browser.</div>
+</body></html>`;
+    const blob = new Blob([staticHtml], {type:'text/html'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'packout_static_'+ new Date().toISOString().slice(0,10) + '.html';
+    a.click();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+  }catch(e){ alert('Download static HTML failed: '+e.message); }
+}
+document.getElementById('btn-download-static-packout')?.addEventListener('click', downloadStaticPackout);
+document.getElementById('btn-download-static-packout-config')?.addEventListener('click', downloadStaticPackout);
+
 // ===== Filters =====
 function setupDropdowns() {
   for (const [name, opts] of Object.entries({
