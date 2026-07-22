@@ -62,14 +62,21 @@ def read_sku_master_from_ws(ws):
         row = {headers[ci]: ws.cell(r, ci + 1).value for ci in range(len(headers))}
         sku = str(row.get("SKU", "") or "").strip()
         if not sku: continue
-        sku_attrs[sku] = {"Style": str(row.get("Style","") or ""),
-                           "Color": str(row.get("Color","") or ""),
-                           "Usage": str(row.get("Usage","") or "")}
+        # Trim Style/Color/Usage to avoid "Dark Havana " vs "Dark Havana" duplicates in filters
+        def _clean(v):
+            return str(v).strip() if v is not None else ""
+        sku_attrs[sku] = {"Style": _clean(row.get("Style","")),
+                           "Color": _clean(row.get("Color","")),
+                           "Usage": _clean(row.get("Usage",""))}
         gb = str(row.get("GB_PN","") or "").strip()
         sku_to_gb[sku] = gb
-        sku_pallet[sku] = int(row.get("Pallet_Qty", 864) or 864)
+        try:
+            pallet_raw = row.get("Pallet_Qty", 864)
+            sku_pallet[sku] = int(float(pallet_raw)) if pallet_raw not in (None, "") else 864
+        except Exception:
+            sku_pallet[sku] = 864
         if gb and row.get("Style") and row.get("Color"):
-            gb_style_color[gb] = (str(row["Style"]), str(row["Color"]))
+            gb_style_color[gb] = (_clean(row["Style"]), _clean(row["Color"]))
     return sku_attrs, sku_to_gb, sku_pallet, gb_style_color
 
 

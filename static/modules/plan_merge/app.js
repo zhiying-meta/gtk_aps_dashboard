@@ -457,7 +457,7 @@ if (modal) {
   modal.querySelector('.modal-backdrop').addEventListener('click', () => modal.style.display = 'none');
 }
 
-// ===== Generate (client-first, server fallback, full offline) =====
+// ===== Generate (smart client-first with size check, server fallback) =====
 document.getElementById('btn-generate').addEventListener('click', async () => {
   const btn = document.getElementById('btn-generate');
   const status = document.getElementById('upload-status');
@@ -467,24 +467,33 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     status.textContent = '❌ Please select a file'; btn.disabled = false; return;
   }
   const file = fileInput.files[0];
+  const fileSizeKB = (file.size/1024).toFixed(1);
+  const isLarge = file.size > 1024*1024 || file.name.includes('template-2026') || file.name.includes('input_template');
+  console.log(`[Generate] File: ${file.name} ${fileSizeKB}KB large=${isLarge}`);
   document.getElementById('loading').style.display = 'flex';
   const warnEl = document.getElementById('upload-warnings');
   if (warnEl) { warnEl.style.display = 'none'; warnEl.innerHTML = ''; }
 
-  // Try client engine first if available (works offline)
-  if (window.PlanMergeEngine && typeof XLSX !== 'undefined'){
+  // For large files, skip client to avoid UI freeze, go server directly
+  let clientAttempted = false;
+  if (!isLarge && window.PlanMergeEngine && typeof XLSX !== 'undefined'){
+    clientAttempted = true;
     try{
-      status.textContent = '🖥️ Client engine processing...';
+      status.textContent = `🖥️ Client engine processing ${file.name} (${fileSizeKB}KB)...`;
+      // Add small delay to allow UI to render
+      await new Promise(r=> setTimeout(r, 50));
       const data = await processFileClientSide(file);
       handleProcessedData(data, file.name, true);
-      status.textContent = status.textContent.replace('Processing','Done');
+      status.textContent = `✅ Done (client) — ${file.name} ${allRows.length} rows`;
       document.getElementById('loading').style.display='none';
       btn.disabled=false;
       return;
     }catch(clientErr){
       console.warn('Client engine failed, trying server:', clientErr);
-      status.textContent = `⚠️ Client failed: ${clientErr.message} - trying server...`;
+      status.textContent = `⚠️ Client failed (${clientErr.message}) — trying server for ${file.name}...`;
     }
+  } else if (isLarge){
+    status.textContent = `📦 Large file detected (${fileSizeKB}KB) — using server engine for ${file.name}...`;
   }
 
   // Fallback to server API
@@ -497,17 +506,24 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     form.append('gb_cut', document.getElementById('cfg-gb').value);
     const offsetEl = document.getElementById('cfg-etd-packout-offset');
     if (offsetEl) form.append('etd_packout_offset', offsetEl.value);
+    status.textContent = `⏳ Server processing ${file.name} (${fileSizeKB}KB)...`;
     const resp = await fetch('/api/process', { method:'POST', body: form });
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    const text = await resp.text();
+    let data;
+    try{ data = JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON: ${text.slice(0,200)}`); }
+    if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
     handleProcessedData(data, file.name, false);
+    status.textContent = `✅ Done (server) — ${file.name} ${allRows.length} rows | ${fileSizeKB}KB`;
   }catch(e){
-    status.textContent = `❌ ${e.message}`;
+    console.error('Generate failed', e);
+    status.textContent = `❌ ${e.message} (file ${file.name})`;
     const fnMain = document.getElementById('file-name-main');
     if (fnMain){
-      fnMain.textContent = `❌ Load failed: ${e.message}`;
+      fnMain.textContent = `❌ Load failed: ${file.name} — ${e.message}`;
       fnMain.className = 'file-name error';
     }
+    // Show alert for visibility
+    try{ alert(`Failed to load ${file.name}: ${e.message}`); }catch{}
   }finally{
     btn.disabled=false; document.getElementById('loading').style.display='none';
   }
@@ -524,7 +540,24 @@ function setupDropdowns() {
     detail: { items: extractUnique('Version-Detail', activeDim, true), map: {'':'ExF / CTB'} },
   })) setupDropdown(name, opts.items, opts.map);
 }
-function extractUnique(f, dim, keepEmpty) { const s=new Set(); for(const r of allRows){ if(dim && r._dim!==dim) continue; const v=r[f]; if(v!=null&&(keepEmpty||v!=='')) s.add(v); } return [...s].sort(); }
+function extractUnique(f, dim, keepEmpty) {
+  // Deduplicate case-insensitively and trim, to avoid "BLACK" vs "Black" vs "Dark Havana " duplicates
+  const map = new Map(); // lowerKey -> original (first seen)
+  for(const r of allRows){
+    if(dim && r._dim!==dim) continue;
+    let v=r[f];
+    if(v==null) continue;
+    if(typeof v==='string') v=v.trim();
+    if(!keepEmpty && v==='') continue;
+    if(v==='' && !keepEmpty) continue;
+    const key = (typeof v==='string') ? v.toLowerCase() : String(v).toLowerCase();
+    if(!map.has(key)){
+      map.set(key, v);
+    }
+  }
+  // Sort case-insensitive
+  return [...map.values()].sort((a,b)=> String(a).localeCompare(String(b), undefined, {sensitivity:'base'}));
+}
 
 function setupDropdown(name, vals, labelMap) {
   const btn=document.getElementById(name+'-btn'), menu=document.getElementById(name+'-menu'), cnt=document.getElementById(name+'-count');
@@ -568,12 +601,39 @@ function fltr() { clearTimeout(_ft); _ft=setTimeout(()=>{applyFilters();render()
 function render() { if (pivotFields.length>0) renderPivotTable(); else renderTable(); }
 function getFilteredRows(useDim) {
   const s=getVals('sku'), u=getVals('usage'), st=getVals('style'), co=getVals('color'), t=getVals('type'), de=getVals('detail');
+  const getTrimmed = (v)=> (typeof v==='string'? v.trim() : v);
+  // Build lower-cased sets for case-insensitive matching (for Color/Style etc)
+  const makeLowerSet = (arr)=> {
+    if(!arr) return null;
+    const set = new Set(arr.map(x=> (typeof x==='string'? x.trim().toLowerCase() : String(x).toLowerCase())));
+    return set;
+  };
+  const sLower = makeLowerSet(s);
+  const uLower = makeLowerSet(u);
+  const stLower = makeLowerSet(st);
+  const coLower = makeLowerSet(co);
   return allRows.filter(r=>{
     if(useDim && activeDim && r._dim!==activeDim) return false;
-    if(s&&s.length&&!s.includes(r.PN)) return false;
-    if(u&&u.length&&!u.includes(r.Usage)) return false;
-    if(st&&st.length&&!st.includes(r.Style)) return false;
-    if(co&&co.length&&!co.includes(r.Color)) return false;
+    if(s&&s.length){
+      const pn = getTrimmed(r.PN);
+      const pnLower = typeof pn==='string'? pn.toLowerCase() : String(pn).toLowerCase();
+      if(!s.includes(pn) && !s.includes(r.PN) && !(sLower && sLower.has(pnLower))) return false;
+    }
+    if(u&&u.length){
+      const uv = getTrimmed(r.Usage);
+      const uvLower = typeof uv==='string'? uv.toLowerCase() : String(uv).toLowerCase();
+      if(!u.includes(uv) && !u.includes(r.Usage) && !(uLower && uLower.has(uvLower))) return false;
+    }
+    if(st&&st.length){
+      const sv = getTrimmed(r.Style);
+      const svLower = typeof sv==='string'? sv.toLowerCase() : String(sv).toLowerCase();
+      if(!st.includes(sv) && !st.includes(r.Style) && !(stLower && stLower.has(svLower))) return false;
+    }
+    if(co&&co.length){
+      const cv = getTrimmed(r.Color);
+      const cvLower = typeof cv==='string'? cv.toLowerCase() : String(cv).toLowerCase();
+      if(!co.includes(cv) && !co.includes(r.Color) && !(coLower && coLower.has(cvLower))) return false;
+    }
     if(t&&t.length&&!t.includes(r['Version-Type'])) return false;
     if(de&&de.length&&!de.includes(r['Version-Detail'])) return false;
     return true;
@@ -868,8 +928,8 @@ function escAttr(s){
 // ===== Column toggles =====
 ['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',()=>render());});
 
-// ===== Auto-load demo on startup (skip in static mode) =====
-(async function autoLoad() {
+// ===== Demo info (no auto file set to avoid confusion with user uploads) =====
+(async function initDemoInfo() {
   if (isStaticMode()){
     console.log('[Static] Offline mode detected, skip auto demo fetch, init static UI');
     setTimeout(()=>{ if(typeof initStaticUI==='function') initStaticUI(); }, 300);
@@ -878,26 +938,55 @@ function escAttr(s){
   try {
     const resp = await fetch('/demo');
     if (!resp.ok) throw new Error('no demo');
+    // Don't auto-inject file into input to avoid "always demo" confusion.
+    // Just store blob for optional quick load via button if needed.
     const blob = await resp.blob();
+    window._demoBlob = blob;
+    window._demoFileName = 'input_demo.xlsx';
+    const fnEl = document.getElementById('file-name-main');
+    // Only show demo hint if no file already selected and no last load
+    const inp = document.querySelector('.file-input');
+    const hasFile = inp && inp.files && inp.files.length>0;
+    const last = loadLastStatus();
+    if (!hasFile && !last && fnEl && !fnEl.textContent){
+      fnEl.textContent = `💡 Demo available: input_demo.xlsx (${(blob.size/1024).toFixed(1)} KB) — click "Load Demo" or upload your own file`;
+      fnEl.className = 'file-name';
+    }
+    console.log('[Demo] Demo blob ready, size', (blob.size/1024).toFixed(1), 'KB');
+  } catch(e) {
+    console.log('Demo info failed:', e.message);
+  }
+})();
+
+// Optional: provide global function to load demo on demand
+window.loadDemoFile = async function(){
+  try{
+    if (!window._demoBlob){
+      const resp = await fetch('/demo');
+      if (!resp.ok) throw new Error('no demo');
+      window._demoBlob = await resp.blob();
+    }
     const inp = document.querySelector('.file-input');
     if (!inp) return;
     const dt = new DataTransfer();
-    dt.items.add(new File([blob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    dt.items.add(new File([window._demoBlob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
     inp.files = dt.files;
     if (inp.closest('.upload-card')) inp.closest('.upload-card').classList.add('has-file');
     const fnEl = document.getElementById('file-name-main');
     if (fnEl) {
-      fnEl.textContent = `📄 input_demo.xlsx (${(blob.size/1024).toFixed(1)} KB) — Demo loaded, pending`;
+      fnEl.textContent = `📄 input_demo.xlsx (${(window._demoBlob.size/1024).toFixed(1)} KB) — Demo loaded, click Generate`;
       fnEl.className = 'file-name has-file';
     }
-  } catch(e) {
-    console.log('Auto-load demo failed:', e.message);
-  }
-})();
+    return true;
+  }catch(e){ console.error('Load demo failed', e); return false; }
+};
+
 document.addEventListener('DOMContentLoaded', ()=>{
   if (isStaticMode()){
     setTimeout(()=>{ if(typeof initStaticUI==='function') initStaticUI(); }, 400);
   }
+  // Clear stale localStorage demo hint if user wants fresh start? Keep but don't auto-restore file name as demo if we have explicit demo info logic
+  // restoreLoadStatusUI will still run via earlier DOMContentLoaded listener
 });
 
 
