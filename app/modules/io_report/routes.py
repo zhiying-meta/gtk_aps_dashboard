@@ -553,6 +553,170 @@ def api_io_schema():
     return jsonify(IO_SCHEMA)
 
 
+@io_bp.route("/api/io/export/static", methods=["GET"])
+def api_io_export_static():
+    """Export current IO report dashboard as static HTML with embedded data and flexible filtering (like campus-planning-system/frontend/dist) — called when clicking Download Static HTML button"""
+    try:
+        import json
+        import datetime
+        from app.modules.io_report.engine import get_cache, build_reports_for_group, get_meta
+        try:
+            cache = get_cache(DEFAULT_DATA_DIR)
+        except Exception as e:
+            return _json_error(f"No data to export: {e}", 404)
+
+        # Build embedded data for all groups and col_dims for full BI offline
+        groups = ['FG','GB','FR','LT','RT']
+        col_dims = ['shift','day','week','month']
+        embedded = {"groups": {}, "status": {"loaded": True, "fg": len(cache.fg_items), "gb": len(cache.gb_items), "cats": cache.cats}}
+
+        for g in groups:
+            embedded["groups"][g] = {}
+            for cd in col_dims:
+                try:
+                    meta = get_meta(cache, g, cd)
+                    reports_line, _ = build_reports_for_group(cache, 'LINE_CODE', cd, g, '', '', '')
+                    reports_pn, _ = build_reports_for_group(cache, 'ITEM_NO', cd, g, '', '', '')
+                    reports_style, _ = build_reports_for_group(cache, 'STYLE', cd, g, '', '', '')
+                    embedded["groups"][g][cd] = {
+                        "meta": {"line_codes": meta.get("line_codes", [])[:100], "items": meta.get("items", [])[:100], "styles": meta.get("styles", [])[:50]},
+                        "reportsLine": {k: {"columns": v.get("columns", [])[:20], "rows": v.get("rows", [])[:200]} for k,v in reports_line.items() if isinstance(v, dict) and "columns" in v},
+                        "reportsPN": {k: {"columns": v.get("columns", [])[:20], "rows": v.get("rows", [])[:200]} for k,v in reports_pn.items() if isinstance(v, dict) and "columns" in v},
+                        "reportsStyle": {k: {"columns": v.get("columns", [])[:20], "rows": v.get("rows", [])[:200]} for k,v in reports_style.items() if isinstance(v, dict) and "columns" in v},
+                    }
+                except Exception:
+                    continue
+
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        static_json = json.dumps(embedded, ensure_ascii=False, default=str).replace("<", "\\u003c")
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I/O Report - Static BI - {now_str}</title>
+<style>
+body{{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}}
+h1{{font-size:18px;color:#1e293b}}
+.sub{{font-size:11px;color:#64748b;margin-bottom:8px}}
+.status{{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}}
+.tabs{{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}}
+.tab{{padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:12px}}
+.tab.active{{background:#3b82f6;color:#fff;border-color:#3b82f6}}
+.filters{{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}}
+.filter-group{{display:flex;flex-direction:column;gap:4px;min-width:140px}}
+.filter-group label{{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}}
+.filter-group input{{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}}
+.btn{{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}}
+.btn-outline{{background:#fff;color:#64748b;border-color:#cbd5e1}}
+.table-wrapper{{overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:12px;max-height:70vh}}
+table{{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}}
+th{{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2}}
+td{{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}}
+td.frozen{{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}}
+</style></head><body>
+<h1>📈 I/O Report — Static BI Report (Full Format & Filtering Preserved)</h1>
+<div class="sub">Generated: {now_str} | Export via /api/io/export/static (calls export_static logic) | All groups (FG/GB/FR/LT/RT) and flexible dims embedded</div>
+<div class="status" id="static-status"></div>
+<div class="tabs" id="groupTabs"><button class="tab active" data-group="FG">FG</button><button class="tab" data-group="GB">GB</button><button class="tab" data-group="FR">FR</button><button class="tab" data-group="LT">LT</button><button class="tab" data-group="RT">RT</button></div>
+<div class="tabs" id="colDimTabs"><button class="tab active" data-coldim="day">Day</button><button class="tab" data-coldim="shift">Shift</button><button class="tab" data-coldim="week">Week</button><button class="tab" data-coldim="month">Month</button></div>
+<div class="tabs" id="rowDimTabs"><button class="tab active" data-rowdim="LINE_CODE">Line</button><button class="tab" data-rowdim="ITEM_NO">PN</button><button class="tab" data-rowdim="STYLE">Style</button></div>
+<div class="filters">
+  <div class="filter-group"><label>Search Line</label><input type="text" id="f-line" placeholder="Line filter"></div>
+  <div class="filter-group"><label>Search PN</label><input type="text" id="f-pn" placeholder="PN filter"></div>
+  <div class="filter-group"><label>Search Style</label><input type="text" id="f-style" placeholder="Style filter"></div>
+  <div class="filter-group"><label>Search Any</label><input type="text" id="f-search" placeholder="Any text"></div>
+  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
+</div>
+<div id="static-all-content"></div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static BI report from I/O dashboard via export_static. All tabs (FG/GB/FR/LT/RT) and flexible dims (Line/PN/Style, Column Shift/Day/Week/Month) preserved with embedded numbers. Exported via /api/io/export/static.</div>
+<script>
+const STATIC_DATA = {static_json};
+let curGroup = 'FG';
+let curColDim = 'day';
+let curRowDim = 'LINE_CODE';
+function esc(s){{ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }}
+function renderReports(){{
+  const groupData = STATIC_DATA.groups[curGroup] && STATIC_DATA.groups[curGroup][curColDim];
+  if(!groupData){{ document.getElementById('static-all-content').innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">No data for '+curGroup+' / '+curColDim+'</div>'; return; }}
+  let reportsData;
+  if(curRowDim==='ITEM_NO') reportsData = groupData.reportsPN;
+  else if(curRowDim==='STYLE') reportsData = groupData.reportsStyle;
+  else reportsData = groupData.reportsLine;
+  if(!reportsData || Object.keys(reportsData).length===0){{
+    document.getElementById('static-all-content').innerHTML='<div style="text-align:center;padding:20px;color:#94a3b8">No data for '+curGroup+' / '+curColDim+' / '+curRowDim+'</div>';
+    return;
+  }}
+  let html='';
+  const reportOrder = ['daily_input','daily_output','daily_checkin','daily_checkout','cum_input','cum_output','cum_checkin','cum_checkout','balance'];
+  const reportNames = {{daily_input:'Daily Input',daily_output:'Daily Output',daily_checkin:'Daily Checkin',daily_checkout:'Daily Checkout',cum_input:'Cum Input',cum_output:'Cum Output',cum_checkin:'Cum Checkin',cum_checkout:'Cum Checkout',balance:'BOH'}};
+  reportOrder.forEach(rt=>{{
+    const data = reportsData[rt];
+    if(!data || !data.rows || data.rows.length===0) return;
+    const cols = data.columns || [];
+    const rows = data.rows || [];
+    html += '<div class="table-wrapper" style="margin-bottom:16px"><div style="font-weight:600;font-size:12px;margin:6px">'+esc(reportNames[rt]||rt)+' — '+rows.length+' rows × '+cols.length+' cols</div><table><thead><tr>';
+    html += '<th class="frozen" style="left:0;min-width:120px">'+esc(curRowDim)+'</th><th class="frozen divider-col" style="left:120px;min-width:5px"></th>';
+    cols.forEach(c=>{{ html += '<th>'+esc(c)+'</th>'; }});
+    html += '</tr></thead><tbody>';
+    rows.slice(0,500).forEach(r=>{{
+      const dimVal = r[curRowDim] || r['LINE_CODE'] || r['ITEM_NO'] || r['STYLE'] || '';
+      html += '<tr><td class="frozen" style="left:0;min-width:120px">'+esc(String(dimVal))+'</td><td class="frozen divider-col" style="left:120px"></td>';
+      cols.forEach(c=>{{ const v=r[c]; html += '<td>'+(v!=null?Number(v).toLocaleString():'')+'</td>'; }});
+      html += '</tr>';
+    }});
+    if(rows.length>500) html += '<tr><td colspan="999" style="text-align:center;color:#94a3b8">... '+rows.length+' total rows, showing first 500 for static ...</td></tr>';
+    html += '</tbody></table></div>';
+  }});
+  document.getElementById('static-all-content').innerHTML = html || '<div style="text-align:center;padding:20px;color:#94a3b8">No data</div>';
+  applyFilter();
+}}
+function applyFilter(){{
+  const lineF = document.getElementById('f-line').value.toLowerCase();
+  const pnF = document.getElementById('f-pn').value.toLowerCase();
+  const styleF = document.getElementById('f-style').value.toLowerCase();
+  const search = document.getElementById('f-search').value.toLowerCase();
+  const content = document.getElementById('static-all-content');
+  if(!content) return;
+  let visible=0, total=0;
+  content.querySelectorAll('tr').forEach(tr=>{{
+    if(tr.querySelector('th')) return;
+    total++;
+    const text = tr.textContent.toLowerCase();
+    let show = true;
+    if(lineF && !text.includes(lineF)) show=false;
+    if(pnF && !text.includes(pnF)) show=false;
+    if(styleF && !text.includes(styleF)) show=false;
+    if(search && !text.includes(search)) show=false;
+    tr.style.display = show ? '' : 'none';
+    if(show) visible++;
+  }});
+  document.getElementById('f-count').textContent = visible+' / '+total+' rows';
+}}
+document.querySelectorAll('#groupTabs .tab').forEach(b=>{{ b.addEventListener('click', ()=>{{ document.querySelectorAll('#groupTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curGroup=b.dataset.group; renderReports(); }}); }});
+document.querySelectorAll('#colDimTabs .tab').forEach(b=>{{ b.addEventListener('click', ()=>{{ document.querySelectorAll('#colDimTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curColDim=b.dataset.coldim; renderReports(); }}); }});
+document.querySelectorAll('#rowDimTabs .tab').forEach(b=>{{ b.addEventListener('click', ()=>{{ document.querySelectorAll('#rowDimTabs .tab').forEach(x=>x.classList.remove('active')); b.classList.add('active'); curRowDim=b.dataset.rowdim; renderReports(); }}); }});
+document.getElementById('f-apply')?.addEventListener('click', applyFilter);
+document.getElementById('f-clear')?.addEventListener('click', ()=>{{ document.getElementById('f-line').value=''; document.getElementById('f-pn').value=''; document.getElementById('f-style').value=''; document.getElementById('f-search').value=''; applyFilter(); }});
+document.getElementById('f-search')?.addEventListener('input', applyFilter);
+document.getElementById('f-line')?.addEventListener('input', applyFilter);
+document.getElementById('f-pn')?.addEventListener('input', applyFilter);
+document.getElementById('f-style')?.addEventListener('input', applyFilter);
+const statusEl = document.getElementById('static-status');
+if(statusEl){{ const st = STATIC_DATA.status; statusEl.innerHTML = '✅ Ready: '+(st.fg||0)+' FG / '+(st.gb||0)+' GB | Cats: '+(st.cats||[]).join(', '); }}
+renderReports();
+</script>
+</body></html>"""
+
+        from flask import Response
+        return Response(html_content, mimetype='text/html', headers={
+            "Content-Disposition": f"attachment; filename=io_report_static_BI_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Export static failed: {e}")
+
+
 @io_bp.route("/api/io/templates/input_template.xlsx", methods=["GET"])
 def api_io_single_template():
     import openpyxl

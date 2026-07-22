@@ -580,7 +580,24 @@ function clearPackout(clearMsg) {
 document.getElementById('btn-clear-packout')?.addEventListener('click', ()=> clearPackout());
 document.getElementById('btn-clear-packout-report')?.addEventListener('click', ()=> clearPackout());
 
-function downloadStaticPackout(){
+async function downloadStaticPackout(){
+  // Try backend export_static first (like campus-planning-system/frontend/dist)
+  try{
+    const resp = await fetch('/api/plan_merge/export/static', {method: 'GET'});
+    if(resp.ok){
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const cd = resp.headers.get('Content-Disposition');
+      let fname = 'packout_static_BI_'+ new Date().toISOString().slice(0,10) + '.html';
+      if(cd){ const m = cd.match(/filename="?([^"]+)"?/); if(m) fname = m[1]; }
+      a.download = fname;
+      a.click();
+      setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+      return;
+    }
+  }catch(e){ console.warn('Backend export static failed, fallback to client-side', e); }
+
   try{
     const reportWrapper = document.getElementById('report-table-wrapper')?.innerHTML || document.getElementById('report-section')?.innerHTML || '<div>No data</div>';
     const status = document.getElementById('upload-status')?.textContent || '';

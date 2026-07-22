@@ -922,13 +922,34 @@
       applyPivot();
     });
 
-    // Download Static HTML with flexible filtering — full interactive offline version
+    // Download Static HTML with flexible filtering — calls export_static backend like campus-planning-system/frontend/dist
     document.getElementById('btn-download-static-util')?.addEventListener('click', async ()=>{
       const btn = document.getElementById('btn-download-static-util');
       const origText = btn ? btn.textContent : '';
       try{
-        if(btn){ btn.textContent='⏳ Preparing static HTML...'; btn.disabled=true; }
-        // Fetch full data for static export
+        if(btn){ btn.textContent='⏳ Calling export static...'; btn.disabled=true; }
+        // Try backend export_static endpoint first (like campus-planning-system reference)
+        try{
+          const resp = await fetch('/api/utilization/export/static');
+          if(resp.ok){
+            const blob = await resp.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            const cd = resp.headers.get('Content-Disposition');
+            let fname = 'utilization_static_'+ new Date().toISOString().slice(0,10) + '.html';
+            if(cd){
+              const m = cd.match(/filename="?([^"]+)"?/);
+              if(m) fname = m[1];
+            }
+            a.download = fname;
+            a.click();
+            setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+            if(btn){ btn.textContent='✅ Exported via backend'; setTimeout(()=>{ btn.textContent=origText; btn.disabled=false; }, 1500); }
+            return;
+          }
+        }catch(e){ console.warn('Backend export static failed, fallback to client-side', e); }
+        if(btn){ btn.textContent='⏳ Preparing static HTML (client)...'; }
+        // Fallback: client-side generation with flexible filtering
         const [statusData, metaData, pivotDay, pivotShift] = await Promise.all([
           fetchJSON(API_STATUS).catch(()=>({})),
           fetchJSON(API_META).catch(()=>({})),

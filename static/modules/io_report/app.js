@@ -394,7 +394,25 @@ function attachUploadLogic(isCompact){
     const btn = document.getElementById('btnDownloadStaticIO_'+suffix);
     const origText = btn ? btn.textContent : '';
     try{
-      if(btn){ btn.textContent='⏳ Preparing full BI report...'; btn.disabled=true; }
+      if(btn){ btn.textContent='⏳ Calling export static...'; btn.disabled=true; }
+      // Try backend export_static (like campus-planning-system/frontend/dist)
+      try{
+        const resp = await fetch('/api/io/export/static');
+        if(resp.ok){
+          const blob = await resp.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          const cd = resp.headers.get('Content-Disposition');
+          let fname = 'io_report_static_BI_'+ new Date().toISOString().slice(0,10) + '.html';
+          if(cd){ const m = cd.match(/filename="?([^"]+)"?/); if(m) fname = m[1]; }
+          a.download = fname;
+          a.click();
+          setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+          if(btn){ btn.textContent='✅ Exported via backend'; setTimeout(()=>{ btn.textContent=origText; btn.disabled=false; }, 1500); }
+          return;
+        }
+      }catch(e){ console.warn('Backend export static failed, fallback to client-side', e); }
+      if(btn){ btn.textContent='⏳ Preparing full BI report (client)...'; }
       const groups = ['FG','GB','FR','LT','RT'];
       const colDims = ['shift','day','week','month'];
       const status = await (async()=>{ try{ const r=await fetch('/api/io/status'); return await r.json(); }catch{ return {}; } })();
@@ -673,8 +691,26 @@ function initReportsPage(){
     const btn = document.getElementById('io-download-static');
     const origText = btn ? btn.textContent : '';
     try{
-      if(btn){ btn.textContent='⏳ Preparing BI report...'; btn.disabled=true; }
-      // Fetch all groups and col dims for full BI report
+      if(btn){ btn.textContent='⏳ Calling export static...'; btn.disabled=true; }
+      // Try backend export_static first (like campus-planning-system/frontend/dist)
+      try{
+        const resp = await fetch('/api/io/export/static');
+        if(resp.ok){
+          const blob = await resp.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          const cd = resp.headers.get('Content-Disposition');
+          let fname = 'io_report_static_BI_'+ new Date().toISOString().slice(0,10) + '.html';
+          if(cd){ const m = cd.match(/filename="?([^"]+)"?/); if(m) fname = m[1]; }
+          a.download = fname;
+          a.click();
+          setTimeout(()=> URL.revokeObjectURL(a.href), 1000);
+          if(btn){ btn.textContent='✅ Exported via backend'; setTimeout(()=>{ btn.textContent=origText; btn.disabled=false; }, 1500); }
+          return;
+        }
+      }catch(e){ console.warn('Backend export static failed, fallback to client-side full BI', e); }
+      if(btn){ btn.textContent='⏳ Preparing BI report (client)...'; }
+      // Fallback: fetch all groups and col dims for full BI report
       const groups = ['FG','GB','FR','LT','RT'];
       const colDims = ['shift','day','week','month'];
       const status = await (async()=>{ try{ const r=await fetch('/api/io/status'); return await r.json(); }catch{ return {}; } })();

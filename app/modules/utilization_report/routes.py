@@ -899,3 +899,349 @@ def api_combined_template():
     wb.save(buf)
     buf.seek(0)
     return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="utilization_template.xlsx")
+
+
+def _build_util_pivot_for_export(caches, mode):
+    """Build pivot for export static with flexible filtering preserved"""
+    try:
+        from app.modules.utilization_report.engine import build_report
+        from collections import defaultdict
+        all_recs = []
+        for ver in caches.keys():
+            cache = caches.get(ver)
+            if not cache:
+                continue
+            recs = build_report(cache, mode=mode, line_filter='', date_from='', date_to='')
+            for r in recs:
+                nr = dict(r)
+                nr['version_type'] = ver.capitalize()
+                nr['version_key'] = ver
+                all_recs.append(nr)
+
+        if not all_recs:
+            return {"mode": mode, "columns": [], "rows": [], "detail": {}, "lines": [], "total_lines": 0, "total_cols": 0}
+
+        if mode == "shift":
+            cols_set = set()
+            for r in all_recs:
+                col = f"{r['plan_date']}|{r['shift_name']}"
+                cols_set.add(col)
+            cols = sorted(list(cols_set))
+        else:
+            cols = sorted(list(set(r['plan_date'] for r in all_recs)))
+
+        max_cols = 1000
+        if len(cols) > max_cols:
+            cols = cols[:max_cols]
+
+        matrix = {}
+        detail = {}
+        lines_set = set()
+        for r in all_recs:
+            key = (r['line_code'], r['version_type'])
+            lines_set.add(r['line_code'])
+            if key not in matrix:
+                matrix[key] = {}
+                detail[key] = {}
+            col = f"{r['plan_date']}|{r['shift_name']}" if mode == "shift" else r['plan_date']
+            if col not in cols:
+                continue
+            util_pct = r.get('utilization_pct', 0)
+            capped = min(100.0, util_pct) if util_pct is not None else 0
+            matrix[key][col] = capped
+            detail[key][col] = {
+                'util_raw': util_pct,
+                'util_capped': capped,
+                'load': r['load'],
+                'capacity': r['capacity'],
+                'uph': r['uph'],
+                'efficiency': r['efficiency'],
+                'working_hours': r['working_hours'],
+                'is_overload': r.get('is_overload', False),
+            }
+
+        def sort_key(k):
+            line, vtype = k
+            order = 0 if vtype.lower() == 'gated' else 1
+            return (line, order, vtype)
+        sorted_keys = sorted(matrix.keys(), key=sort_key)
+
+        rows = []
+        last_line = None
+        for (line, vtype) in sorted_keys:
+            row = {
+                'line_code': line,
+                'version_type': vtype,
+                'is_new_line': line != last_line,
+            }
+            last_line = line
+            for col in cols:
+                row[col] = matrix[(line, vtype)].get(col, None)
+            rows.append(row)
+
+        detail_json = {}
+        for (line, vtype), col_map in detail.items():
+            key_str = f"{line}||{vtype}"
+            detail_json[key_str] = col_map
+
+        return {
+            "mode": mode,
+            "versions": list(caches.keys()),
+            "columns": cols,
+            "rows": rows,
+            "detail": detail_json,
+            "lines": sorted(list(lines_set)),
+            "total_lines": len(sorted_keys),
+            "total_cols": len(cols),
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"mode": mode, "columns": [], "rows": [], "detail": {}, "lines": [], "total_lines": 0, "total_cols": 0, "error": str(e)}
+
+
+@util_bp.route("/api/utilization/export/static", methods=["GET"])
+def api_export_static():
+    """Export current utilization dashboard as static HTML with embedded data and flexible filtering (like campus-planning-system/frontend/dist)
+    Called when user clicks Download Static HTML button — triggers export_static logic for current data
+    """
+    try:
+        import json
+        import datetime
+        caches = get_all_caches(DEFAULT_DATA_DIR)
+        if not caches:
+            return _json_error("No data to export. Upload Gated or Ungated first.", 404)
+
+        # Build status
+        from app.modules.utilization_report.engine import _CACHES
+        cached_versions = {}
+        for k in _CACHES.keys():
+            if k.startswith(DEFAULT_DATA_DIR + "::"):
+                ver = k.split("::")[-1]
+                c = _CACHES[k]
+                cached_versions[ver] = {
+                    'lines': len(c.lines),
+                    'dates': len(c.dates),
+                    'shifts': len(c.shifts),
+                    'records_shift': len(c.records_shift),
+                    'records_day': len(c.records_day),
+                }
+
+        status = {
+            "loaded": True,
+            "versions": list(caches.keys()),
+            "details": cached_versions,
+            "files_found": list(caches.keys()),
+        }
+        # Build meta
+        primary = caches.get('gated') or list(caches.values())[0]
+        meta = {
+            "lines": primary.lines,
+            "dates": primary.dates,
+            "shifts": primary.shifts,
+            "versions": list(caches.keys()),
+            "date_min": min(primary.dates) if primary.dates else "",
+            "date_max": max(primary.dates) if primary.dates else "",
+        }
+
+        # Build pivots for day and shift
+        pivot_day = _build_util_pivot_for_export(caches, mode='day')
+        pivot_shift = _build_util_pivot_for_export(caches, mode='shift')
+
+        # Build static HTML with embedded data and flexible filtering (full format preserved)
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        static_data = {
+            "status": status,
+            "meta": meta,
+            "pivotDay": pivot_day,
+            "pivotShift": pivot_shift,
+            "currentMode": "day"
+        }
+        # Use json dumps with ensure_ascii=False, escape < for safety
+        import html as html_lib
+        static_json = json.dumps(static_data, ensure_ascii=False, default=str).replace("<", "\\u003c")
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Line Utilization - Static BI - {now_str}</title>
+<style>
+body{{font-family:Arial,sans-serif;margin:16px;background:#f8fafc;color:#1e293b}}
+h1{{font-size:18px;margin-bottom:4px}}
+.sub{{font-size:11px;color:#64748b;margin-bottom:10px}}
+.status{{margin:10px 0;padding:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;font-size:12px}}
+.filters{{background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:10px 0;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}}
+.filter-group{{display:flex;flex-direction:column;gap:4px;min-width:160px}}
+.filter-group label{{font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase}}
+.filter-group input, .filter-group select{{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px}}
+.btn{{padding:5px 12px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:5px;font-size:12px;cursor:pointer}}
+.btn-outline{{background:#fff;color:#64748b;border-color:#cbd5e1}}
+.table-wrapper{{overflow:auto;max-height:80vh;border:1px solid #e2e8f0;border-radius:6px;background:#fff;margin-top:10px}}
+table{{border-collapse:collapse;font-size:12px;white-space:nowrap;width:max-content;min-width:100%}}
+th{{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:2;border-right:1px solid #334155}}
+td{{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:center;min-width:68px}}
+td.frozen{{position:sticky;left:0;background:#fff;z-index:1;min-width:68px;text-align:left;font-weight:500}}
+td.frozen.divider-col{{background:#475569 !important;width:5px;min-width:5px;max-width:5px;padding:0 !important}}
+th.frozen{{left:0;z-index:3;background:#1e293b}}
+th.divider-col{{background:#475569 !important;width:5px;min-width:5px;max-width:5px}}
+.util-cell-zero{{color:#cbd5e1}}
+.util-cell-red{{background:#fef2f2;color:#991b1b}}
+.util-cell-yellow{{background:#fffbeb;color:#92400e}}
+.util-cell-green{{background:#ecfdf5;color:#065f46;font-weight:600}}
+.type-Gated{{background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:4px;font-size:11px}}
+.type-Ungated{{background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:4px;font-size:11px}}
+.badge{{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;margin-right:4px}}
+.badge-ready{{background:#dcfce7;color:#065f46;border:1px solid #86efac}}
+.badge-notready{{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}}
+</style></head><body>
+<h1>⚙️ Line Utilization — Static BI Report (Full Format & Filtering Preserved)</h1>
+<div class="sub">Generated: {now_str} | Export via /api/utilization/export/static (calls export_static logic) | Day cols: {len(pivot_day.get('columns',[]))}, Shift cols: {len(pivot_shift.get('columns',[]))}, Lines: {len(meta.get('lines',[]))}</div>
+<div class="status" id="static-status"></div>
+<div class="filters">
+  <div class="filter-group"><label>Version Type</label>
+    <div><label><input type="checkbox" id="f-gated" checked> Gated</label> <label><input type="checkbox" id="f-ungated" checked> Ungated</label></div>
+  </div>
+  <div class="filter-group"><label>Line (comma separated)</label><input type="text" id="f-line" placeholder="e.g. AL1-PKG,AL1-FAT"></div>
+  <div class="filter-group"><label>Date From</label><input type="date" id="f-from"></div>
+  <div class="filter-group"><label>Date To</label><input type="date" id="f-to"></div>
+  <div class="filter-group"><label>Mode</label><div><button class="btn" id="f-mode-day">Day</button> <button class="btn btn-outline" id="f-mode-shift">Shift</button></div></div>
+  <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply Filters</button> <button class="btn btn-outline" id="f-clear">Clear</button></div></div>
+</div>
+<div style="font-size:11px;color:#64748b">Formula: Capacity=UPH×Eff×WH | Load=Σ INPUT | Util%=Load/Capacity capped at 100% | Thick border per Line | Gated yellow, Ungated green</div>
+<div id="static-badge" style="margin:8px 0;font-size:11px"></div>
+<div class="table-wrapper" id="static-wrapper"><div style="text-align:center;padding:30px;color:#94a3b8">Loading...</div></div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static BI report from Line Utilization dashboard via export_static. All format and filtering preserved like campus-planning-system/frontend/dist. Data embedded at export time.</div>
+<script>
+const STATIC_DATA = {static_json};
+
+function esc(s){{ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }}
+
+let currentMode = STATIC_DATA.currentMode || 'day';
+let selectedVersions = new Set(['Gated','Ungated']);
+let filterLine = '';
+let dateFrom = '';
+let dateTo = '';
+
+function getPivot(){{ return currentMode==='day' ? STATIC_DATA.pivotDay : STATIC_DATA.pivotShift; }}
+
+function renderStatus(){{
+  const st = STATIC_DATA.status;
+  const versions = (st && st.versions) ? st.versions : [];
+  const gatedReady = versions.includes('gated');
+  const ungatedReady = versions.includes('ungated');
+  let html = '';
+  if(gatedReady && ungatedReady) html = '<span class="badge badge-ready">✅ Gated: Ready</span><span class="badge badge-ready">✅ Ungated: Ready</span> — Showing both';
+  else if(gatedReady) html = '<span class="badge badge-ready">✅ Gated: Ready</span><span class="badge badge-notready">❌ Ungated: Not Ready (empty)</span> — Showing Gated only';
+  else if(ungatedReady) html = '<span class="badge badge-notready">❌ Gated: Not Ready</span><span class="badge badge-ready">✅ Ungated: Ready</span> — Showing Ungated only';
+  else html = '<span class="badge badge-notready">❌ Gated: Not Ready</span><span class="badge badge-notready">❌ Ungated: Not Ready</span> — No data';
+  document.getElementById('static-status').innerHTML = html;
+}}
+
+function renderMatrix(){{
+  const pivot = getPivot();
+  const cols = pivot.columns || [];
+  const rows = pivot.rows || [];
+  const detail = pivot.detail || {{}};
+  const wrapper = document.getElementById('static-wrapper');
+  if(!rows || rows.length===0){{
+    wrapper.innerHTML = '<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">No data — both modules Not Ready or filtered out</div>';
+    document.getElementById('static-badge').textContent = '0 rows';
+    return;
+  }}
+  let filteredRows = rows.filter(r=>{{
+    const v = (r.version_type||'').toLowerCase();
+    if(v==='gated' && !selectedVersions.has('Gated')) return false;
+    if(v==='ungated' && !selectedVersions.has('Ungated')) return false;
+    if(filterLine){{
+      const lineFilters = filterLine.toLowerCase().split(',').map(s=>s.trim()).filter(Boolean);
+      if(lineFilters.length>0){{
+        const lc = (r.line_code||'').toLowerCase();
+        if(!lineFilters.some(f=> lc.includes(f))) return false;
+      }}
+    }}
+    return true;
+  }});
+  let filteredCols = cols;
+  if(dateFrom || dateTo){{
+    filteredCols = cols.filter(c=>{{
+      let d = c;
+      if(c.includes('|')) d = c.split('|')[0];
+      if(dateFrom && d < dateFrom) return false;
+      if(dateTo && d > dateTo) return false;
+      return true;
+    }});
+  }}
+
+  const frozenCols = [{{key:'line_code',label:'Line',width:130}},{{key:'version_type',label:'Version Type',width:110}}];
+  let left=0; frozenCols.forEach(c=>{{ c._left=left; left+=c.width; }});
+  const dividerLeft = left;
+  let thead = '<tr>';
+  frozenCols.forEach(c=>{{ thead += '<th class="frozen" style="left:'+c._left+'px;min-width:'+c.width+'px">'+esc(c.label)+'</th>'; }});
+  thead += '<th class="frozen divider-col" style="left:'+dividerLeft+'px;min-width:5px"></th>';
+  filteredCols.forEach(col=>{{
+    let label = col;
+    let sub='';
+    if(col.includes('|')){{ const parts=col.split('|'); label=parts[0]; sub=parts[1]; try{{ const d=new Date(label); if(!isNaN(d)) label=(d.getMonth()+1)+'/'+d.getDate(); }}catch(e){{}} }}else{{ try{{ const d=new Date(col); if(!isNaN(d)) label=(d.getMonth()+1)+'/'+d.getDate(); }}catch(e){{}} }}
+    thead += '<th style="min-width:68px" title="'+esc(col)+'">'+esc(label)+(sub?'<br><span style="font-size:9px;color:#cbd5e1">'+esc(sub)+'</span>':'')+'</th>';
+  }});
+  thead += '</tr>';
+
+  let tbody='';
+  let lastLine=null;
+  filteredRows.forEach(r=>{{
+    const isNewLine = r.line_code !== lastLine;
+    lastLine = r.line_code;
+    const vType = r.version_type||'';
+    tbody += '<tr class="'+(isNewLine?'row-new-line':'')+'">';
+    frozenCols.forEach(c=>{{
+      const isLast = c===frozenCols[frozenCols.length-1];
+      const extra = isLast ? ' frozen-last' : '';
+      let val='';
+      if(c.key==='line_code') val=esc(r.line_code);
+      else if(c.key==='version_type') val='<span class="type-'+esc(vType)+'">'+esc(vType)+'</span>';
+      tbody += '<td class="frozen data-cell'+extra+'" style="left:'+c._left+'px;min-width:'+c.width+'px">'+val+'</td>';
+    }});
+    tbody += '<td class="divider-col frozen" style="left:'+dividerLeft+'px"></td>';
+    filteredCols.forEach(col=>{{
+      const keyStr = r.line_code+'||'+vType;
+      const cellDetail = detail[keyStr] && detail[keyStr][col];
+      const cellVal = r[col];
+      if(cellVal==null){{ tbody += '<td class="data-cell" style="background:#f8fafc"></td>'; }}
+      else{{
+        let cls='';
+        if(cellVal===0) cls='util-cell-zero';
+        else if(cellVal<60) cls='util-cell-red';
+        else if(cellVal<80) cls='util-cell-yellow';
+        else cls='util-cell-green';
+        tbody += '<td class="data-cell '+cls+'">'+Math.round(cellVal)+'%</td>';
+      }}
+    }});
+    tbody += '</tr>';
+  }});
+
+  wrapper.innerHTML = '<table><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table>';
+  document.getElementById('static-badge').textContent = filteredRows.length+' rows × '+filteredCols.length+' cols (filtered from '+rows.length+' rows × '+cols.length+' cols) | Thick border per Line';
+}}
+
+document.getElementById('f-gated').addEventListener('change', (e)=>{{ if(e.target.checked) selectedVersions.add('Gated'); else selectedVersions.delete('Gated'); }});
+document.getElementById('f-ungated').addEventListener('change', (e)=>{{ if(e.target.checked) selectedVersions.add('Ungated'); else selectedVersions.delete('Ungated'); }});
+document.getElementById('f-line').addEventListener('input', (e)=>{{ filterLine = e.target.value; }});
+document.getElementById('f-from').addEventListener('change', (e)=>{{ dateFrom = e.target.value; }});
+document.getElementById('f-to').addEventListener('change', (e)=>{{ dateTo = e.target.value; }});
+document.getElementById('f-mode-day').addEventListener('click', ()=>{{ currentMode='day'; document.getElementById('f-mode-day').className='btn'; document.getElementById('f-mode-shift').className='btn btn-outline'; renderMatrix(); }});
+document.getElementById('f-mode-shift').addEventListener('click', ()=>{{ currentMode='shift'; document.getElementById('f-mode-shift').className='btn'; document.getElementById('f-mode-day').className='btn btn-outline'; renderMatrix(); }});
+document.getElementById('f-apply').addEventListener('click', renderMatrix);
+document.getElementById('f-clear').addEventListener('click', ()=>{{ selectedVersions=new Set(['Gated','Ungated']); filterLine=''; dateFrom=''; dateTo=''; document.getElementById('f-gated').checked=true; document.getElementById('f-ungated').checked=true; document.getElementById('f-line').value=''; document.getElementById('f-from').value=''; document.getElementById('f-to').value=''; currentMode='day'; renderMatrix(); }});
+
+renderStatus();
+renderMatrix();
+</script>
+</body></html>"""
+        from flask import Response
+        return Response(html_content, mimetype='text/html', headers={
+            "Content-Disposition": f"attachment; filename=utilization_static_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Export static failed: {e}")
