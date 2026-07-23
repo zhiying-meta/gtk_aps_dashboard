@@ -142,51 +142,15 @@ def extract_weekly_cum(daily, cut_day):
     return result
 
 
-def process_uploaded_data(file_map, config):
-    # Every upload is treated as fresh — clear LRU caches to avoid cross-file reuse
-    _to_dt.cache_clear()
-    _to_saturday_label.cache_clear()
-    _date_to_week_label_cached.cache_clear()
 
-    from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
-    from app.modules.plan_merge.config import DEFAULT_ETD_PACKOUT_OFFSET
-
-    def _parse_offset(v, fallback):
-        try:
-            if v is None or v == "":
-                return fallback
-            return max(0, int(v))
-        except Exception:
-            return fallback
-
-    cfg = {
-        "exf_cut": config.get("exf_cut", "Saturday"),
-        "etd_cut": config.get("etd_cut", "Saturday"),
-        "output_cut": config.get("output_cut", "Wednesday"),
-        "gb_cut": config.get("gb_cut", "Tuesday"),
-        "etd_packout_offset": _parse_offset(config.get("etd_packout_offset"), DEFAULT_ETD_PACKOUT_OFFSET),
-    }
-
-    fp = file_map.get("main") or file_map.get("sku") or next(iter(file_map.values()), None)
-    if not fp:
-        raise ValueError("No file uploaded")
-
-    sheets, missing_sheets = read_uploaded_xlsx(fp)
-
-    if "sku" not in sheets:
-        raise ValueError("Missing required sheet: sku_master")
-
-    sku_ws = sheets["sku"]
-    sku_attrs, sku_to_gb, sku_pallet, gb_style_color = read_sku_master_from_ws(sku_ws)
-    all_skus = set(sku_attrs.keys())
-
-    plan_gated = sheets.get("gated", {})
-    plan_ungated = sheets.get("ungated", {})
-    plan_fcst = sheets.get("fcst", {})
-    ctb_sku = sheets.get("ctb", {})
-    ctb_gb = sheets.get("ctb_gb", {})
-
+def _aggregate_core(sku_attrs, sku_to_gb, sku_pallet, gb_style_color,
+                    plan_gated, plan_ungated, plan_fcst, ctb_sku, ctb_gb,
+                    cfg, missing_sheets):
+    """Core aggregation shared by legacy 6-sheet and snapshot folder modes.
+    Mirrors original logic from process_uploaded_data after parsing.
+    """
     all_pns = set(sku_attrs.keys())
+
     for d in [plan_gated, plan_ungated, plan_fcst, ctb_sku]:
         all_pns.update(k for k in d if k in sku_attrs)
     all_skus = sorted(s for s in all_pns if s in sku_attrs)
@@ -240,12 +204,38 @@ def process_uploaded_data(file_map, config):
 
     all_weeks = sorted(all_weeks)
 
-    def fill(vals): return {w: vals.get(w, None) for w in all_weeks}
+    def fill(vals):
+        """Original fill without carry – kept for non-cum? But we will use carry for cum"""
+        return {w: vals.get(w, None) for w in all_weeks}
+
+    def fill_carry(vals):
+        """Carry forward last non-None value for cumulative metrics (cum should persist)"""
+        res = {}
+        last = None
+        for w in all_weeks:
+            if w in vals and vals[w] is not None:
+                last = vals[w]
+            res[w] = last
+        return res
+
     def diff(b, s):
+        """Legacy diff on sparse – kept for compatibility but not used for cum diff now"""
         if not b:
             return {}
         ks = set(list(b.keys()) + list(s.keys()))
         return {k: ((b.get(k) or 0) - (s.get(k) or 0)) for k in ks}
+
+    def diff_carry(b_filled, s_filled):
+        """Diff from already carry-filled dicts: (b - s) where either had data, else None"""
+        res = {}
+        for w in all_weeks:
+            bv = b_filled.get(w)
+            sv = s_filled.get(w)
+            if bv is None and sv is None:
+                res[w] = None
+            else:
+                res[w] = round((bv or 0) - (sv or 0), 0)
+        return res
 
     rows = []
     for sku in all_skus:
@@ -267,18 +257,32 @@ def process_uploaded_data(file_map, config):
         if sku in ctb_sku:
             ctb = extract_weekly_cum(ctb_sku[sku], cfg["etd_cut"])
 
+        # ---- Carry forward for cumulative metrics (fix: cum should persist after last data) ----
+        exf_f = fill_carry(exf)
+        up_f = fill_carry(up)
+        gp_f = fill_carry(gp)
+        ue_f = fill_carry(ue)
+        ge_f = fill_carry(ge)
+        ctb_f = fill_carry(ctb)
+
+        # Diffs from filled values
+        ue_vs_exf = diff_carry(ue_f, exf_f)
+        up_vs_exf = diff_carry(up_f, exf_f)
+        ge_vs_exf = diff_carry(ge_f, exf_f)
+        gp_vs_exf = diff_carry(gp_f, exf_f)
+
         base = {"PN": sku, "Usage": usage, "Style": style, "Color": color,
                 "GB_PN": gb, "Pallet_Qty": pallet, "_dim": "FG"}
-        rows.append({**base, "Version-Type": "ExF", "Version-Detail": "", "Cut Day": cfg["exf_cut"], **fill(exf)})
-        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "ETD", "Cut Day": cfg["etd_cut"], **fill(ue)})
-        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "ETD vs ExF", "Cut Day": cfg["etd_cut"], **fill(diff(ue, exf))})
-        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "Packout", "Cut Day": cfg["output_cut"], **fill(up)})
-        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "Packout vs ExF", "Cut Day": cfg["output_cut"], **fill(diff(up, exf))})
-        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "ETD", "Cut Day": cfg["etd_cut"], **fill(ge)})
-        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "ETD vs ExF", "Cut Day": cfg["etd_cut"], **fill(diff(ge, exf))})
-        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "Packout", "Cut Day": cfg["output_cut"], **fill(gp)})
-        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "Packout vs ExF", "Cut Day": cfg["output_cut"], **fill(diff(gp, exf))})
-        rows.append({**base, "Version-Type": "CTB", "Version-Detail": "", "Cut Day": "", **fill(ctb)})
+        rows.append({**base, "Version-Type": "ExF", "Version-Detail": "", "Cut Day": cfg["exf_cut"], **exf_f})
+        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "ETD", "Cut Day": cfg["etd_cut"], **ue_f})
+        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "ETD vs ExF", "Cut Day": cfg["etd_cut"], **ue_vs_exf})
+        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "Packout", "Cut Day": cfg["output_cut"], **up_f})
+        rows.append({**base, "Version-Type": "Ungated", "Version-Detail": "Packout vs ExF", "Cut Day": cfg["output_cut"], **up_vs_exf})
+        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "ETD", "Cut Day": cfg["etd_cut"], **ge_f})
+        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "ETD vs ExF", "Cut Day": cfg["etd_cut"], **ge_vs_exf})
+        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "Packout", "Cut Day": cfg["output_cut"], **gp_f})
+        rows.append({**base, "Version-Type": "Gated", "Version-Detail": "Packout vs ExF", "Cut Day": cfg["output_cut"], **gp_vs_exf})
+        rows.append({**base, "Version-Type": "CTB", "Version-Detail": "", "Cut Day": "", **ctb_f})
 
     # ---- Build canonical GB mapping (SKU master is source of truth, case-insensitive) ----
     # Map lower -> canonical SKU master GB
@@ -729,6 +733,7 @@ def process_uploaded_data(file_map, config):
                     ctb_vals[w] = round(s, 0)
 
         # Build rows: include ETD as well to match direct availability
+        # For GB, also carry forward cumulative values (same fix as FG)
         version_defs = [
             ("ExF", "", exf_vals, cfg["exf_cut"]),
             ("Ungated", "ETD", ue_vals, cfg["gb_cut"]),
@@ -742,8 +747,11 @@ def process_uploaded_data(file_map, config):
             ("CTB", "", ctb_vals, ""),
         ]
 
+        # Apply carry forward for GB as well (cum should persist)
         for vt, vd, vals, cd in version_defs:
-            rows.append({**base, "Version-Type": vt, "Version-Detail": vd, "Cut Day": cd, **fill(vals)})
+            # Use fill_carry for cum metrics (all are cum)
+            filled = fill_carry(vals) if vals else {w: None for w in all_weeks}
+            rows.append({**base, "Version-Type": vt, "Version-Detail": vd, "Cut Day": cd, **filled})
 
     wl = {}
     for w in all_weeks:
@@ -760,6 +768,113 @@ def process_uploaded_data(file_map, config):
         warnings.append("All 6 sheets present ✓")
 
     return {"rows": rows, "weeks": all_weeks, "week_labels": wl, "config": cfg, "warnings": warnings}
+
+
+
+def process_uploaded_data(file_map, config):
+    # Every upload is treated as fresh — clear LRU caches to avoid cross-file reuse
+    _to_dt.cache_clear()
+    _to_saturday_label.cache_clear()
+    _date_to_week_label_cached.cache_clear()
+
+    from app.modules.plan_merge.utils import read_uploaded_xlsx, read_sku_master_from_ws
+    from app.modules.plan_merge.config import DEFAULT_ETD_PACKOUT_OFFSET
+
+    def _parse_offset(v, fallback):
+        try:
+            if v is None or v == "":
+                return fallback
+            return max(0, int(v))
+        except Exception:
+            return fallback
+
+    cfg = {
+        "exf_cut": config.get("exf_cut", "Saturday"),
+        "etd_cut": config.get("etd_cut", "Saturday"),
+        "output_cut": config.get("output_cut", "Wednesday"),
+        "gb_cut": config.get("gb_cut", "Tuesday"),
+        "etd_packout_offset": _parse_offset(config.get("etd_packout_offset"), DEFAULT_ETD_PACKOUT_OFFSET),
+    }
+
+    fp = file_map.get("main") or file_map.get("sku") or next(iter(file_map.values()), None)
+    if not fp:
+        raise ValueError("No file uploaded")
+
+    sheets, missing_sheets = read_uploaded_xlsx(fp)
+
+    if "sku" not in sheets:
+        raise ValueError("Missing required sheet: sku_master")
+
+    sku_ws = sheets["sku"]
+    sku_attrs, sku_to_gb, sku_pallet, gb_style_color = read_sku_master_from_ws(sku_ws)
+
+    plan_gated = sheets.get("gated", {})
+    plan_ungated = sheets.get("ungated", {})
+    plan_fcst = sheets.get("fcst", {})
+    ctb_sku = sheets.get("ctb", {})
+    ctb_gb = sheets.get("ctb_gb", {})
+
+    return _aggregate_core(sku_attrs, sku_to_gb, sku_pallet, gb_style_color,
+                           plan_gated, plan_ungated, plan_fcst, ctb_sku, ctb_gb,
+                           cfg, missing_sheets)
+
+
+def process_snapshot_data(snapshot_file_map, config):
+    """
+    New entry for snapshot folder format: gated.ungated.ctb
+    snapshot_file_map: dict with keys: item, bom, gated, ungated, fcst_main, fcst_detail, ctb
+    Each value is file path.
+    Returns same structure as process_uploaded_data.
+    """
+    from app.modules.plan_merge.snapshot_parser import parse_snapshot_folder
+
+    parsed = parse_snapshot_folder(snapshot_file_map)
+    sku_attrs = parsed["sku_attrs"]
+    sku_to_gb = parsed["sku_to_gb"]
+    sku_pallet = parsed["sku_pallet"]
+    gb_style_color = parsed["gb_style_color"]
+    gated = parsed["gated"]
+    ungated = parsed["ungated"]
+    fcst = parsed["fcst"]
+    ctb = parsed["ctb"]
+    ctb_gb = parsed["ctb_gb"]
+
+    # Build missing sheets list for warning
+    missing = []
+    if not gated:
+        missing.append("plan_output_gated (from gated排产)")
+    if not ungated:
+        missing.append("plan_output_ungated")
+    if not fcst:
+        missing.append("forecast (from FCST)")
+    if not ctb:
+        missing.append("ctb_sku_cum")
+    if not ctb_gb:
+        missing.append("ctb_gb_cum")
+    if not sku_attrs:
+        raise ValueError("SKU master empty from 料号快照")
+
+    from app.modules.plan_merge.config import DEFAULT_ETD_PACKOUT_OFFSET
+
+    def _parse_offset(v, fallback):
+        try:
+            if v is None or v == "":
+                return fallback
+            return max(0, int(v))
+        except Exception:
+            return fallback
+
+    cfg = {
+        "exf_cut": config.get("exf_cut", "Saturday"),
+        "etd_cut": config.get("etd_cut", "Saturday"),
+        "output_cut": config.get("output_cut", "Wednesday"),
+        "gb_cut": config.get("gb_cut", "Tuesday"),
+        "etd_packout_offset": _parse_offset(config.get("etd_packout_offset"), DEFAULT_ETD_PACKOUT_OFFSET),
+    }
+
+    return _aggregate_core(sku_attrs, sku_to_gb, sku_pallet, gb_style_color,
+                           gated, ungated, fcst, ctb, ctb_gb,
+                           cfg, missing)
 
 
 def _write_sheet(ws, rows, weeks, fixed, flabels, fills, hf, hfl, hb, cf, cb, nf, wlabels):

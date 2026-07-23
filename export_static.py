@@ -46,24 +46,99 @@ def is_plan_merge_file(path: Path):
     if name.startswith("~$") or name.startswith("."):
         return False
     lower = name.lower()
-    io_keywords = ["料号主表", "排产结果", "结存表"]
-    for kw in io_keywords:
-        if kw.lower() in lower:
-            return False
+    # Snapshot files should be allowed (IO-style snapshot-only)
+    snapshot_keywords = ["料号快照", "bom快照", "gated排产", "ungated排产", "fcst主表", "fcst明细", "ctb.xlsx", "fcst"]
+    for kw in snapshot_keywords:
+        if kw in lower:
+            return True
+    io_keywords = ["料号主表", "结存表"]
+    # For IO, only filter if it's exactly IO's 3 files, but not snapshot gated/ungated which contain 排产结果
+    # So we check for排产结果表 but exclude gated/ungated
+    if "料号主表" in name or "结存表" in name:
+        return False
+    if "排产结果表" in name and "gated" not in lower and "ungated" not in lower:
+        return False
     # Skip very large unrelated files
     if "lager" in lower and "by sku" in lower:
-        # This is likely not 6-sheet template, skip by default
         return False
     return True
 
 def find_default_inputs():
     candidates = []
+    # Prefer snapshot demo folder if exists
+    snapshot_demo_dir = PROJECT_ROOT / "data" / "gated.ungated.ctb"
+    if snapshot_demo_dir.exists():
+        # Check if at least item + bom exist
+        has_item = any((snapshot_demo_dir / fn).exists() for fn in ["料号快照.xlsx", "料号快照_filled.xlsx"])
+        has_bom = (snapshot_demo_dir / "BOM快照.xlsx").exists()
+        if has_item and has_bom:
+            # Return a special marker path for snapshot processing
+            # We use the dir itself as a file marker
+            candidates.append(snapshot_demo_dir)
+            return candidates
     demo = TEMPLATE_DIR / "input_demo.xlsx"
     if demo.exists():
         candidates.append(demo)
     return candidates
 
+def _process_snapshot_dir(dir_path: Path, config: dict):
+    try:
+        from app.modules.plan_merge.snapshot_parser import detect_snapshot_files
+        from app.modules.plan_merge.engine import process_snapshot_data
+    except Exception as e:
+        print(f"❌ Failed to import snapshot engine: {e}")
+        return None
+    print(f"   🔧 Processing snapshot dir {dir_path.name} ...")
+    try:
+        files = []
+        for f in dir_path.glob("*.xlsx"):
+            files.append(str(f))
+        file_map = detect_snapshot_files(files)
+        # Also map by known names
+        for key, target in {
+            "item": "料号快照.xlsx",
+            "bom": "BOM快照.xlsx",
+            "gated": "gated排产结果表.xlsx",
+            "ungated": "ungated排产结果表.xlsx",
+            "fcst_main": "FCST主表.xlsx",
+            "fcst_detail": "FCST明细表.xlsx",
+            "ctb": "CTB.xlsx",
+        }.items():
+            fp = dir_path / target
+            if fp.exists() and key not in file_map:
+                file_map[key] = str(fp)
+            # filled variant for item
+            if key == "item":
+                filled = dir_path / "料号快照_filled.xlsx"
+                if filled.exists():
+                    file_map[key] = str(filled)
+        result = process_snapshot_data(file_map, config)
+        rows = result.get("rows", [])
+        weeks = result.get("weeks", [])
+        week_labels = result.get("week_labels", {})
+        cfg = result.get("config", config)
+        warnings = result.get("warnings", [])
+        print(f"      ✅ Snapshot {dir_path.name}: {len(rows)} rows, {len(weeks)} weeks")
+        return {
+            "id": dir_path.name,
+            "name": dir_path.name,
+            "file": dir_path.name,
+            "rows": rows,
+            "weeks": weeks,
+            "week_labels": week_labels,
+            "config": cfg,
+            "warnings": warnings,
+        }
+    except Exception as e:
+        print(f"      ❌ Failed to process snapshot dir {dir_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 def process_file(filepath: Path, config: dict):
+    # If filepath is a directory, treat as snapshot dir
+    if filepath.is_dir():
+        return _process_snapshot_dir(filepath, config)
     try:
         from app.modules.plan_merge.engine import process_uploaded_data
     except Exception as e:
@@ -443,25 +518,39 @@ def main():
                     if is_plan_merge_file(p):
                         input_files.append(p)
                 elif p.is_dir():
-                    for f in p.glob("*.xlsx"):
-                        if is_plan_merge_file(f):
-                            input_files.append(f)
+                    # If dir contains snapshot files (料号快照 etc.), treat dir as one version
+                    # Check for snapshot marker
+                    has_snapshot = any((p / fn).exists() for fn in ["料号快照.xlsx", "BOM快照.xlsx", "料号快照_filled.xlsx"])
+                    if has_snapshot:
+                        input_files.append(p)
+                    else:
+                        for f in p.glob("*.xlsx"):
+                            if is_plan_merge_file(f):
+                                input_files.append(f)
     else:
-        # default only demo
-        demo = TEMPLATE_DIR / "input_demo.xlsx"
-        if demo.exists():
-            input_files.append(demo)
+        # default: try snapshot demo dir first, then legacy demo
+        input_files = find_default_inputs()
 
-    # dedup
+    # dedup (handle both files and dirs)
     seen=set()
     uniq=[]
     for f in input_files:
-        rp=f.resolve()
+        try:
+            rp=f.resolve()
+        except:
+            continue
         if rp not in seen:
             seen.add(rp)
             uniq.append(f)
     input_files=uniq
-    input_files=[f for f in input_files if is_plan_merge_file(f)]
+    # Filter: keep dirs (snapshot) as is, filter files via is_plan_merge_file
+    filtered=[]
+    for f in input_files:
+        if f.is_dir():
+            filtered.append(f)
+        elif is_plan_merge_file(f):
+            filtered.append(f)
+    input_files=filtered
 
     if not input_files:
         print("⚠️ No input xlsx found")

@@ -419,11 +419,29 @@
       allWeeks.forEach(w=>{ o[w]= (vals && vals[w]!=null) ? vals[w] : null; });
       return o;
     }
+    function fill_carry(vals){
+      let o={};
+      let last=null;
+      allWeeks.forEach(w=>{
+        if(vals && vals[w]!=null) last=vals[w];
+        o[w]=last;
+      });
+      return o;
+    }
     function diff(b,s){
       if (!b) return {};
       let ks = new Set([...Object.keys(b), ...Object.keys(s||{})]);
       let r={};
       ks.forEach(k=>{ r[k]=(b[k]||0)-(s[k]||0); });
+      return r;
+    }
+    function diff_carry(b_filled, s_filled){
+      let r={};
+      allWeeks.forEach(w=>{
+        let bv=b_filled[w], sv=s_filled[w];
+        if(bv==null && sv==null) r[w]=null;
+        else r[w]=Math.round((bv||0)-(sv||0));
+      });
       return r;
     }
 
@@ -451,17 +469,29 @@
         ctb = extractWeeklyCum(data.ctb[sku], cfg.etd_cut);
       }
 
+      // Carry forward for cum (fix: cum should persist)
+      let exf_f = fill_carry(exf);
+      let up_f = fill_carry(up);
+      let gp_f = fill_carry(gp);
+      let ue_f = fill_carry(ueRounded);
+      let ge_f = fill_carry(geRounded);
+      let ctb_f = fill_carry(ctb);
+      let ue_vs_exf = diff_carry(ue_f, exf_f);
+      let up_vs_exf = diff_carry(up_f, exf_f);
+      let ge_vs_exf = diff_carry(ge_f, exf_f);
+      let gp_vs_exf = diff_carry(gp_f, exf_f);
+
       let base = {PN:sku, Usage:usage, Style:style, Color:color, GB_PN:gb, Pallet_Qty:pallet, _dim:'FG'};
-      rows.push(Object.assign({}, base, {'Version-Type':'ExF','Version-Detail':'','Cut Day':cfg.exf_cut}, fill(exf)));
-      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'ETD','Cut Day':cfg.etd_cut}, fill(ueRounded)));
-      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'ETD vs ExF','Cut Day':cfg.etd_cut}, fill(diff(ueRounded, exf))));
-      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'Packout','Cut Day':cfg.output_cut}, fill(up)));
-      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'Packout vs ExF','Cut Day':cfg.output_cut}, fill(diff(up, exf))));
-      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'ETD','Cut Day':cfg.etd_cut}, fill(geRounded)));
-      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'ETD vs ExF','Cut Day':cfg.etd_cut}, fill(diff(geRounded, exf))));
-      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'Packout','Cut Day':cfg.output_cut}, fill(gp)));
-      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'Packout vs ExF','Cut Day':cfg.output_cut}, fill(diff(gp, exf))));
-      rows.push(Object.assign({}, base, {'Version-Type':'CTB','Version-Detail':'','Cut Day':''}, fill(ctb)));
+      rows.push(Object.assign({}, base, {'Version-Type':'ExF','Version-Detail':'','Cut Day':cfg.exf_cut}, exf_f));
+      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'ETD','Cut Day':cfg.etd_cut}, ue_f));
+      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'ETD vs ExF','Cut Day':cfg.etd_cut}, ue_vs_exf));
+      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'Packout','Cut Day':cfg.output_cut}, up_f));
+      rows.push(Object.assign({}, base, {'Version-Type':'Ungated','Version-Detail':'Packout vs ExF','Cut Day':cfg.output_cut}, up_vs_exf));
+      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'ETD','Cut Day':cfg.etd_cut}, ge_f));
+      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'ETD vs ExF','Cut Day':cfg.etd_cut}, ge_vs_exf));
+      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'Packout','Cut Day':cfg.output_cut}, gp_f));
+      rows.push(Object.assign({}, base, {'Version-Type':'Gated','Version-Detail':'Packout vs ExF','Cut Day':cfg.output_cut}, gp_vs_exf));
+      rows.push(Object.assign({}, base, {'Version-Type':'CTB','Version-Detail':'','Cut Day':''}, ctb_f));
     });
 
     // ---- GB handling fix + canonicalization (SKU master is source of truth, case-insensitive) ----
@@ -882,7 +912,7 @@
         });
       }
 
-      // Include full 10 types like FG for completeness
+      // Include full 10 types like FG for completeness – use fill_carry for cum
       let versionDefs = [
         ['ExF','',exfVals, cfg.exf_cut],
         ['Ungated','ETD', ueVals, cfg.gb_cut],
@@ -896,7 +926,7 @@
         ['CTB','', ctbVals, '']
       ];
       versionDefs.forEach(([vt, vd, vals, cd])=>{
-        rows.push(Object.assign({}, base, {'Version-Type':vt,'Version-Detail':vd,'Cut Day':cd}, fill(vals)));
+        rows.push(Object.assign({}, base, {'Version-Type':vt,'Version-Detail':vd,'Cut Day':cd}, fill_carry(vals)));
       });
     });
 

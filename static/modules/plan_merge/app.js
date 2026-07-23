@@ -111,6 +111,19 @@ function handleProcessedData(data, fileName, isClient){
     fnMain.textContent=fileMsg;
     fnMain.className='file-name success';
   }
+  const fnCombined = document.getElementById('fname_combined');
+  if (fnCombined){
+    fnCombined.textContent=fileMsg;
+  }
+  const pmBadge = document.getElementById('pmStatusBadge');
+  if (pmBadge){
+    pmBadge.textContent=`✅ Ready: ${allRows.length} rows`;
+    pmBadge.style.background='#dcfce7'; pmBadge.style.color='#065f46'; pmBadge.style.borderColor='#86efac';
+  }
+  const pmMsg = document.getElementById('pmPersistentMsg');
+  if (pmMsg){
+    pmMsg.textContent=`✅ Loaded ${allRows.length} rows at ${timeStr} — Ready`;
+  }
   const fileInput = document.querySelector('.file-input');
   const card = fileInput ? fileInput.closest('.upload-card') : null;
   if (card) card.classList.add('has-file');
@@ -365,31 +378,207 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(restoreLoadStatusUI, 300);
 });
 
-// ===== Upload: mark files + filename display =====
-function updateFileNameDisplay(input) {
-  const card = input.closest('.upload-card');
-  const fnEl = card ? card.querySelector('.file-name') : document.getElementById('file-name-main');
-  const mainFnEl = document.getElementById('file-name-main');
-  if (input.files && input.files.length > 0) {
-    const name = input.files[0].name;
-    const sizeKB = (input.files[0].size / 1024).toFixed(1);
-    const txt = `📄 ${name} (${sizeKB} KB) — pending`;
-    if (fnEl) { fnEl.textContent = txt; fnEl.className = 'file-name has-file'; }
-    if (mainFnEl && fnEl !== mainFnEl) { mainFnEl.textContent = txt; mainFnEl.className = 'file-name has-file'; }
-    if (card) card.classList.add('has-file');
-  } else {
-    if (fnEl) { fnEl.textContent = ''; fnEl.className = 'file-name'; }
-    if (card) card.classList.remove('has-file');
+// ===== Upload: Snapshot Only =====
+(function(){
+  // Snapshot keys, matching backend SNAPSHOT_TARGET_MAP
+  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
+  const files = { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
+
+  function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
+  function markHasFile(cardId, has){
+    const el = document.getElementById(cardId);
+    if(el) el.classList.toggle('has-file', !!has);
   }
-}
-document.querySelectorAll('.file-input').forEach(inp => {
-  inp.addEventListener('change', () => {
-    const card = inp.closest('.upload-card');
-    const has = inp.files.length > 0;
-    if (card) card.classList.toggle('has-file', has);
-    updateFileNameDisplay(inp);
+  function classifyByName(name){
+    const low = (name||'').toLowerCase();
+    // Important: check ungated before gated
+    if (low.includes('料号') || (low.includes('item') || low.includes('料号快照'))) {
+      if (low.includes('料号快照') || low.includes('item') ) return 'item';
+    }
+    if (low.includes('bom')) return 'bom';
+    if (low.includes('ungated')) return 'ungated';
+    if (low.includes('gated排产') || low.includes('gated')) {
+      if (!low.includes('ungated')) return 'gated';
+    }
+    if (low.includes('fcst')) {
+      if (low.includes('主表') || low.includes('main')) return 'fcst_main';
+      if (low.includes('明细') || low.includes('detail')) return 'fcst_detail';
+    }
+    if (low.includes('主表')) return 'fcst_main';
+    if (low.includes('明细')) return 'fcst_detail';
+    if (low.includes('ctb')) return 'ctb';
+    // fallback English
+    if (low.includes('料号快照')) return 'item';
+    if (low.includes('bom快照')) return 'bom';
+    return null;
+  }
+  function setFileForKey(k, file){
+    files[k]=file;
+    const fnameEl=document.getElementById('fname_'+k);
+    if(fnameEl) fnameEl.textContent='✓ '+file.name+' ('+(file.size/1024).toFixed(1)+'KB)';
+    markHasFile('card_'+k,true);
+  }
+  function clearFileForKey(k){
+    files[k]=null;
+    const fnameEl=document.getElementById('fname_'+k);
+    if(fnameEl) fnameEl.textContent='';
+    markHasFile('card_'+k,false);
+    const inp=document.getElementById('input_'+k);
+    if(inp) inp.value='';
+  }
+  function updateCombinedDisplay(){
+    const comboEl=document.getElementById('fname_combined');
+    if(!comboEl) return;
+    if(files.combined && files.combined.length>0){
+      if(files.combined.length===1){
+        const f=files.combined[0];
+        const isZip=f.name.toLowerCase().endsWith('.zip');
+        const hint=isZip?'📦 Zip':'📄 File';
+        comboEl.textContent=`✓ ${hint}: ${f.name} (${(f.size/1024).toFixed(1)}KB) — auto-classified`;
+      }else{
+        comboEl.textContent=`✓ ${files.combined.length} files: `+files.combined.map(f=>f.name).join(', ');
+      }
+      markHasFile('card_combined',true);
+    }else{
+      // if no combined, show summary of individual slots filled
+      const filled=SNAPSHOT_KEYS.filter(k=>!!files[k]);
+      if(filled.length>0){
+        comboEl.textContent=`📦 ${filled.length}/7 slots filled: `+filled.join(', ');
+        markHasFile('card_combined',false);
+      }else{
+        comboEl.textContent='';
+        markHasFile('card_combined',false);
+      }
+    }
+  }
+
+  // Individual file inputs
+  SNAPSHOT_KEYS.forEach(k=>{
+    const input=document.getElementById('input_'+k);
+    if(!input) return;
+    input.addEventListener('change', ()=>{
+      if(input.files.length>0){
+        setFileForKey(k,input.files[0]);
+        // Clear combined if individual changed
+        if(files.combined.length>0){
+          files.combined=[];
+          const ce=document.getElementById('fname_combined');
+          if(ce) ce.textContent=`ℹ️ Individual ${k} set, cleared quick upload. You can still use quick upload to override.`;
+          setTimeout(updateCombinedDisplay, 1500);
+        }
+      }else{
+        clearFileForKey(k);
+      }
+      updateCombinedDisplay();
+    });
   });
-});
+
+  // Quick Upload: Select Files button -> trigger hidden input
+  const btnSelectFiles=document.getElementById('btn-select-files');
+  const btnSelectFolder=document.getElementById('btn-select-folder');
+  const inputCombined=document.getElementById('input_combined');
+  const inputCombinedFolder=document.getElementById('input_combined_folder');
+
+  if(btnSelectFiles && inputCombined){
+    btnSelectFiles.addEventListener('click', (e)=>{ e.preventDefault(); inputCombined.click(); });
+  }
+  if(btnSelectFolder && inputCombinedFolder){
+    btnSelectFolder.addEventListener('click', (e)=>{ e.preventDefault(); inputCombinedFolder.click(); });
+  }
+
+  function handleCombinedSelection(selectedFiles){
+    const selected = Array.from(selectedFiles||[]);
+    if(selected.length===0){ files.combined=[]; updateCombinedDisplay(); return; }
+
+    if(selected.length===1){
+      const f=selected[0];
+      const low=f.name.toLowerCase();
+      const isZip=low.endsWith('.zip');
+      // Single file: if it's zip or single snapshot, keep as combined and auto-distribute if possible
+      files.combined=[f];
+      const cls=classifyByName(f.name);
+      if(cls){
+        setFileForKey(cls,f);
+        // keep combined as well for server fallback
+      }else if(isZip){
+        // zip will be handled server side
+        updateCombinedDisplay();
+        return;
+      }
+      // Clear other individual if this single file is ambiguous and we want to use as combined
+      // For snapshot, if single file is not classified, treat as combined (maybe zip)
+      updateCombinedDisplay();
+      return;
+    }
+
+    // Multiple files: auto-distribute
+    // Reset individual slots
+    SNAPSHOT_KEYS.forEach(k=> clearFileForKey(k));
+    files.combined=[];
+
+    const unclassified=[];
+    selected.forEach(f=>{
+      const cls=classifyByName(f.name);
+      if(cls && !files[cls]){
+        setFileForKey(cls,f);
+      }else{
+        unclassified.push(f);
+      }
+    });
+    // Try to fill remaining empty slots with unclassified (order-based fallback)
+    for(const k of SNAPSHOT_KEYS){
+      if(!files[k] && unclassified.length>0){
+        // For fallback, assign if still no classification but we have file
+        // Use file extension check: if xlsx, assign
+        if(unclassified[0].name.toLowerCase().endsWith('.xlsx')){
+          setFileForKey(k, unclassified.shift());
+        }
+      }
+    }
+    if(unclassified.length>0){
+      // leftover -> keep as combined for server auto-classify
+      files.combined=selected;
+    }else{
+      files.combined=selected; // keep for server as well
+    }
+    const filled=SNAPSHOT_KEYS.filter(k=>!!files[k]).length;
+    const ce=document.getElementById('fname_combined');
+    if(ce){
+      if(filled>=2){
+        ce.textContent=`✓ Auto-distributed ${selected.length} files → ${filled}/7 slots filled (${SNAPSHOT_KEYS.filter(k=>!!files[k]).join(', ')})`;
+      }else{
+        ce.textContent=`✓ ${selected.length} files selected, classified ${filled}/7`;
+      }
+    }
+    markHasFile('card_combined',true);
+    updateCombinedDisplay();
+  }
+
+  if(inputCombined){
+    inputCombined.addEventListener('change', ()=>{
+      handleCombinedSelection(inputCombined.files);
+    });
+  }
+  if(inputCombinedFolder){
+    inputCombinedFolder.addEventListener('change', ()=>{
+      handleCombinedSelection(inputCombinedFolder.files);
+    });
+  }
+
+  // Expose files object and helpers for Generate button
+  window._pmSnapshotFiles = files;
+  window._pmClassifyByName = classifyByName;
+  window._pmMarkHasFile = markHasFile;
+  window._pmUpdateCombinedDisplay = updateCombinedDisplay;
+  window._pmClearAll = function(){
+    SNAPSHOT_KEYS.forEach(k=> clearFileForKey(k));
+    files.combined=[];
+    updateCombinedDisplay();
+    document.querySelectorAll('.file-input').forEach(inp=>{ inp.value=''; });
+    document.querySelectorAll('.upload-card').forEach(c=> c.classList.remove('has-file'));
+    document.querySelectorAll('.fname').forEach(el=> el.textContent='');
+  };
+})();
 
 // ===== Cut Day Offset =====
 const DOW_IDX = {'Monday':0,'Tuesday':1,'Wednesday':2,'Thursday':3,'Friday':4,'Saturday':5,'Sunday':6};
@@ -457,93 +646,124 @@ if (modal) {
   modal.querySelector('.modal-backdrop').addEventListener('click', () => modal.style.display = 'none');
 }
 
-// ===== Generate (smart client-first with size check, server fallback) =====
+// ===== Generate — Snapshot Only =====
 document.getElementById('btn-generate').addEventListener('click', async () => {
   const btn = document.getElementById('btn-generate');
   const status = document.getElementById('upload-status');
-  btn.disabled = true; status.textContent = '⏳ Processing...';
-  const fileInput = document.querySelector('.file-input');
-  if (!fileInput || !fileInput.files.length) {
-    status.textContent = '❌ Please select a file'; btn.disabled = false; return;
-  }
-  const file = fileInput.files[0];
-  const fileSizeKB = (file.size/1024).toFixed(1);
-  const isLarge = file.size > 1024*1024 || file.name.includes('template-2026') || file.name.includes('input_template');
-  console.log(`[Generate] File: ${file.name} ${fileSizeKB}KB large=${isLarge}`);
-  document.getElementById('loading').style.display = 'flex';
-  const warnEl = document.getElementById('upload-warnings');
-  if (warnEl) { warnEl.style.display = 'none'; warnEl.innerHTML = ''; }
+  btn.disabled = true; status.textContent = '⏳ Processing snapshot...';
 
-  // For large files, skip client to avoid UI freeze, go server directly
-  let clientAttempted = false;
-  if (!isLarge && window.PlanMergeEngine && typeof XLSX !== 'undefined'){
-    clientAttempted = true;
-    try{
-      status.textContent = `🖥️ Client engine processing ${file.name} (${fileSizeKB}KB)...`;
-      // Add small delay to allow UI to render
-      await new Promise(r=> setTimeout(r, 50));
-      const data = await processFileClientSide(file);
-      handleProcessedData(data, file.name, true);
-      status.textContent = `✅ Done (client) — ${file.name} ${allRows.length} rows`;
-      document.getElementById('loading').style.display='none';
-      btn.disabled=false;
-      return;
-    }catch(clientErr){
-      console.warn('Client engine failed, trying server:', clientErr);
-      status.textContent = `⚠️ Client failed (${clientErr.message}) — trying server for ${file.name}...`;
+  const snapFilesObj = window._pmSnapshotFiles || { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
+  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
+
+  // Collect all snapshot files from individual slots + combined
+  let allFiles = [];
+  SNAPSHOT_KEYS.forEach(k=>{
+    if(snapFilesObj[k]) allFiles.push(snapFilesObj[k]);
+  });
+  // If combined has files that are not already in individual slots, add them (for zip or unclassified)
+  if(snapFilesObj.combined && snapFilesObj.combined.length>0){
+    // Check if combined files contain files not in individual
+    // If individual slots already filled from combined, avoid duplicate by name, but server handles dedup
+    // For simplicity, if individual slots count < combined length, use combined list as primary
+    const individualCount = SNAPSHOT_KEYS.filter(k=>!!snapFilesObj[k]).length;
+    if(individualCount===0){
+      allFiles = snapFilesObj.combined.slice();
+    }else if(individualCount < snapFilesObj.combined.length){
+      // Merge both, dedup by name
+      const names = new Set(allFiles.map(f=>f.name));
+      snapFilesObj.combined.forEach(f=>{
+        if(!names.has(f.name)) allFiles.push(f);
+      });
     }
-  } else if (isLarge){
-    status.textContent = `📦 Large file detected (${fileSizeKB}KB) — using server engine for ${file.name}...`;
   }
 
-  // Fallback to server API
+  if(allFiles.length===0){
+    status.textContent='❌ Please select snapshot files (料号快照, BOM快照, gated/ungated, FCST, CTB) via Quick Upload or individual slots';
+    btn.disabled=false;
+    return;
+  }
+
+  document.getElementById('loading').style.display='flex';
+  const warnEl=document.getElementById('upload-warnings');
+  if(warnEl){ warnEl.style.display='none'; warnEl.innerHTML=''; }
+
+  const totalSize = allFiles.reduce((s,f)=>s+f.size,0);
+  const totalSizeKB = (totalSize/1024).toFixed(1);
+  console.log(`[Generate] Snapshot-only mode: ${allFiles.length} files, ${totalSizeKB}KB — ${allFiles.map(f=>f.name).join(', ')}`);
+  status.textContent=`📂 Snapshot mode: ${allFiles.length} files (${totalSizeKB}KB) — server engine...`;
+
   try{
     const form = new FormData();
-    form.append('main', file);
+    allFiles.forEach(f=>{
+      const name = f.webkitRelativePath || f.name;
+      form.append('files', f, name);
+    });
     form.append('exf_cut', document.getElementById('cfg-exf').value);
     form.append('etd_cut', document.getElementById('cfg-etd').value);
     form.append('output_cut', document.getElementById('cfg-output').value);
     form.append('gb_cut', document.getElementById('cfg-gb').value);
-    const offsetEl = document.getElementById('cfg-etd-packout-offset');
-    if (offsetEl) form.append('etd_packout_offset', offsetEl.value);
-    status.textContent = `⏳ Server processing ${file.name} (${fileSizeKB}KB)...`;
-    const resp = await fetch('/api/process', { method:'POST', body: form });
-    const text = await resp.text();
+    const offsetEl=document.getElementById('cfg-etd-packout-offset');
+    if(offsetEl) form.append('etd_packout_offset', offsetEl.value);
+
+    status.textContent=`⏳ Server processing snapshot (${allFiles.length} files, ${totalSizeKB}KB)...`;
+    const resp=await fetch('/api/process', {method:'POST', body:form});
+    const text=await resp.text();
     let data;
-    try{ data = JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON: ${text.slice(0,200)}`); }
-    if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
-    handleProcessedData(data, file.name, false);
-    status.textContent = `✅ Done (server) — ${file.name} ${allRows.length} rows | ${fileSizeKB}KB`;
+    try{ data=JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON: ${text.slice(0,300)}`); }
+    if(!resp.ok || data.error) throw new Error(data.error||`HTTP ${resp.status}`);
+
+    const names=allFiles.map(f=>f.name).join(', ');
+    handleProcessedData(data, `Snapshot(${allFiles.length} files: ${names.slice(0,120)}...)`, false);
+
+    // Update persistent status
+    const pmBadge=document.getElementById('pmStatusBadge');
+    if(pmBadge) pmBadge.textContent=`✅ Ready: ${allFiles.length} files | ${data.rows?.length||0} rows`;
+    const pmMsg=document.getElementById('pmPersistentMsg');
+    if(pmMsg) pmMsg.textContent=`✅ Loaded ${allFiles.length} files at ${new Date().toLocaleTimeString()} — Ready`;
+
+    status.textContent=`✅ Done (snapshot server) — ${allFiles.length} files, ${allRows.length} rows | ${totalSizeKB}KB | ${data.warnings? data.warnings[0]:''}`;
+    document.getElementById('loading').style.display='none';
+    btn.disabled=false;
   }catch(e){
-    console.error('Generate failed', e);
-    status.textContent = `❌ ${e.message} (file ${file.name})`;
-    const fnMain = document.getElementById('file-name-main');
-    if (fnMain){
-      fnMain.textContent = `❌ Load failed: ${file.name} — ${e.message}`;
-      fnMain.className = 'file-name error';
+    console.error('Snapshot generate failed', e);
+    let msg = e.message||'Unknown error';
+    let hint = '';
+    if(msg.includes('Failed to fetch')){
+      hint = ' — Server not reachable. Check server running on http://localhost:8502 (run ./run.sh), or files too large causing server crash. Try: 1) Restart server ./run.sh --reset 2) Upload zip instead of many xlsx 3) Check server logs in /tmp/server.log. Attempting status check...';
+      // Try to ping status to confirm server alive
+      try{
+        fetch('/api/plan_merge/status').then(r=>r.json()).then(j=>{
+          status.textContent = `⚠️ Server alive but snapshot failed: ${msg}${hint} | Status: ${JSON.stringify(j).slice(0,200)}`;
+        }).catch(()=>{
+          status.textContent = `❌ Snapshot failed: ${msg}${hint} — status endpoint also unreachable, server likely down. Please run ./run.sh`;
+        });
+      }catch{}
+    }else{
+      status.textContent=`❌ Snapshot failed: ${msg}${hint}`;
     }
-    // Show alert for visibility
-    try{ alert(`Failed to load ${file.name}: ${e.message}`); }catch{}
-  }finally{
+    if(!msg.includes('Failed to fetch')){
+      status.textContent=`❌ Snapshot failed: ${msg}${hint}`;
+      try{ alert(`Snapshot failed: ${msg}\n${hint}\n\nCheck: server running? files valid xlsx? Try zip upload or ./run.sh --reset`); }catch{}
+    }else{
+      try{ alert(`Snapshot failed: ${msg}${hint}\n\nPossible fixes:\n- Server down: run ./run.sh\n- Files too large: try zip\n- Check /tmp/server.log\n- Try demo zip first`); }catch{}
+    }
     btn.disabled=false; document.getElementById('loading').style.display='none';
   }
 });
 
-// ===== Clear — similar to utilization and io_report, sets Not Ready and supports re-upload =====
+// ===== Clear — snapshot only =====
 function clearPackout(clearMsg) {
-  if(!confirm(clearMsg || 'Clear Packout data? It will become Not Ready, you can re-upload new file.')) return;
-  // Call backend clear for consistency (backend is stateless but returns ok)
+  if(!confirm(clearMsg || 'Clear Packout data? It will become Not Ready, you can re-upload snapshot files.')) return;
   fetch('/api/plan_merge/clear', {method:'POST'}).catch(()=>{});
   try{
-    // Clear file inputs
+    // Use snapshot clear helper if available
+    if(window._pmClearAll) window._pmClearAll();
     document.querySelectorAll('.file-input').forEach(inp=>{
       inp.value='';
       const card = inp.closest('.upload-card');
       if(card) card.classList.remove('has-file');
     });
-    // Clear file name displays
-    const fnMain = document.getElementById('file-name-main');
-    if(fnMain){ fnMain.textContent=''; fnMain.className='file-name'; }
+    document.querySelectorAll('.fname').forEach(el=>{ el.textContent=''; });
     document.querySelectorAll('.file-name').forEach(el=>{ el.textContent=''; el.className='file-name'; });
     // Clear data
     allRows=[]; allWeeks=[]; weekLabels={}; filteredRows=[]; activeDim='FG'; pivotFields=[];
@@ -601,7 +821,7 @@ async function downloadStaticPackout(){
   try{
     const reportWrapper = document.getElementById('report-table-wrapper')?.innerHTML || document.getElementById('report-section')?.innerHTML || '<div>No data</div>';
     const status = document.getElementById('upload-status')?.textContent || '';
-    const fileName = document.getElementById('file-name-main')?.textContent || '';
+    const fileName = document.getElementById('fname_combined')?.textContent || document.getElementById('file-name-main')?.textContent || '';
     const now = new Date().toLocaleString();
     // Embed current data for flexible filtering
     const embeddedRows = filteredRows.length>0 ? filteredRows : allRows;
@@ -1123,7 +1343,7 @@ function escAttr(s){
 // ===== Column toggles =====
 ['col-pn','col-usage','col-style','col-color','col-cutday','col-pallet'].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener('change',()=>render());});
 
-// ===== Demo info (no auto file set to avoid confusion with user uploads) =====
+// ===== Demo info — Snapshot Only =====
 (async function initDemoInfo() {
   if (isStaticMode()){
     console.log('[Static] Offline mode detected, skip auto demo fetch, init static UI');
@@ -1131,47 +1351,31 @@ function escAttr(s){
     return;
   }
   try {
-    const resp = await fetch('/demo');
+    const resp = await fetch('/api/plan_merge/templates/demo');
     if (!resp.ok) throw new Error('no demo');
-    // Don't auto-inject file into input to avoid "always demo" confusion.
-    // Just store blob for optional quick load via button if needed.
     const blob = await resp.blob();
     window._demoBlob = blob;
-    window._demoFileName = 'input_demo.xlsx';
-    const fnEl = document.getElementById('file-name-main');
-    // Only show demo hint if no file already selected and no last load
-    const inp = document.querySelector('.file-input');
-    const hasFile = inp && inp.files && inp.files.length>0;
+    window._demoFileName = 'snapshot_demo.zip';
+    const fnEl = document.getElementById('fname_combined');
     const last = loadLastStatus();
-    if (!hasFile && !last && fnEl && !fnEl.textContent){
-      fnEl.textContent = `💡 Demo available: input_demo.xlsx (${(blob.size/1024).toFixed(1)} KB) — click "Load Demo" or upload your own file`;
-      fnEl.className = 'file-name';
+    if (!last && fnEl && !fnEl.textContent){
+      fnEl.textContent = `💡 Demo available: snapshot_demo.zip (${(blob.size/1024/1024).toFixed(2)} MB) — contains 7 snapshot xlsx (料号快照, BOM快照, gated/ungated, FCST主/明细, CTB). Click download or upload your own.`;
+      fnEl.className = 'fname';
     }
-    console.log('[Demo] Demo blob ready, size', (blob.size/1024).toFixed(1), 'KB');
+    console.log('[Demo] Snapshot demo blob ready, size', (blob.size/1024).toFixed(1), 'KB');
   } catch(e) {
     console.log('Demo info failed:', e.message);
   }
 })();
 
-// Optional: provide global function to load demo on demand
+// Optional: provide global function to load demo on demand (snapshot zip cannot be auto-injected, so just download)
 window.loadDemoFile = async function(){
   try{
-    if (!window._demoBlob){
-      const resp = await fetch('/demo');
-      if (!resp.ok) throw new Error('no demo');
-      window._demoBlob = await resp.blob();
-    }
-    const inp = document.querySelector('.file-input');
-    if (!inp) return;
-    const dt = new DataTransfer();
-    dt.items.add(new File([window._demoBlob], 'input_demo.xlsx', {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-    inp.files = dt.files;
-    if (inp.closest('.upload-card')) inp.closest('.upload-card').classList.add('has-file');
-    const fnEl = document.getElementById('file-name-main');
-    if (fnEl) {
-      fnEl.textContent = `📄 input_demo.xlsx (${(window._demoBlob.size/1024).toFixed(1)} KB) — Demo loaded, click Generate`;
-      fnEl.className = 'file-name has-file';
-    }
+    // For snapshot, trigger download instead of auto-inject
+    const a = document.createElement('a');
+    a.href = '/api/plan_merge/templates/demo';
+    a.download = 'snapshot_demo.zip';
+    a.click();
     return true;
   }catch(e){ console.error('Load demo failed', e); return false; }
 };

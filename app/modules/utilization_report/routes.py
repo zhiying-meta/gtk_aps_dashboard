@@ -59,10 +59,60 @@ def api_status():
                 }
 
         files_found = []
+        file_details = {}  # ver -> list of {name, size_kb, exists, is_calendar, is_schedule}
+        file_summary = {}  # ver -> summary string like "calendar:xxx + schedule:yyy"
         for ver in ['gated','ungated']:
             util_dir = base_path / "utilization" / ver
-            if util_dir.exists() and (util_dir / "工作日历快照.xlsx").exists() and (util_dir / "排产结果表.xlsx").exists():
+            cal_path = util_dir / "工作日历快照.xlsx"
+            sched_path = util_dir / "排产结果表.xlsx"
+            ver_files = []
+            if cal_path.exists():
+                try:
+                    sz = cal_path.stat().st_size
+                    ver_files.append({"name": "工作日历快照.xlsx", "original": "工作日历快照.xlsx", "type": "calendar", "size": sz, "size_kb": round(sz/1024,1), "exists": True})
+                except:
+                    ver_files.append({"name": "工作日历快照.xlsx", "type": "calendar", "exists": True, "size_kb": 0})
+            if sched_path.exists():
+                try:
+                    sz = sched_path.stat().st_size
+                    ver_files.append({"name": "排产结果表.xlsx", "original": "排产结果表.xlsx", "type": "schedule", "size": sz, "size_kb": round(sz/1024,1), "exists": True})
+                except:
+                    ver_files.append({"name": "排产结果表.xlsx", "type": "schedule", "exists": True, "size_kb": 0})
+            # Also list any other xlsx/zip files in dir for debugging (like original named uploads if user copied manually) – IO-style, only xlsx/zip, ignore pkl/cache
+            if util_dir.exists():
+                try:
+                    for f in util_dir.iterdir():
+                        if f.is_file() and f.name not in ("工作日历快照.xlsx", "排产结果表.xlsx"):
+                            # Show extra files as unknown only if xlsx or zip (like IO shows only relevant files)
+                            if f.suffix.lower() not in (".xlsx", ".zip"):
+                                continue
+                            # Skip cache files
+                            if f.name.lower().endswith('.pkl') or f.name.startswith('cache_'):
+                                continue
+                            try:
+                                sz = f.stat().st_size
+                            except:
+                                sz = 0
+                            ver_files.append({"name": f.name, "original": f.name, "type": "unknown", "size": sz, "size_kb": round(sz/1024,1), "exists": True})
+                except:
+                    pass
+            if ver_files:
+                file_details[ver] = ver_files
+                # Build summary
+                cals = [x for x in ver_files if x.get('type')=='calendar']
+                scheds = [x for x in ver_files if x.get('type')=='schedule']
+                if cals and scheds:
+                    file_summary[ver] = f"calendar={cals[0]['name']}({cals[0].get('size_kb',0)}KB) + schedule={scheds[0]['name']}({scheds[0].get('size_kb',0)}KB)"
+                elif cals:
+                    file_summary[ver] = f"calendar={cals[0]['name']}({cals[0].get('size_kb',0)}KB) only — missing schedule"
+                elif scheds:
+                    file_summary[ver] = f"schedule={scheds[0]['name']}({scheds[0].get('size_kb',0)}KB) only — missing calendar"
+                else:
+                    file_summary[ver] = ", ".join([f['name'] for f in ver_files])
+
+            if util_dir.exists() and cal_path.exists() and sched_path.exists():
                 files_found.append(ver)
+
         # No fallback to IVY folders — after clear all, files_found should be empty, so UI shows Not Ready and matrix empty
         # Only Ready if files exist AND cache exists (validated above)
 
@@ -73,6 +123,9 @@ def api_status():
                 "versions": list(cached_versions.keys()),
                 "details": cached_versions,
                 "files_found": files_found,
+                "file_details": file_details,
+                "file_summary": file_summary,
+                "detected_message": f"✅ Utilization: detected {sum(len(v) for v in file_details.values())} files — " + "; ".join([f"{ver}: {file_summary.get(ver,'')}" for ver in files_found]) if files_found else "No files",
             })
         else:
             # Not yet computed, but files may exist
@@ -81,7 +134,10 @@ def api_status():
                 "versions": [],
                 "details": {},
                 "files_found": files_found,
+                "file_details": file_details,
+                "file_summary": file_summary,
                 "needs_compute": len(files_found) > 0,
+                "detected_message": f"⚠️ Files found but not computed: " + "; ".join([f"{ver}: {file_summary.get(ver,'')}" for ver in file_details.keys()]) if file_details else "No files",
             })
 
     except Exception as e:
@@ -373,62 +429,159 @@ def api_pivot():
 @util_bp.route("/api/utilization/upload", methods=["POST"])
 def api_upload():
     """
-    Upload handler supporting:
-    - Separate per-version one-click: ?version=gated|ungated  (calendar+schedule or zip)
-      Allows uploading only one version and displaying it immediately, the other can be empty.
-    - Separate upload: calendar alone or schedule alone (per version)
-    - One-click: calendar + schedule together (or zip) for single version
-    - Multi-version (legacy): gated + ungated together (4 files or zip with both) when no version param
+    Upload handler – IO-style (reference IO report import):
+    - Accepts: multiple xlsx, zip, folder (webkitdirectory) for gated/ungated
+    - Auto-classify by filename keywords (calendar=工作日历, schedule=排产结果) + version (gated/ungated)
+    - Informs specifically which files were uploaded (like IO: detected N files — ...)
+    - Supports:
+      * per-version one-click: ?version=gated|ungated (calendar+schedule or zip)
+      * separate upload: calendar alone or schedule alone
+      * one-click: calendar+schedule together for single version
+      * multi-version: gated+ungated together (4 files or zip with both)
+    Returns detailed file list for frontend persistent badge.
     """
     if not request.files:
         return _json_error("Expected calendar and schedule files (xlsx or zip)", 400)
 
-    # Forced version for independent one-click modules
     forced_version = (request.args.get('version') or request.form.get('version') or '').strip().lower()
     if forced_version not in ('gated', 'ungated'):
         forced_version = None
 
     tmp_dir = tempfile.mkdtemp(prefix="util_upload_")
+    tmp_extract_dir = tempfile.mkdtemp(prefix="util_extract_")
     try:
         import zipfile
 
-        extracted_files = []
-
+        # ---------- IO-style collection ----------
+        all_files = []
         for key in request.files:
-            for f in request.files.getlist(key):
-                if not f.filename:
+            all_files.extend([(key, f) for f in request.files.getlist(key)])
+
+        if not all_files:
+            return _json_error("No files uploaded", 400)
+
+        # Helper: check xlsx by content PK header
+        def _is_valid_xlsx_content(p):
+            try:
+                if not os.path.exists(p) or os.path.getsize(p) < 10:
+                    return False
+                with open(p, 'rb') as fh:
+                    return fh.read(2) == b'PK'
+            except:
+                return False
+
+        def _extract_zip_to_tmp(zip_path, out_dir):
+            extracted = []
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zf:
+                    for info in zf.infolist():
+                        if info.is_dir():
+                            continue
+                        # Be permissive: extract xlsx or files containing keywords
+                        base = os.path.basename(info.filename)
+                        if not base or base.startswith('.') or base.startswith('~$'):
+                            continue
+                        low = base.lower()
+                        # Only care about xlsx or files with our keywords (calendar/schedule)
+                        if not (low.endswith('.xlsx') or any(kw in low for kw in ["工作日历", "日历", "calendar", "排产", "schedule"])):
+                            # Also extract if size >1KB and not obviously non-excel
+                            if info.file_size < 1024 or low.endswith(('.txt','.csv','.pdf')):
+                                continue
+                        target = os.path.join(out_dir, base)
+                        c = 1
+                        b, e = os.path.splitext(target)
+                        while os.path.exists(target):
+                            target = f"{b}_{c}{e}"
+                            c += 1
+                        with zf.open(info) as src, open(target, 'wb') as dst:
+                            shutil.copyfileobj(src, dst)
+                        if _is_valid_xlsx_content(target):
+                            extracted.append(target)
+                        else:
+                            # Keep if name matches expected
+                            if any(kw in low for kw in ["工作日历","日历","calendar","排产","schedule"]):
+                                extracted.append(target)
+            except Exception as e:
+                print(f"[util] zip extract failed {e}")
+            return extracted
+
+        pending_regular = []
+        for field_key, f in all_files:
+            if not f.filename:
+                continue
+            fname = f.filename
+            if fname.lower().endswith('.zip'):
+                zip_tmp = os.path.join(tmp_dir, f"_upload_{field_key}_{os.path.basename(fname)}")
+                f.save(zip_tmp)
+                extracted = _extract_zip_to_tmp(zip_tmp, tmp_extract_dir)
+                for ep in extracted:
+                    pending_regular.append((field_key, ep, True))
+                try:
+                    os.remove(zip_tmp)
+                except:
+                    pass
+            else:
+                safe_name = os.path.basename(fname)
+                if not safe_name:
                     continue
-                fname = f.filename
-                low = fname.lower()
-                tmp_path = os.path.join(tmp_dir, fname)
-                f.save(tmp_path)
+                # Strip spaces and keep
+                safe_name = safe_name.strip()
+                temp_path = os.path.join(tmp_extract_dir, f"_raw_{field_key}_{safe_name}")
+                c = 1
+                b, e = os.path.splitext(temp_path)
+                while os.path.exists(temp_path):
+                    temp_path = f"{b}_{c}{e}"
+                    c += 1
+                f.save(temp_path)
+                pending_regular.append((field_key, temp_path, True))
 
-                if low.endswith('.zip'):
-                    try:
-                        with zipfile.ZipFile(tmp_path, 'r') as zf:
-                            for info in zf.infolist():
-                                if info.is_dir():
-                                    continue
-                                if not info.filename.lower().endswith('.xlsx'):
-                                    continue
-                                base = os.path.basename(info.filename)
-                                out_path = os.path.join(tmp_dir, f"zip_{base}")
-                                with zf.open(info) as src, open(out_path, 'wb') as dst:
-                                    shutil.copyfileobj(src, dst)
-                                extracted_files.append(out_path)
-                        os.remove(tmp_path)
-                    except Exception as ze:
-                        print(f"[util] zip extract failed {fname}: {ze}")
-                        continue
-                else:
-                    extracted_files.append(tmp_path)
+        # Second pass: classify and copy to target with IO-style naming
+        # For utilization, target filenames are fixed per version: 工作日历快照.xlsx and 排产结果表.xlsx inside version folder
+        # But for detection, we keep files in tmp_extract_dir
+        final_files = []
+        # We will also keep a list of uploaded file info for response
+        uploaded_file_info = []  # list of dict with original name, size, detected type
 
-        if not extracted_files:
-            return _json_error("No xlsx files found (including inside zip)", 400)
+        for field_key, src_path, is_path in pending_regular:
+            if not os.path.exists(src_path):
+                continue
+            base = os.path.basename(src_path)
+            # Remove _raw_ prefix for display
+            display_name = base
+            if base.startswith("_raw_"):
+                # Extract original: _raw_{field_key}_{safe_name}
+                parts = base.split("_", 2)
+                display_name = parts[-1] if len(parts) >= 3 else base[5:]
 
+            sz = os.path.getsize(src_path)
+            # Only include xlsx (by content) or files with relevant keywords
+            if not _is_valid_xlsx_content(src_path):
+                # Skip if not valid and not containing keywords? But keep for error reporting
+                # For now, keep only if name contains our keywords
+                low = display_name.lower()
+                if not any(kw in low for kw in ["工作日历","日历","calendar","排产","schedule","gated","ungated"]):
+                    continue
+
+            final_files.append(src_path)
+            uploaded_file_info.append({
+                "field": field_key,
+                "original": display_name,
+                "size": sz,
+                "size_kb": round(sz/1024, 1),
+                "path": src_path,
+            })
+
+        if not final_files:
+            existing = os.listdir(tmp_extract_dir)
+            return _json_error(f"No xlsx files found (including inside zip). Got {existing}. Expected 工作日历快照.xlsx and 排产结果表.xlsx for gated/ungated.", 400)
+
+        # Classification helpers – IO-style
         def classify_content_type(path):
-            """Return (is_calendar, is_schedule) based on name/content heuristic"""
             name = os.path.basename(path).lower()
+            # Also check original display name if path is _raw_
+            # Remove _raw_ prefix
+            if name.startswith("_raw_"):
+                name = "_".join(name.split("_")[2:]).lower() if "_" in name else name[5:].lower()
             is_calendar = False
             is_schedule = False
             if "工作日历" in name or "calendar" in name or "日历" in name:
@@ -449,8 +602,9 @@ def api_upload():
             return is_calendar, is_schedule
 
         def classify_file(path):
-            """Legacy helper for non-forced mode: also returns version hint"""
             name = os.path.basename(path).lower()
+            if name.startswith("_raw_"):
+                name = "_".join(name.split("_")[2:]).lower() if "_" in name else name[5:].lower()
             is_cal, is_sched = classify_content_type(path)
             ver = None
             if "ungated" in name or "ungate" in name:
@@ -461,36 +615,38 @@ def api_upload():
 
         # Group
         if forced_version:
-            # Independent module: all files belong to forced_version
             version_groups = {
-                forced_version: {"calendar": None, "schedule": None},
+                forced_version: {"calendar": None, "schedule": None, "files": []},
             }
-            for p in extracted_files:
+            for p in final_files:
                 is_cal, is_sched = classify_content_type(p)
-                # If file is detected as both? prioritize not overwritten
                 if is_cal and not version_groups[forced_version]["calendar"]:
                     version_groups[forced_version]["calendar"] = p
+                    version_groups[forced_version]["files"].append(p)
                 elif is_sched and not version_groups[forced_version]["schedule"]:
                     version_groups[forced_version]["schedule"] = p
+                    version_groups[forced_version]["files"].append(p)
                 else:
-                    # Fallback: if classification ambiguous, fill remaining slot
                     if not version_groups[forced_version]["calendar"]:
                         version_groups[forced_version]["calendar"] = p
+                        version_groups[forced_version]["files"].append(p)
                     elif not version_groups[forced_version]["schedule"]:
                         version_groups[forced_version]["schedule"] = p
+                        version_groups[forced_version]["files"].append(p)
         else:
-            # Legacy multi-version logic
             version_groups = {
-                "gated": {"calendar": None, "schedule": None},
-                "ungated": {"calendar": None, "schedule": None},
+                "gated": {"calendar": None, "schedule": None, "files": []},
+                "ungated": {"calendar": None, "schedule": None, "files": []},
             }
             unassigned = []
-            for p in extracted_files:
+            for p in final_files:
                 ver, is_cal, is_sched = classify_file(p)
                 if ver and is_cal and not version_groups[ver]["calendar"]:
                     version_groups[ver]["calendar"] = p
+                    version_groups[ver]["files"].append(p)
                 elif ver and is_sched and not version_groups[ver]["schedule"]:
                     version_groups[ver]["schedule"] = p
+                    version_groups[ver]["files"].append(p)
                 else:
                     unassigned.append((p, is_cal, is_sched, ver))
 
@@ -500,27 +656,32 @@ def api_upload():
                 for tv in target_vers:
                     if is_cal and not version_groups[tv]["calendar"]:
                         version_groups[tv]["calendar"] = p
+                        version_groups[tv]["files"].append(p)
                         assigned = True
                         break
                     if is_sched and not version_groups[tv]["schedule"]:
                         version_groups[tv]["schedule"] = p
+                        version_groups[tv]["files"].append(p)
                         assigned = True
                         break
                 if not assigned:
                     for tv in ["gated", "ungated"]:
                         if is_cal and not version_groups[tv]["calendar"]:
                             version_groups[tv]["calendar"] = p
+                            version_groups[tv]["files"].append(p)
                             assigned = True
                             break
                         if is_sched and not version_groups[tv]["schedule"]:
                             version_groups[tv]["schedule"] = p
+                            version_groups[tv]["files"].append(p)
                             assigned = True
                             break
 
-        # Save and compute
+        # Save and compute – also build detailed file list for response (IO-style)
         results = {}
         any_saved = False
         versions_to_process = [forced_version] if forced_version else ["gated", "ungated"]
+        detailed_files = {}  # version -> list of file info
 
         for ver in versions_to_process:
             if ver not in version_groups:
@@ -529,6 +690,23 @@ def api_upload():
             sched_path = version_groups[ver]["schedule"]
             persist_dir = os.path.join(DEFAULT_DATA_DIR, "utilization", ver)
             os.makedirs(persist_dir, exist_ok=True)
+
+            # Build detailed file list for this version – IO-style: include original names, types, sizes
+            ver_files = []
+            for src in version_groups[ver].get("files", []):
+                for info in uploaded_file_info:
+                    if info["path"] == src:
+                        f_type = "calendar" if src == cal_path else "schedule" if src == sched_path else "unknown"
+                        ver_files.append({
+                            "original": info["original"],
+                            "size_kb": info["size_kb"],
+                            "size": info["size"],
+                            "type": f_type,
+                            "field": info["field"],
+                            "detected_as": f"{f_type} ({info['original']})",
+                        })
+                        break
+            detailed_files[ver] = ver_files
 
             if cal_path:
                 dest = os.path.join(persist_dir, "工作日历快照.xlsx")
@@ -544,31 +722,58 @@ def api_upload():
             if os.path.exists(cal_persist) and os.path.exists(sched_persist):
                 try:
                     cache = _compute_records(ver, cal_persist, sched_persist)
+                    # IO-style detailed message
+                    cal_file = next((f for f in ver_files if f['type']=='calendar'), None)
+                    sched_file = next((f for f in ver_files if f['type']=='schedule'), None)
+                    if cal_file and sched_file:
+                        detected_str = f"✅ {ver.capitalize()} Ready: calendar={cal_file['original']}({cal_file['size_kb']}KB) + schedule={sched_file['original']}({sched_file['size_kb']}KB) — {len(cache.lines)} lines, {len(cache.dates)} dates, will be shown in matrix"
+                    elif cal_file:
+                        detected_str = f"⚠️ {ver.capitalize()} Partial: calendar={cal_file['original']}({cal_file['size_kb']}KB) uploaded, missing schedule — {len(cache.lines)} lines but need both to display"
+                    elif sched_file:
+                        detected_str = f"⚠️ {ver.capitalize()} Partial: schedule={sched_file['original']}({sched_file['size_kb']}KB) uploaded, missing calendar"
+                    else:
+                        # Files exist from previous uploads, use persisted names
+                        detected_str = f"✅ {ver.capitalize()} Ready: 工作日历快照.xlsx + 排产结果表.xlsx — {len(cache.lines)} lines, {len(cache.dates)} dates (using persisted files)"
                     results[ver] = {
                         "lines": len(cache.lines),
                         "dates": len(cache.dates),
                         "records_shift": len(cache.records_shift),
                         "ready": True,
+                        "files": ver_files,
+                        "detected": detected_str,
+                        "summary": f"{ver}: " + (f"📅 {cal_file['original']} + 📋 {sched_file['original']}" if cal_file and sched_file else "ready")
                     }
                 except Exception as ve:
                     import traceback
                     traceback.print_exc()
-                    results[ver] = {"ready": False, "error": str(ve)}
+                    results[ver] = {"ready": False, "error": str(ve), "files": ver_files, "detected": f"❌ {ver} failed: {ve}"}
             else:
                 has_cal = os.path.exists(cal_persist)
                 has_sched = os.path.exists(sched_persist)
                 if has_cal or has_sched:
+                    cal_file = next((f for f in ver_files if f['type']=='calendar'), None)
+                    sched_file = next((f for f in ver_files if f['type']=='schedule'), None)
+                    partial_msg = f"Partial upload for {ver}: "
+                    if cal_file:
+                        partial_msg += f"calendar={cal_file['original']}({cal_file['size_kb']}KB) present, "
+                    else:
+                        partial_msg += f"calendar={'present' if has_cal else 'missing'}, "
+                    if sched_file:
+                        partial_msg += f"schedule={sched_file['original']}({sched_file['size_kb']}KB) {'present' if has_sched else 'missing'}"
+                    else:
+                        partial_msg += f"schedule={'present' if has_sched else 'missing'}"
+                    partial_msg += " — upload missing file to complete (need both calendar + schedule)"
                     results[ver] = {
                         "ready": False,
                         "partial": True,
                         "has_calendar": has_cal,
                         "has_schedule": has_sched,
-                        "message": f"Partial upload for {ver}: calendar={has_cal}, schedule={has_sched}. Upload missing file to complete.",
+                        "files": ver_files,
+                        "message": partial_msg,
+                        "detected": partial_msg,
                     }
 
-        # If forced version uploaded but other version already exists, also include its status (so frontend knows overall)
         if forced_version:
-            # Add info about the other version if files exist
             other = "ungated" if forced_version == "gated" else "gated"
             other_dir = os.path.join(DEFAULT_DATA_DIR, "utilization", other)
             cal_other = os.path.join(other_dir, "工作日历快照.xlsx")
@@ -577,22 +782,59 @@ def api_upload():
                 has_cal = os.path.exists(cal_other)
                 has_sched = os.path.exists(sched_other)
                 if has_cal and has_sched:
-                    # try to get cache info if already computed else mark partial
                     if other not in results:
-                        results[other] = {"ready": True, "existing": True, "has_calendar": True, "has_schedule": True}
+                        results[other] = {"ready": True, "existing": True, "has_calendar": True, "has_schedule": True, "files": []}
                 else:
                     if other not in results:
-                        results[other] = {"ready": False, "partial": True, "has_calendar": has_cal, "has_schedule": has_sched, "existing": True}
+                        results[other] = {"ready": False, "partial": True, "has_calendar": has_cal, "has_schedule": has_sched, "existing": True, "files": []}
 
         if not any_saved and not results:
             return _json_error("No valid calendar/schedule files classified. Please upload 工作日历快照.xlsx and 排产结果表.xlsx, or zip containing them.", 400)
 
         reload_all(DEFAULT_DATA_DIR)
 
+        # Build overall detected message like IO: "✅ Snapshot mode: detected N files — ..." – now with per-version breakdown
+        overall_files = []
+        ver_summaries = []
+        for ver, flist in detailed_files.items():
+            if not flist:
+                continue
+            parts = []
+            for f in flist:
+                parts.append(f"{f['type']}={f['original']}({f['size_kb']}KB)")
+            ver_summaries.append(f"{ver}:[{' + '.join(parts)}]")
+            for f in flist:
+                overall_files.append(f"{ver}:{f['original']}")
+
+        # IO-style: show specific uploaded files with sizes and types, like IO's "Detected N files — ..."
+        if uploaded_file_info:
+            file_list_str = ", ".join([f"{info['original']}({info['size_kb']}KB)" for info in uploaded_file_info])
+            ver_detail_str = "; ".join(ver_summaries) if ver_summaries else file_list_str
+            detected_msg = f"✅ Utilization upload: detected {len(uploaded_file_info)} files — {file_list_str} | breakdown: {ver_detail_str}"
+        else:
+            detected_msg = "✅ Upload complete — using existing persisted files"
+
+        # Also build per-version file list for frontend persistent badge (IO-like)
+        per_version_summary = {}
+        for ver in detailed_files:
+            flist = detailed_files[ver]
+            if flist:
+                per_version_summary[ver] = {
+                    "count": len(flist),
+                    "files": flist,
+                    "text": " + ".join([f"{f['type']}:{f['original']}({f['size_kb']}KB)" for f in flist])
+                }
+
         return jsonify({
             "ok": True,
             "results": results,
             "saved_versions": list(results.keys()),
+            "files": uploaded_file_info,
+            "detailed_files": detailed_files,
+            "per_version_summary": per_version_summary,
+            "ver_summaries": ver_summaries,
+            "detected_message": detected_msg,
+            "file_list_detail": file_list_str if uploaded_file_info else "",
         })
 
     except Exception as e:
@@ -601,6 +843,7 @@ def api_upload():
         return _json_error(f"Upload failed: {e}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+        shutil.rmtree(tmp_extract_dir, ignore_errors=True)
 
 @util_bp.route("/api/utilization/demo/load", methods=["POST"])
 def api_demo_load():
