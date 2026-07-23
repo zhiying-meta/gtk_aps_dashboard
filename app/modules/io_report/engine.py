@@ -211,11 +211,13 @@ def _find_header_row(ws, expected_keywords, scan_rows=15):
             # Clean row: strip and upper for matching, keep original for _get_col_index
             cleaned = [str(c).strip() if c is not None else "" for c in row]
             cleaned_upper = [c.upper() for c in cleaned]
-            # Count how many expected keywords appear (exact or case-insensitive)
+            # Count how many expected keywords appear (exact or case-insensitive), skip empty
             score = 0
             for kw in expected_keywords:
                 kw_up = kw.upper()
                 for c_up in cleaned_upper:
+                    if not c_up:
+                        continue
                     if kw_up == c_up or kw_up in c_up or c_up in kw_up:
                         score += 1
                         break
@@ -257,6 +259,8 @@ def _find_best_sheet_and_header(wb, expected_keywords, scan_rows=15):
             for kw in expected_keywords:
                 kw_up = kw.upper()
                 for c_up in cleaned:
+                    if not c_up:
+                        continue
                     if kw_up == c_up or kw_up in c_up:
                         score += 1
                         break
