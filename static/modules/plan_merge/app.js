@@ -368,9 +368,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ===== Upload: Snapshot Only =====
 (function(){
-  // Snapshot keys, matching backend SNAPSHOT_TARGET_MAP
-  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
-  const files = { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
+  // Snapshot keys, matching backend SNAPSHOT_TARGET_MAP (including new Modelo CTB)
+  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb','ctb_gb_modelo','ctb_sku_modelo'];
+  const files = { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, ctb_gb_modelo:null, ctb_sku_modelo:null, combined:[] };
 
   function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
   function markHasFile(cardId, has){
@@ -394,7 +394,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (low.includes('主表')) return 'fcst_main';
     if (low.includes('明细')) return 'fcst_detail';
-    if (low.includes('ctb')) return 'ctb';
+    // New Modelo CTB detection - must check GB/SKU before generic CTB
+    if (low.includes('ctb')) {
+      const isGb = low.includes('gb') && !low.includes('sku');
+      const isSku = low.includes('sku') && !low.includes('gb');
+      const isModelo = low.includes('modelo') || low.includes('publish');
+      if (isModelo) {
+        if (isGb) return 'ctb_gb_modelo';
+        if (isSku) return 'ctb_sku_modelo';
+        // If contains both or ambiguous, try to infer
+        if (low.includes('gb')) return 'ctb_gb_modelo';
+        if (low.includes('sku')) return 'ctb_sku_modelo';
+      }
+      // Generic old CTB
+      return 'ctb';
+    }
     // fallback English
     if (low.includes('料号快照')) return 'item';
     if (low.includes('bom快照')) return 'bom';

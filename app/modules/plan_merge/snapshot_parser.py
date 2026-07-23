@@ -487,11 +487,83 @@ def parse_snapshot_folder(file_paths):
         except Exception as e:
             raise ValueError(f"Failed parsing FCST main={os.path.basename(str(file_paths['fcst_main']))} detail={os.path.basename(str(file_paths['fcst_detail']))}: {e}") from e
 
-    # CTB
+    # CTB - old format + new Modelo format (MPM)
     ctb_sku = {}
     ctb_gb = {}
     if "ctb" in file_paths:
-        ctb_sku, ctb_gb = _safe_parse_wrapper(parse_ctb, file_paths["ctb"], "CTB")
+        try:
+            old_sku, old_gb = _safe_parse_wrapper(parse_ctb, file_paths["ctb"], "CTB")
+            ctb_sku.update(old_sku)
+            ctb_gb.update(old_gb)
+        except Exception:
+            # Old CTB may be actually Modelo format, try new parser as fallback
+            pass
+
+    # New Modelo GB CTB (MPM) - needs item master mapping
+    if "ctb_gb_modelo" in file_paths:
+        try:
+            from app.modules.plan_merge.modelo_ctb_parser import parse_modelo_gb_ctb, parse_item_snapshot_for_gb_mapping
+            # Build GB list for mapping from item snapshot
+            if item_path:
+                gb_list = parse_item_snapshot_for_gb_mapping(item_path)
+                new_gb = parse_modelo_gb_ctb(file_paths["ctb_gb_modelo"], gb_list)
+                # Merge: if same GB PN exists, sum values per date
+                for pn, date_vals in new_gb.items():
+                    if pn not in ctb_gb:
+                        ctb_gb[pn] = date_vals
+                    else:
+                        for d, v in date_vals.items():
+                            ctb_gb[pn][d] = ctb_gb[pn].get(d, 0) + v
+        except Exception as e:
+            print(f"[CTB GB Modelo] failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # New Modelo SKU CTB (MPM) - has explicit SKU
+    if "ctb_sku_modelo" in file_paths:
+        try:
+            from app.modules.plan_merge.modelo_ctb_parser import parse_modelo_sku_ctb
+            new_sku = parse_modelo_sku_ctb(file_paths["ctb_sku_modelo"])
+            for pn, date_vals in new_sku.items():
+                if pn not in ctb_sku:
+                    ctb_sku[pn] = date_vals
+                else:
+                    for d, v in date_vals.items():
+                        ctb_sku[pn][d] = ctb_sku[pn].get(d, 0) + v
+        except Exception as e:
+            print(f"[CTB SKU Modelo] failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Also support if ctb file itself is Modelo format (detected as generic ctb but actually new)
+    # Try to parse generic ctb path as both GB and SKU modelo if it contains "Modelo"
+    if "ctb" in file_paths and ("ctb_gb_modelo" not in file_paths and "ctb_sku_modelo" not in file_paths):
+        base_name = os.path.basename(str(file_paths["ctb"])).lower()
+        if "modelo" in base_name or "publish" in base_name:
+            # Try to detect if it's GB or SKU by filename
+            try:
+                if "gb" in base_name:
+                    from app.modules.plan_merge.modelo_ctb_parser import parse_modelo_gb_ctb, parse_item_snapshot_for_gb_mapping
+                    if item_path:
+                        gb_list = parse_item_snapshot_for_gb_mapping(item_path)
+                        new_gb = parse_modelo_gb_ctb(file_paths["ctb"], gb_list)
+                        for pn, date_vals in new_gb.items():
+                            if pn not in ctb_gb:
+                                ctb_gb[pn] = date_vals
+                            else:
+                                for d, v in date_vals.items():
+                                    ctb_gb[pn][d] = ctb_gb[pn].get(d, 0) + v
+                elif "sku" in base_name:
+                    from app.modules.plan_merge.modelo_ctb_parser import parse_modelo_sku_ctb
+                    new_sku = parse_modelo_sku_ctb(file_paths["ctb"])
+                    for pn, date_vals in new_sku.items():
+                        if pn not in ctb_sku:
+                            ctb_sku[pn] = date_vals
+                        else:
+                            for d, v in date_vals.items():
+                                ctb_sku[pn][d] = ctb_sku[pn].get(d, 0) + v
+            except Exception as e:
+                print(f"[CTB Modelo generic] fallback failed: {e}")
 
     return {
         "sku_attrs": sku_attrs,
@@ -553,8 +625,39 @@ def detect_snapshot_files(uploaded_files):
             mapping["fcst_main"] = str(fp)
         if "fcst" in name and "明细" in name:
             mapping["fcst_detail"] = str(fp)
+        # New Modelo CTB detection (MPM format) - need separate GB and SKU
         if "ctb" in name:
-            mapping["ctb"] = str(fp)
+            # Check if it's Modelo GB or SKU
+            is_gb = ("gb" in name) or ("gb" in os.path.basename(str(fp)).lower() and "sku" not in name)
+            is_sku = ("sku" in name)
+            is_modelo = ("modelo" in name or "publish" in name)
+            if is_modelo:
+                if is_gb and not is_sku:
+                    mapping["ctb_gb_modelo"] = str(fp)
+                elif is_sku and not is_gb:
+                    mapping["ctb_sku_modelo"] = str(fp)
+                else:
+                    # If filename contains both or ambiguous, check content via separate detection
+                    # For GB file, it often has "GB" in name, for SKU has "SKU"
+                    if "gb" in name:
+                        mapping["ctb_gb_modelo"] = str(fp)
+                    if "sku" in name:
+                        mapping["ctb_sku_modelo"] = str(fp)
+            # Old format CTB still maps to generic
+            if "ctb_gb_modelo" not in mapping and "ctb_sku_modelo" not in mapping:
+                # Only map to generic if not already modelo specific
+                # If file is modelo but we already mapped specific, don't overwrite generic with modelo (to avoid confusion)
+                # For old CTB.xlsx with 2 sheets, keep generic
+                if not (is_modelo and (is_gb or is_sku)):
+                    mapping["ctb"] = str(fp)
+            else:
+                # If modelo, also keep generic as fallback for backward compat if needed
+                # But we want separate handling, so also set generic if file is actually old format?
+                # For modelo, we don't set generic to avoid double parsing as old format
+                pass
+            # Handle case where file is generic CTB.xlsx with 2 sheets (old format)
+            if not is_modelo:
+                mapping["ctb"] = str(fp)
 
     # Fallback: if we have item_filled, use it as item
     if "item_filled" in mapping:

@@ -28,7 +28,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 SNAPSHOT_DEMO_DIR = os.path.join(DEFAULT_DATA_DIR, "gated.ungated.ctb")
 
-# ---------- Snapshot Target Map (like IO's TARGET_MAP, but 7 files) ----------
+# ---------- Snapshot Target Map (like IO's TARGET_MAP, but 7 files + 2 Modelo MPM CTB) ----------
 SNAPSHOT_TARGET_MAP = {
     "item": "料号快照.xlsx",
     "bom": "BOM快照.xlsx",
@@ -37,6 +37,9 @@ SNAPSHOT_TARGET_MAP = {
     "fcst_main": "FCST主表.xlsx",
     "fcst_detail": "FCST明细表.xlsx",
     "ctb": "CTB.xlsx",
+    # New Modelo MPM CTB support (GB and SKU separated, no explicit GB PN, need mapping via item master)
+    "ctb_gb_modelo": "Modelo GB CTB.xlsx",
+    "ctb_sku_modelo": "Modelo SKU CTB.xlsx",
 }
 
 # For backward compat of old demo/template endpoint names
@@ -75,7 +78,28 @@ def _classify_snapshot_upload(filename: str, field: str) -> str | None:
         return SNAPSHOT_TARGET_MAP["fcst_main"]
     if "fcst明细" in filename or "fcst_detail" in fn_low:
         return SNAPSHOT_TARGET_MAP["fcst_detail"]
+    # New Modelo MPM CTB detection - must check before generic ctb
+    # GB CTB has GB + CTB, SKU CTB has SKU + CTB, both may have Modelo/Publish
     if "ctb" in fn_low or "ctb" in field_low:
+        # Check for Modelo GB vs SKU
+        is_gb = "gb" in fn_low and "sku" not in fn_low
+        is_sku = "sku" in fn_low and "gb" not in fn_low
+        is_modelo = "modelo" in fn_low or "publish" in fn_low
+        if is_modelo:
+            if is_gb:
+                return SNAPSHOT_TARGET_MAP["ctb_gb_modelo"]
+            if is_sku:
+                return SNAPSHOT_TARGET_MAP["ctb_sku_modelo"]
+            # Fallback: if filename contains both or ambiguous, try to infer by content keyword
+            # But keep generic handling below
+        # Generic CTB (old format with 2 sheets)
+        # If it's modelo but we couldn't distinguish, return generic and let detect handle
+        # However to avoid overwriting, we will return specific if detected
+        if is_gb and is_modelo:
+            return SNAPSHOT_TARGET_MAP["ctb_gb_modelo"]
+        if is_sku and is_modelo:
+            return SNAPSHOT_TARGET_MAP["ctb_sku_modelo"]
+        # Old CTB.xlsx
         return SNAPSHOT_TARGET_MAP["ctb"]
     # Additional heuristic for FCST files named with 主表 / 明细 without fcst keyword
     if "主表" in filename:
