@@ -20,8 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (toggleAlt) toggleAlt.addEventListener('click', toggleSidebar);
 
   // Section registry - 5 modules integrated
+  // ctbConverter is part of Packout only (ExF vs ETD vs Packout vs CTB)
   const S = {
     upload: document.getElementById('upload-section'),
+    ctbConverter: document.getElementById('ctb-converter-section'),
     config: document.getElementById('config-section'),
     report: document.getElementById('report-section'),
     io: document.getElementById('io-report-section'),
@@ -37,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showPackout() {
     if (S.upload) S.upload.style.display = 'block';
+    if (S.ctbConverter) S.ctbConverter.style.display = 'block';
     if (S.config) S.config.style.display = 'block';
     if (S.report && S.report.dataset.hasData === 'true') S.report.style.display = 'block';
   }
