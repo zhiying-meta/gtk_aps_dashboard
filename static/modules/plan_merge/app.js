@@ -770,7 +770,6 @@ function clearPackout(clearMsg) {
     document.getElementById('row-count').textContent='';
   }catch(e){ console.error('clear packout failed', e); }
 }
-document.getElementById('btn-clear-packout')?.addEventListener('click', ()=> clearPackout());
 document.getElementById('btn-clear-packout-report')?.addEventListener('click', ()=> clearPackout());
 
 async function downloadStaticPackout(){
@@ -915,7 +914,6 @@ setTimeout(applyFilter, 100);
   }catch(e){ alert('Download static HTML failed: '+e.message); console.error(e); }
 }
 document.getElementById('btn-download-static-packout')?.addEventListener('click', downloadStaticPackout);
-document.getElementById('btn-download-static-packout-config')?.addEventListener('click', downloadStaticPackout);
 
 // ===== Filters =====
 function setupDropdowns() {
