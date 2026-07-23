@@ -28,7 +28,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..
 DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 SNAPSHOT_DEMO_DIR = os.path.join(DEFAULT_DATA_DIR, "gated.ungated.ctb")
 
-# ---------- Snapshot Target Map (like IO's TARGET_MAP, but 7 files + 2 Modelo MPM CTB) ----------
+# ---------- Snapshot Target Map (like IO's TARGET_MAP, but 7 files) ----------
 SNAPSHOT_TARGET_MAP = {
     "item": "料号快照.xlsx",
     "bom": "BOM快照.xlsx",
@@ -37,9 +37,6 @@ SNAPSHOT_TARGET_MAP = {
     "fcst_main": "FCST主表.xlsx",
     "fcst_detail": "FCST明细表.xlsx",
     "ctb": "CTB.xlsx",
-    # New Modelo MPM CTB support (GB and SKU separated, no explicit GB PN, need mapping via item master)
-    "ctb_gb_modelo": "Modelo GB CTB.xlsx",
-    "ctb_sku_modelo": "Modelo SKU CTB.xlsx",
 }
 
 # For backward compat of old demo/template endpoint names
@@ -78,28 +75,7 @@ def _classify_snapshot_upload(filename: str, field: str) -> str | None:
         return SNAPSHOT_TARGET_MAP["fcst_main"]
     if "fcst明细" in filename or "fcst_detail" in fn_low:
         return SNAPSHOT_TARGET_MAP["fcst_detail"]
-    # New Modelo MPM CTB detection - must check before generic ctb
-    # GB CTB has GB + CTB, SKU CTB has SKU + CTB, both may have Modelo/Publish
     if "ctb" in fn_low or "ctb" in field_low:
-        # Check for Modelo GB vs SKU
-        is_gb = "gb" in fn_low and "sku" not in fn_low
-        is_sku = "sku" in fn_low and "gb" not in fn_low
-        is_modelo = "modelo" in fn_low or "publish" in fn_low
-        if is_modelo:
-            if is_gb:
-                return SNAPSHOT_TARGET_MAP["ctb_gb_modelo"]
-            if is_sku:
-                return SNAPSHOT_TARGET_MAP["ctb_sku_modelo"]
-            # Fallback: if filename contains both or ambiguous, try to infer by content keyword
-            # But keep generic handling below
-        # Generic CTB (old format with 2 sheets)
-        # If it's modelo but we couldn't distinguish, return generic and let detect handle
-        # However to avoid overwriting, we will return specific if detected
-        if is_gb and is_modelo:
-            return SNAPSHOT_TARGET_MAP["ctb_gb_modelo"]
-        if is_sku and is_modelo:
-            return SNAPSHOT_TARGET_MAP["ctb_sku_modelo"]
-        # Old CTB.xlsx
         return SNAPSHOT_TARGET_MAP["ctb"]
     # Additional heuristic for FCST files named with 主表 / 明细 without fcst keyword
     if "主表" in filename:
@@ -847,3 +823,168 @@ def api_status():
             "note": "Snapshot-only: upload 7 files (料号快照, BOM快照, gated, ungated, FCST主, FCST明细, CTB) or zip",
         }
     )
+
+
+@plan_merge_bp.route("/api/plan_merge/ctb/convert", methods=["POST"])
+def api_ctb_convert():
+    """
+    MPM CTB Converter: Upload 料号表 + Modelo GB CTB + Modelo SKU CTB -> Generate standard CTB.xlsx
+    Expandable module in Packout page.
+    Does not affect main flow's CTB support.
+    """
+    upload_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    work_dir = os.path.join(config.UPLOAD_FOLDER, upload_id)
+    os.makedirs(work_dir, exist_ok=True)
+    tmp_extract_dir = tempfile.mkdtemp(prefix="ctb_conv_")
+    try:
+        all_files = []
+        for key in request.files:
+            all_files.extend([(key, f) for f in request.files.getlist(key)])
+
+        if not all_files:
+            return _json_error("No files uploaded. Need 料号表 + GB CTB + SKU CTB (at least 1+1).", 400)
+
+        # Save files to tmp
+        saved = {}
+        for field_key, f in all_files:
+            if not f.filename:
+                continue
+            fname = f.filename
+            safe_name = os.path.basename(fname)
+            tmp_path = os.path.join(tmp_extract_dir, f"_raw_{field_key}_{safe_name}")
+            c = 1
+            b, e = os.path.splitext(tmp_path)
+            while os.path.exists(tmp_path):
+                tmp_path = f"{b}_{c}{e}"
+                c += 1
+            f.save(tmp_path)
+            # Classify by keyword for converter
+            low = safe_name.lower()
+            field_low = (field_key or "").lower()
+            if "料号" in safe_name or "item" in low or "料号" in field_low:
+                saved["item"] = tmp_path
+            elif "gb" in low and "ctb" in low:
+                saved["gb"] = tmp_path
+            elif "sku" in low and "ctb" in low:
+                saved["sku"] = tmp_path
+            elif "modelo" in low and "gb" in low:
+                saved["gb"] = tmp_path
+            elif "modelo" in low and "sku" in low:
+                saved["sku"] = tmp_path
+            else:
+                # Fallback: try to detect by content or name
+                if "gb" in low:
+                    saved["gb"] = tmp_path
+                elif "sku" in low:
+                    saved["sku"] = tmp_path
+                else:
+                    # If field is explicit
+                    if "conv_item" in field_low or "item" in field_low:
+                        saved["item"] = tmp_path
+                    elif "conv_gb" in field_low or "gb" in field_low:
+                        saved["gb"] = tmp_path
+                    elif "conv_sku" in field_low or "sku" in field_low:
+                        saved["sku"] = tmp_path
+
+        if "item" not in saved:
+            return _json_error("Missing 料号表 (Item Snapshot) - required for Style/Color->GB mapping. File should contain ITEM_NO, SYLTE, COLOR, PURPOSE, PRODUCT_CATEGORY.", 400)
+
+        if "gb" not in saved and "sku" not in saved:
+            return _json_error("Missing MPM CTB files - need at least GB CTB or SKU CTB (Modelo GB/SKU CTB Publish).", 400)
+
+        # Parse using modelo parser
+        ctb_sku = {}
+        ctb_gb = {}
+        warnings = []
+
+        try:
+            from app.modules.plan_merge.modelo_ctb_parser import (
+                parse_modelo_gb_ctb,
+                parse_modelo_sku_ctb,
+                parse_item_snapshot_for_gb_mapping,
+            )
+
+            if "gb" in saved:
+                try:
+                    gb_list = parse_item_snapshot_for_gb_mapping(saved["item"])
+                    gb_dict = parse_modelo_gb_ctb(saved["gb"], gb_list)
+                    ctb_gb.update(gb_dict)
+                    warnings.append(f"✅ GB CTB: parsed {len(gb_dict)} GB PNs from MP FrameModule ({os.path.basename(saved['gb'])})")
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return _json_error(f"Failed to parse GB CTB {os.path.basename(saved['gb'])}: {e}", 400)
+
+            if "sku" in saved:
+                try:
+                    sku_dict = parse_modelo_sku_ctb(saved["sku"])
+                    ctb_sku.update(sku_dict)
+                    warnings.append(f"✅ SKU CTB: parsed {len(sku_dict)} SKUs from {os.path.basename(saved['sku'])}")
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return _json_error(f"Failed to parse SKU CTB {os.path.basename(saved['sku'])}: {e}", 400)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return _json_error(f"Converter init failed: {e}", 500)
+
+        if not ctb_sku and not ctb_gb:
+            return _json_error("No CTB data extracted - check files format. GB needs MP FrameModule section, SKU needs SKU column.", 400)
+
+        # Collect all dates
+        all_dates_set = set()
+        for d in ctb_sku.values():
+            all_dates_set.update(d.keys())
+        for d in ctb_gb.values():
+            all_dates_set.update(d.keys())
+        all_dates = sorted(list(all_dates_set))
+
+        # Generate standard CTB.xlsx with 2 sheets
+        import openpyxl
+        wb = openpyxl.Workbook()
+        # SKU sheet
+        ws_sku = wb.active
+        ws_sku.title = "ctb_sku_cum"
+        # Header: SKU + dates
+        ws_sku.append(["SKU"] + all_dates)
+        for pn in sorted(ctb_sku.keys()):
+            row = [pn]
+            vals = ctb_sku[pn]
+            for d in all_dates:
+                row.append(vals.get(d, 0))
+            ws_sku.append(row)
+
+        # GB sheet
+        ws_gb = wb.create_sheet("ctb_gb_cum")
+        ws_gb.append(["PN"] + all_dates)
+        for pn in sorted(ctb_gb.keys()):
+            row = [pn]
+            vals = ctb_gb[pn]
+            for d in all_dates:
+                row.append(vals.get(d, 0))
+            ws_gb.append(row)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        warnings.append(f"📊 Generated standard CTB: {len(ctb_sku)} SKUs, {len(ctb_gb)} GBs, {len(all_dates)} dates")
+        warnings.append(f"💡 This CTB.xlsx can now be used in main Packout flow's CTB upload")
+
+        # Return Excel
+        return send_file(
+            buf,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"CTB_Standard_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(str(e), 500)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(tmp_extract_dir, ignore_errors=True)

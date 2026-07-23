@@ -122,12 +122,45 @@
         <div class="upload-card" id="card_fcst_detail" style="border-color:#f59e0b"><div class="upload-label">📁 FCST Detail <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">Required</span></div><div class="upload-hint">FCST_Detail.xlsx</div><input type="file" class="file-input" id="input_fcst_detail" accept=".xlsx"><div class="fname" id="fname_fcst_detail" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
         <div class="upload-card" id="card_gated"><div class="upload-label">📁 Gated Schedule <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">Gated_Schedule.xlsx</div><input type="file" class="file-input" id="input_gated" accept=".xlsx"><div class="fname" id="fname_gated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
         <div class="upload-card" id="card_ungated"><div class="upload-label">📁 Ungated Schedule <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">Ungated_Schedule.xlsx</div><input type="file" class="file-input" id="input_ungated" accept=".xlsx"><div class="fname" id="fname_ungated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ctb"><div class="upload-label">📁 CTB (Old) <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">CTB.xlsx (2 sheets)</div><input type="file" class="file-input" id="input_ctb" accept=".xlsx"><div class="fname" id="fname_ctb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ctb_gb_modelo" style="border-color:#10b981"><div class="upload-label">📁 GB CTB (MPM Modelo) <span style="font-size:9px;background:#dcfce7;color:#065f46;padding:1px 4px;border-radius:4px">New</span></div><div class="upload-hint">Modelo GB CTB Publish 0722.xlsx - MP FrameModule</div><input type="file" class="file-input" id="input_ctb_gb_modelo" accept=".xlsx"><div class="fname" id="fname_ctb_gb_modelo" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ctb_sku_modelo" style="border-color:#3b82f6"><div class="upload-label">📁 SKU CTB (MPM Modelo) <span style="font-size:9px;background:#dbeafe;color:#1e40af;padding:1px 4px;border-radius:4px">New</span></div><div class="upload-hint">Modelo SKU CTB Publish 0722.xlsx - has SKU PN</div><input type="file" class="file-input" id="input_ctb_sku_modelo" accept=".xlsx"><div class="fname" id="fname_ctb_sku_modelo" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_ctb"><div class="upload-label">📁 CTB <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">CTB.xlsx (2 sheets: ctb_sku_cum / ctb_gb_cum)</div><input type="file" class="file-input" id="input_ctb" accept=".xlsx"><div class="fname" id="fname_ctb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
       </div>
 
-      <div style="margin-top:8px;font-size:11px;color:#64748b">💡 4 Required + 5 Optional (CTB Old or Modelo GB/SKU) — optional files will show as empty if missing. Modelo GB needs mapping via 料号快照 Style/Color → GB PN. Modelo SKU has explicit SKU.</div>
+      <div style="margin-top:8px;font-size:11px;color:#64748b">💡 4 Required + 3 Optional — optional files will show as empty if missing</div>
+    </div>
+
+    <!-- ===== MPM CTB Converter (Expandable) ===== -->
+    <div class="section" id="ctb-converter-section" style="border:2px dashed #10b981;background:#f0fdf4;border-radius:8px">
+      <div class="section-header" style="cursor:pointer" onclick="document.getElementById('ctb-converter-body').style.display = document.getElementById('ctb-converter-body').style.display==='none' ? 'block' : 'none'">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="section-title">🛠️ MPM CTB Converter (Expandable)</span>
+          <span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">Convert Modelo GB/SKU CTB → Standard CTB.xlsx</span>
+        </div>
+        <div class="section-actions">
+          <span style="font-size:11px;color:#065f46">▼ Click to expand/collapse</span>
+        </div>
+      </div>
+      <div id="ctb-converter-body" style="display:none;padding:12px">
+        <div style="background:#fff;border:1px solid #bbf7d0;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#065f46">
+          <div style="font-weight:600;margin-bottom:4px">📌 上传 1. 料号表 2. MPM的CTB 2张表格，生成标准CTB格式</div>
+          <div>• <b>料号表</b>：`料号快照.xlsx` (含 GB-XXX 映射 Style/Color → GB PN)</div>
+          <div>• <b>GB CTB</b>：`Modelo GB CTB Publish 0722.xlsx` - 自动提取 MP FrameModule (下一个模块 MP Lens 之前的物料)，按 Style/Color 映射 GB</div>
+          <div>• <b>SKU CTB</b>：`Modelo SKU CTB Publish 0722.xlsx` - 有明确 SKU 料号</div>
+          <div>• 输出：`CTB.xlsx` (2 sheets: ctb_sku_cum / ctb_gb_cum) - 日期为列，PN为行，值为累计CTB</div>
+          <div style="margin-top:4px;color:#047857">💡 不需要在主流程支持MPM格式，通过此转换器生成标准CTB后再用于主流程</div>
+        </div>
+        <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div class="upload-card" id="card_conv_item" style="border-color:#f59e0b"><div class="upload-label">📁 料号表 <span class="req">*</span></div><div class="upload-hint">料号快照.xlsx - 用于 Style/Color→GB 映射</div><input type="file" class="file-input" id="input_conv_item" accept=".xlsx"><div class="fname" id="fname_conv_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+          <div class="upload-card" id="card_conv_gb" style="border-color:#10b981"><div class="upload-label">📁 GB CTB (MPM Modelo) <span style="font-size:9px;background:#dcfce7;color:#065f46;padding:1px 4px;border-radius:4px">MP FrameModule</span></div><div class="upload-hint">Modelo GB CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_gb" accept=".xlsx"><div class="fname" id="fname_conv_gb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+          <div class="upload-card" id="card_conv_sku" style="border-color:#3b82f6"><div class="upload-label">📁 SKU CTB (MPM Modelo)</div><div class="upload-hint">Modelo SKU CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_sku" accept=".xlsx"><div class="fname" id="fname_conv_sku" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid #bbf7d0;border-radius:8px">
+          <button id="btn-conv-generate" class="btn" style="background:#065f46;border-color:#065f46">▶ Generate Standard CTB.xlsx</button>
+          <span id="conv-status" style="font-size:12px;color:#065f46"></span>
+          <span id="conv-spinner" style="display:none;align-items:center;gap:6px;font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:3px 8px;border-radius:12px"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin:0"></span><span id="conv-spinner-text">Loading...</span></span>
+          <button id="btn-conv-clear" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444;margin-left:auto">🗑️ Clear</button>
+        </div>
+        <div id="conv-result" style="margin-top:10px;font-size:11px;color:#475569;display:none"></div>
+      </div>
     </div>
 
     <!-- ===== Config Section ===== -->

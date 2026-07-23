@@ -368,9 +368,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ===== Upload: Snapshot Only =====
 (function(){
-  // Snapshot keys, matching backend SNAPSHOT_TARGET_MAP (including new Modelo CTB)
-  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb','ctb_gb_modelo','ctb_sku_modelo'];
-  const files = { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, ctb_gb_modelo:null, ctb_sku_modelo:null, combined:[] };
+  // Snapshot keys, matching backend SNAPSHOT_TARGET_MAP - main flow only old CTB (7 files)
+  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
+  const files = { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
 
   function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
   function markHasFile(cardId, has){
@@ -394,19 +394,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (low.includes('主表')) return 'fcst_main';
     if (low.includes('明细')) return 'fcst_detail';
-    // New Modelo CTB detection - must check GB/SKU before generic CTB
     if (low.includes('ctb')) {
-      const isGb = low.includes('gb') && !low.includes('sku');
-      const isSku = low.includes('sku') && !low.includes('gb');
-      const isModelo = low.includes('modelo') || low.includes('publish');
-      if (isModelo) {
-        if (isGb) return 'ctb_gb_modelo';
-        if (isSku) return 'ctb_sku_modelo';
-        // If contains both or ambiguous, try to infer
-        if (low.includes('gb')) return 'ctb_gb_modelo';
-        if (low.includes('sku')) return 'ctb_sku_modelo';
-      }
-      // Generic old CTB
+      // Main flow only old CTB (2 sheets), Modelo handled in converter
       return 'ctb';
     }
     // fallback English
@@ -1460,3 +1449,117 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
 });
 
 
+
+// ===== MPM CTB Converter (Expandable) =====
+(function(){
+  const convFiles = { item: null, gb: null, sku: null };
+
+  function markConvFile(cardId, has){
+    const el = document.getElementById(cardId);
+    if(el) el.classList.toggle('has-file', !!has);
+  }
+
+  function updateConvFname(key, file){
+    const el = document.getElementById('fname_conv_'+key);
+    if(el) {
+      if(file) el.textContent = '✓ ' + file.name + ' (' + (file.size/1024).toFixed(1) + 'KB)';
+      else el.textContent = '';
+    }
+    markConvFile('card_conv_'+key, !!file);
+  }
+
+  ['item','gb','sku'].forEach(k=>{
+    const inp = document.getElementById('input_conv_'+k);
+    if(!inp) return;
+    inp.addEventListener('change', ()=>{
+      if(inp.files && inp.files[0]){
+        convFiles[k] = inp.files[0];
+        updateConvFname(k, inp.files[0]);
+      }else{
+        convFiles[k] = null;
+        updateConvFname(k, null);
+      }
+    });
+  });
+
+  document.getElementById('btn-conv-clear')?.addEventListener('click', ()=>{
+    if(!confirm('Clear MPM CTB Converter files?')) return;
+    convFiles.item=null; convFiles.gb=null; convFiles.sku=null;
+    ['item','gb','sku'].forEach(k=>{
+      const inp=document.getElementById('input_conv_'+k);
+      if(inp) inp.value='';
+      updateConvFname(k, null);
+    });
+    const status=document.getElementById('conv-status');
+    if(status) status.textContent='';
+    const result=document.getElementById('conv-result');
+    if(result){ result.style.display='none'; result.innerHTML=''; }
+    const spinner=document.getElementById('conv-spinner');
+    if(spinner) spinner.style.display='none';
+  });
+
+  document.getElementById('btn-conv-generate')?.addEventListener('click', async ()=>{
+    const btn=document.getElementById('btn-conv-generate');
+    const status=document.getElementById('conv-status');
+    const spinner=document.getElementById('conv-spinner');
+    const spinnerText=document.getElementById('conv-spinner-text');
+    const resultDiv=document.getElementById('conv-result');
+
+    if(!convFiles.item){
+      if(status) status.textContent='❌ Need 料号表 (Item Snapshot) for GB mapping';
+      return;
+    }
+    if(!convFiles.gb && !convFiles.sku){
+      if(status) status.textContent='❌ Need at least one: GB CTB or SKU CTB';
+      return;
+    }
+
+    btn.disabled=true; btn.textContent='⏳ Generating...';
+    if(spinner){ spinner.style.display='inline-flex'; if(spinnerText) spinnerText.textContent='Loading: converting...'; }
+    if(status) status.textContent='⏳ Processing - converting Modelo CTB to standard format...';
+    if(resultDiv){ resultDiv.style.display='none'; resultDiv.innerHTML=''; }
+
+    try{
+      const form=new FormData();
+      if(convFiles.item) form.append('conv_item', convFiles.item, convFiles.item.name);
+      if(convFiles.gb) form.append('conv_gb', convFiles.gb, convFiles.gb.name);
+      if(convFiles.sku) form.append('conv_sku', convFiles.sku, convFiles.sku.name);
+
+      const resp=await fetch('/api/plan_merge/ctb/convert', {method:'POST', body:form});
+      if(!resp.ok){
+        const txt=await resp.text();
+        let errMsg=txt;
+        try{ const j=JSON.parse(txt); errMsg=j.error||txt; }catch{}
+        throw new Error(errMsg);
+      }
+      const blob=await resp.blob();
+      const cd=resp.headers.get('Content-Disposition');
+      let fname='CTB_Standard_'+new Date().toISOString().slice(0,10)+'.xlsx';
+      if(cd){ const m=cd.match(/filename="?([^"]+)"?/); if(m) fname=m[1]; }
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=fname;
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+
+      if(status) status.textContent='✅ Generated: ' + fname + ' (' + (blob.size/1024).toFixed(1) + 'KB)';
+      if(resultDiv){
+        resultDiv.style.display='block';
+        resultDiv.innerHTML='<div style="background:#dcfce7;border:1px solid #86efac;padding:8px;border-radius:6px;color:#065f46">✅ Success - Standard CTB.xlsx generated<br>• Contains 2 sheets: ctb_sku_cum (SKU PN x dates) and ctb_gb_cum (GB PN x dates)<br>• GB mapped via 料号表 Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>• SKU has explicit SKU PN<br>• You can now use this file in main Packout upload as CTB.xlsx</div>';
+      }
+
+    }catch(e){
+      console.error('Converter failed', e);
+      if(status) status.textContent='❌ Failed: ' + e.message;
+      if(resultDiv){
+        resultDiv.style.display='block';
+        resultDiv.innerHTML='<div style="background:#fef2f2;border:1px solid #fecaca;padding:8px;border-radius:6px;color:#991b1b">❌ Failed: ' + (e.message||'error') + '</div>';
+      }
+    }finally{
+      btn.disabled=false; btn.textContent='▶ Generate Standard CTB.xlsx';
+      if(spinner) spinner.style.display='none';
+    }
+  });
+
+  console.log('✅ MPM CTB Converter initialized');
+})();
