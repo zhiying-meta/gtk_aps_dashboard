@@ -153,6 +153,48 @@ def _get_col_index(headers: List, target: str) -> int:
     return -1
 
 
+def _find_header_row(ws, expected_keywords, scan_rows=15):
+    """
+    Scan first scan_rows rows to find header row containing at least 2 expected keywords.
+    Returns (header_row_idx (1-based), headers list) or (1, first row headers) if not found.
+    Robust for files where header is not in row 1 (e.g., user file has title row or empty rows).
+    """
+    best = None
+    best_score = -1
+    best_headers = None
+    for r_idx in range(1, scan_rows + 1):
+        try:
+            row = next(ws.iter_rows(min_row=r_idx, max_row=r_idx, values_only=True), None)
+            if not row:
+                continue
+            # Clean row: strip and upper for matching, keep original for _get_col_index
+            cleaned = [str(c).strip() if c is not None else "" for c in row]
+            cleaned_upper = [c.upper() for c in cleaned]
+            # Count how many expected keywords appear (exact or case-insensitive)
+            score = 0
+            for kw in expected_keywords:
+                kw_up = kw.upper()
+                for c_up in cleaned_upper:
+                    if kw_up == c_up or kw_up in c_up or c_up in kw_up:
+                        score += 1
+                        break
+            if score > best_score:
+                best_score = score
+                best = r_idx
+                best_headers = list(row)
+        except Exception:
+            continue
+    # If best_score >=2, use it, else fallback to row 1
+    if best is not None and best_score >= 2:
+        return best, best_headers
+    # fallback row 1
+    try:
+        first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        return 1, list(first) if first else []
+    except Exception:
+        return 1, []
+
+
 # ---------- column defs ----------
 def get_col_defs(sched: List[ScheduleRow], bal: List[BalanceRow], col_dim: str) -> List[dict]:
     seen_date = {}
@@ -416,12 +458,13 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
 
     wb = openpyxl.load_workbook(mm_path, data_only=True, read_only=True)
     ws = wb[wb.sheetnames[0]]
-    headers = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+    # Robust header detection: scan first 15 rows for ITEM_NO / PRODUCT_CATEGORY
+    header_row_idx, headers = _find_header_row(ws, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE"])
     item_no_idx = _get_col_index(headers, "ITEM_NO")
     prod_cat_idx = _get_col_index(headers, "PRODUCT_CATEGORY")
     style_idx = _get_col_index(headers, "PRODUCT_STYLE")
     if item_no_idx < 0 or prod_cat_idx < 0:
-        raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers}")
+        raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers} (detected at row {header_row_idx})")
 
     item_to_cat, item_to_style = {}, {}
     fg_items, gb_items = [], []
@@ -433,7 +476,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     styles_by_cat = defaultdict(set)
     all_items_set = set()
 
-    for row in ws.iter_rows(min_row=2, values_only=True):
+    for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
         if not row or item_no_idx >= len(row) or prod_cat_idx >= len(row):
             continue
         item_raw, cat_raw = row[item_no_idx], row[prod_cat_idx]
@@ -490,7 +533,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
 
     wb2 = openpyxl.load_workbook(sched_path, data_only=True, read_only=True)
     ws2 = wb2[wb2.sheetnames[0]]
-    headers2 = list(next(ws2.iter_rows(min_row=1, max_row=1, values_only=True)))
+    sched_header_row_idx, headers2 = _find_header_row(ws2, ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE", "SHIFT_NAME"])
     line_idx = _get_col_index(headers2, "LINE_CODE")
     shift_idx = _get_col_index(headers2, "SHIFT_NAME")
     plan_item_idx = _get_col_index(headers2, "PLAN_ITEM")
@@ -515,7 +558,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     _sched_skip_no_date = 0
     _sched_kept = 0
 
-    for row in ws2.iter_rows(min_row=2, values_only=True):
+    for row in ws2.iter_rows(min_row=sched_header_row_idx + 1, values_only=True):
         _sched_total += 1
         if not row or len(row) <= max(line_idx, shift_idx, plan_item_idx, sku_idx, plan_date_idx, plan_val_idx):
             _sched_skip_no_sku += 1
@@ -607,14 +650,14 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
 
     wb3 = openpyxl.load_workbook(bal_path, data_only=True, read_only=True)
     ws3 = wb3[wb3.sheetnames[0]]
-    headers3 = list(next(ws3.iter_rows(min_row=1, max_row=1, values_only=True)))
+    bal_header_row_idx, headers3 = _find_header_row(ws3, ["PLAN_DATE", "ITEM_CODE", "BALANCE_QTY", "SHIFT_NAME"])
     bal_date_idx = _get_col_index(headers3, "PLAN_DATE")
     bal_shift_idx = _get_col_index(headers3, "SHIFT_NAME")
     bal_item_idx = _get_col_index(headers3, "ITEM_CODE")
     bal_qty_idx = _get_col_index(headers3, "BALANCE_QTY")
 
     bal_fg, bal_gb = [], []
-    for row in ws3.iter_rows(min_row=2, values_only=True):
+    for row in ws3.iter_rows(min_row=bal_header_row_idx + 1, values_only=True):
         if not row or len(row) <= max(bal_date_idx, bal_shift_idx, bal_item_idx, bal_qty_idx):
             continue
         item_raw = row[bal_item_idx]

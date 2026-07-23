@@ -355,42 +355,78 @@ def api_upload():
                     400,
                 )
             if total_sched == 0 and total_sched_all == 0:
-                # Try to give detailed debug info about schedule file
+                # Try to give detailed debug info about schedule file with robust header detection
                 debug_info = ""
                 try:
                     import openpyxl
                     sched_fp = os.path.join(tmp_dir, TARGET_MAP["schedule"])
                     wb_dbg = openpyxl.load_workbook(sched_fp, data_only=True, read_only=True)
                     ws_dbg = wb_dbg[wb_dbg.sheetnames[0]]
-                    headers_dbg = list(next(ws_dbg.iter_rows(min_row=1, max_row=1, values_only=True)))
-                    # Count raw rows
+                    sheet_names_dbg = wb_dbg.sheetnames
+                    # Robust header detection: scan first 15 rows for keywords
+                    expected = ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE"]
+                    best_row = 1
+                    best_score = -1
+                    best_headers = []
+                    for r_idx in range(1, 16):
+                        try:
+                            row_vals = next(ws_dbg.iter_rows(min_row=r_idx, max_row=r_idx, values_only=True), None)
+                            if not row_vals:
+                                continue
+                            cleaned = [str(c).strip().upper() if c else "" for c in row_vals]
+                            score = sum(1 for kw in expected if any(kw in c or c in kw for c in cleaned if c))
+                            if score > best_score:
+                                best_score = score
+                                best_row = r_idx
+                                best_headers = list(row_vals)
+                        except Exception:
+                            continue
+                    headers_dbg = best_headers
+                    # Count raw rows after header
                     raw_rows = 0
                     sample_skus = []
                     sample_plan_items = []
-                    for _r in ws_dbg.iter_rows(min_row=2, values_only=True):
+                    # Also count total rows in sheet (including empty) for diagnostics
+                    total_sheet_rows = 0
+                    for _r in ws_dbg.iter_rows(min_row=best_row + 1, values_only=True):
+                        total_sheet_rows += 1
+                        # Check if row is essentially empty
+                        if not _r or all(c is None or str(c).strip() == "" for c in _r):
+                            continue
                         raw_rows += 1
                         if raw_rows <= 5:
-                            # Try to guess SKU col is 3 (index 3) or find via header
                             try:
-                                sku_idx_dbg = headers_dbg.index("SKU") if "SKU" in headers_dbg else 3
-                            except Exception:
-                                sku_idx_dbg = 3
-                            try:
+                                # Find SKU col index dynamically
+                                sku_idx_dbg = -1
+                                for idx, h in enumerate(headers_dbg):
+                                    if h and str(h).strip().upper() == "SKU":
+                                        sku_idx_dbg = idx
+                                        break
+                                if sku_idx_dbg < 0:
+                                    sku_idx_dbg = 3
                                 if len(_r) > sku_idx_dbg and _r[sku_idx_dbg]:
-                                    sample_skus.append(str(_r[sku_idx_dbg])[:20])
+                                    sample_skus.append(str(_r[sku_idx_dbg])[:30])
                             except Exception:
                                 pass
                             try:
-                                pi_idx_dbg = headers_dbg.index("PLAN_ITEM") if "PLAN_ITEM" in headers_dbg else 2
+                                pi_idx_dbg = -1
+                                for idx, h in enumerate(headers_dbg):
+                                    if h and str(h).strip().upper() == "PLAN_ITEM":
+                                        pi_idx_dbg = idx
+                                        break
+                                if pi_idx_dbg < 0:
+                                    pi_idx_dbg = 2
                                 if len(_r) > pi_idx_dbg and _r[pi_idx_dbg]:
-                                    sample_plan_items.append(str(_r[pi_idx_dbg])[:15])
+                                    sample_plan_items.append(str(_r[pi_idx_dbg])[:20])
                             except Exception:
                                 pass
                         if raw_rows > 1000:
                             break
                     wb_dbg.close()
-                    debug_info = f" Raw schedule file: {raw_rows} rows, headers={headers_dbg}, sample SKUs={sample_skus[:5]}, sample PLAN_ITEMs={sample_plan_items[:5]}, master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: SKU may not match master (case insensitive now supported) or PLAN_DATE invalid or PLAN_ITEM not INPUT/OUTPUT/CHECKIN/CHECKOUT. Now engine supports case-insensitive SKU and PLAN_ITEM."
+                    debug_info = f" Raw file analysis: sheets={sheet_names_dbg}, detected header at row {best_row} (score {best_score}/5), headers={headers_dbg}, total data rows after header (non-empty)={raw_rows}, total scanned={total_sheet_rows}, sample SKUs={sample_skus[:5]}, sample PLAN_ITEMs={sample_plan_items[:5]}, master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: If header is ['PLAN_ITEM'] only, file may have wrong sheet or only 1 column - check file is valid xlsx with 6 columns. Engine now supports case-insensitive SKU/PLAN_ITEM and header row auto-detect."
                 except Exception as de:
+                    import traceback
+                    traceback.print_exc()
                     debug_info = f" debug failed: {de}"
                 return _json_error(
                     f"validation failed: 0 schedule rows. Check 排产结果表.xlsx has LINE_CODE, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, PLAN_DATE, PLAN_VALUE and SKU exists in master. {debug_info}",
