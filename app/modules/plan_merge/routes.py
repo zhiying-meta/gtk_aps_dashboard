@@ -610,9 +610,16 @@ def process():
             missing_required.append(SNAPSHOT_TARGET_MAP["bom"])
 
         if missing_required:
-            existing_names = [f"{os.path.basename(p)} ({os.path.getsize(p)} bytes)" for p in final_files]
+            existing_names = [f"{os.path.basename(p)} ({os.path.getsize(p)} bytes, {round(os.path.getsize(p)/1024,1)}KB)" for p in final_files]
+            detected_list = []
+            for k, v in file_map.items():
+                try:
+                    sz = os.path.getsize(v)
+                    detected_list.append(f"{k}:{os.path.basename(v)}({round(sz/1024,1)}KB)")
+                except:
+                    detected_list.append(f"{k}:{os.path.basename(v)}")
             return _json_error(
-                f"Missing required files {missing_required}, got {existing_names}. Need at least 料号快照.xlsx and BOM快照.xlsx. Optional: gated/ungated/FCST/CTB will be empty if not provided.",
+                f"Missing required files {missing_required}. Detected {len(file_map)} files: {', '.join(detected_list)}. All uploaded files: {existing_names}. Need at least 料号快照.xlsx and BOM快照.xlsx. Optional: gated/ungated/FCST/CTB will be empty if not provided. Tip: Ensure filenames contain keywords like 料号, BOM, gated, ungated, FCST, CTB or use exact names {list(SNAPSHOT_TARGET_MAP.values())}.",
                 400,
             )
 
@@ -669,8 +676,10 @@ def process():
                 continue
 
         if invalid_files:
+            all_files_info = [f"{os.path.basename(p)} ({os.path.getsize(p)} bytes, {round(os.path.getsize(p)/1024,1)}KB) – {p}" for p in final_files]
+            detected_info = [f"{k}:{os.path.basename(v)} ({round(os.path.getsize(v)/1024,1)}KB)" for k, v in file_map.items() if os.path.exists(v)]
             return _json_error(
-                f"Invalid snapshot files detected: {invalid_files}. Please ensure all files are valid .xlsx (not 0 bytes, not corrupted, not .xls). If you uploaded a zip, ensure it contains xlsx files.",
+                f"Invalid snapshot files detected: {invalid_files}. Detected files: {detected_info}. All uploaded: {all_files_info}. Please ensure all files are valid .xlsx (not 0 bytes, not corrupted, not .xls, not truncated). If you uploaded a zip, ensure it contains xlsx files. Tip: Try re-saving files as .xlsx in Excel, check file sizes, or upload via zip. For truncated files (EOFError), re-upload and ensure network completes.",
                 400,
             )
 
