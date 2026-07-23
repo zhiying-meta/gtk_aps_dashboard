@@ -419,17 +419,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if(files.combined.length===1){
         const f=files.combined[0];
         const isZip=f.name.toLowerCase().endsWith('.zip');
-        const hint=isZip?'📦 Zip':'📄 File';
-        comboEl.textContent=`✓ ${hint}: ${f.name} (${(f.size/1024).toFixed(1)}KB) — auto-classified`;
+        const hint=isZip?'📦 Zip':'📄';
+        comboEl.textContent=`✓ ${hint}: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
       }else{
-        comboEl.textContent=`✓ ${files.combined.length} files: `+files.combined.map(f=>f.name).join(', ');
+        const names = files.combined.slice(0,3).map(f=>f.name).join(', ');
+        const more = files.combined.length>3 ? ` +${files.combined.length-3} more` : '';
+        comboEl.textContent=`✓ ${files.combined.length} files: ${names}${more}`;
       }
       markHasFile('card_combined',true);
     }else{
-      // if no combined, show summary of individual slots filled
       const filled=SNAPSHOT_KEYS.filter(k=>!!files[k]);
       if(filled.length>0){
-        comboEl.textContent=`📦 ${filled.length}/7 slots filled: `+filled.join(', ');
+        comboEl.textContent=`📦 ${filled.length}/7: `+filled.join(', ');
         markHasFile('card_combined',false);
       }else{
         comboEl.textContent='';
@@ -530,11 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const filled=SNAPSHOT_KEYS.filter(k=>!!files[k]).length;
     const ce=document.getElementById('fname_combined');
     if(ce){
-      if(filled>=2){
-        ce.textContent=`✓ Auto-distributed ${selected.length} files → ${filled}/7 slots filled (${SNAPSHOT_KEYS.filter(k=>!!files[k]).join(', ')})`;
-      }else{
-        ce.textContent=`✓ ${selected.length} files selected, classified ${filled}/7`;
-      }
+      ce.textContent=`✓ ${selected.length} files → ${filled}/7`;
     }
     markHasFile('card_combined',true);
     updateCombinedDisplay();

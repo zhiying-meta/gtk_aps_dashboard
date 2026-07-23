@@ -110,20 +110,22 @@
 
       <div style="font-size:11px;color:#94a3b8;margin:6px 0;text-align:center">— or upload individually (7 files) —</div>
 
-      <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-        <div class="upload-card" id="card_item"><div class="upload-label">📁 料号快照 <span class="req">*</span></div><div class="upload-hint">料号快照.xlsx</div><input type="file" class="file-input" id="input_item" accept=".xlsx"><div class="fname" id="fname_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_bom"><div class="upload-label">📁 BOM快照 <span class="req">*</span></div><div class="upload-hint">BOM快照.xlsx</div><input type="file" class="file-input" id="input_bom" accept=".xlsx"><div class="fname" id="fname_bom" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_gated"><div class="upload-label">📁 Gated排产</div><div class="upload-hint">gated排产结果表.xlsx</div><input type="file" class="file-input" id="input_gated" accept=".xlsx"><div class="fname" id="fname_gated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ungated"><div class="upload-label">📁 Ungated排产</div><div class="upload-hint">ungated排产结果表.xlsx</div><input type="file" class="file-input" id="input_ungated" accept=".xlsx"><div class="fname" id="fname_ungated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_fcst_main"><div class="upload-label">📁 FCST主表</div><div class="upload-hint">FCST主表.xlsx</div><input type="file" class="file-input" id="input_fcst_main" accept=".xlsx"><div class="fname" id="fname_fcst_main" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_fcst_detail"><div class="upload-label">📁 FCST明细</div><div class="upload-hint">FCST明细表.xlsx</div><input type="file" class="file-input" id="input_fcst_detail" accept=".xlsx"><div class="fname" id="fname_fcst_detail" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ctb"><div class="upload-label">📁 CTB</div><div class="upload-hint">CTB.xlsx (2 sheets)</div><input type="file" class="file-input" id="input_ctb" accept=".xlsx"><div class="fname" id="fname_ctb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px">
+        <div style="font-weight:600;color:#065f46;margin-bottom:4px">📌 必需 (4)：料号快照、BOM快照、FCST主表、FCST明细表 <span style="color:#dc2626">* 必须，缺一不可</span></div>
+        <div style="color:#475569">○ 可选 (3)：Gated排产、Ungated排产、CTB — 有则显示数值，无则显示空</div>
       </div>
 
-      <div style="margin-top:8px;font-size:11px;color:#64748b">
-        💡 支持 一键多选/zip/文件夹 自动识别分类。仅保留快照导入，demo也是快照zip。<br>
-        映射：料号快照→sku_attrs, BOM快照→GB映射, gated/ungated→OUTPUT聚合, FCST主+明细→ExF, CTB直通。
+      <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+        <div class="upload-card" id="card_item" style="border-color:#f59e0b"><div class="upload-label">📁 料号快照 <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">必须</span></div><div class="upload-hint">料号快照.xlsx</div><input type="file" class="file-input" id="input_item" accept=".xlsx"><div class="fname" id="fname_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_bom" style="border-color:#f59e0b"><div class="upload-label">📁 BOM快照 <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">必须</span></div><div class="upload-hint">BOM快照.xlsx</div><input type="file" class="file-input" id="input_bom" accept=".xlsx"><div class="fname" id="fname_bom" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_fcst_main" style="border-color:#f59e0b"><div class="upload-label">📁 FCST主表 <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">必须</span></div><div class="upload-hint">FCST主表.xlsx</div><input type="file" class="file-input" id="input_fcst_main" accept=".xlsx"><div class="fname" id="fname_fcst_main" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_fcst_detail" style="border-color:#f59e0b"><div class="upload-label">📁 FCST明细 <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">必须</span></div><div class="upload-hint">FCST明细表.xlsx</div><input type="file" class="file-input" id="input_fcst_detail" accept=".xlsx"><div class="fname" id="fname_fcst_detail" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_gated"><div class="upload-label">📁 Gated排产 <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">可选</span></div><div class="upload-hint">gated排产结果表.xlsx</div><input type="file" class="file-input" id="input_gated" accept=".xlsx"><div class="fname" id="fname_gated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_ungated"><div class="upload-label">📁 Ungated排产 <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">可选</span></div><div class="upload-hint">ungated排产结果表.xlsx</div><input type="file" class="file-input" id="input_ungated" accept=".xlsx"><div class="fname" id="fname_ungated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+        <div class="upload-card" id="card_ctb"><div class="upload-label">📁 CTB <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">可选</span></div><div class="upload-hint">CTB.xlsx</div><input type="file" class="file-input" id="input_ctb" accept=".xlsx"><div class="fname" id="fname_ctb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
       </div>
+
+      <div style="margin-top:8px;font-size:11px;color:#64748b">💡 4 必需 + 3 可选，可选缺失则对应数值显示空</div>
     </div>
 
     <!-- ===== Config Section ===== -->
