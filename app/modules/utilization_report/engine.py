@@ -57,16 +57,30 @@ def _norm_date(s):
         return str(s).strip()
 
 def _load_calendar_df(path: str) -> pd.DataFrame:
-    df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
-    # Expected columns
-    needed = {'LINE_CODE','PLAN_DATE','SHIFT_NAME','PLAN_TYPE','PLAN_VALUE','PLAN_ITEM'}
-    cols = set(df.columns.astype(str))
-    # Normalize column names (strip)
+    try:
+        df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
+    except EOFError as e:
+        # Truncated/corrupted file (as seen in user report)
+        raise ValueError(f"Calendar file {path} is corrupted/truncated (EOFError). Please re-upload a valid xlsx. The file may have been incompletely uploaded (network interrupted) or is not a valid Excel. Original error: {e}")
+    except Exception as e:
+        # Catch BadZipFile, openpyxl errors etc.
+        err_str = str(e).lower()
+        if "eof" in err_str or "truncated" in err_str or "not a zip file" in err_str or "badzipfile" in err_str or "file is not a zip file" in err_str:
+            raise ValueError(f"Calendar file {path} is corrupted/invalid xlsx: {e}. Please re-upload. Ensure file is .xlsx (not .xls, not 0 bytes) and upload completed (check file size).")
+        raise
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
 def _load_schedule_df(path: str) -> pd.DataFrame:
-    df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
+    try:
+        df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
+    except EOFError as e:
+        raise ValueError(f"Schedule file {path} is corrupted/truncated (EOFError). Please re-upload a valid xlsx. The file may have been incompletely uploaded. Original error: {e}")
+    except Exception as e:
+        err_str = str(e).lower()
+        if "eof" in err_str or "truncated" in err_str or "not a zip file" in err_str or "badzipfile" in err_str or "file is not a zip file" in err_str:
+            raise ValueError(f"Schedule file {path} is corrupted/invalid xlsx: {e}. Please re-upload. Ensure file is .xlsx and upload completed.")
+        raise
     df.columns = [str(c).strip() for c in df.columns]
     return df
 

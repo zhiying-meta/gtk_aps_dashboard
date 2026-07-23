@@ -470,6 +470,43 @@ def api_upload():
             except:
                 return False
 
+        def _is_valid_xlsx_deep(p):
+            """Deep validation: try to open with zipfile + openpyxl to catch truncated files (EOFError)"""
+            try:
+                if not os.path.exists(p) or os.path.getsize(p) < 100:
+                    return False, "File too small or not exists"
+                # Check PK header first
+                with open(p, 'rb') as fh:
+                    if fh.read(2) != b'PK':
+                        return False, "Not a zip/xlsx (no PK header)"
+                # Try zipfile
+                import zipfile
+                try:
+                    with zipfile.ZipFile(p, 'r') as zf:
+                        # Try to list and read central directory
+                        namelist = zf.namelist()
+                        if not namelist:
+                            return False, "Empty zip"
+                except Exception as e:
+                    return False, f"Bad zip: {e}"
+                # Try openpyxl read_only to catch EOFError as in user report
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+                    # Try to read at least sheet names
+                    _ = wb.sheetnames
+                    wb.close()
+                except EOFError as e:
+                    return False, f"Truncated/corrupted (EOFError): {e} — file may have been incompletely uploaded"
+                except Exception as e:
+                    err = str(e).lower()
+                    if "eof" in err or "truncated" in err or "not a zip" in err or "badzip" in err:
+                        return False, f"Corrupted xlsx ({e})"
+                    # For other openpyxl errors, still consider valid if zip ok (let pandas handle later)
+                return True, "OK"
+            except Exception as e:
+                return False, f"Validation failed: {e}"
+
         def _extract_zip_to_tmp(zip_path, out_dir):
             extracted = []
             try:
@@ -730,11 +767,18 @@ def api_upload():
                         break
             detailed_files[ver] = ver_files
 
+            # Deep validate files before copying to avoid truncated file causing EOFError later (user reported EOFError)
             if cal_path:
+                ok, msg = _is_valid_xlsx_deep(cal_path)
+                if not ok:
+                    return _json_error(f"Calendar file {os.path.basename(cal_path)} is corrupted/invalid: {msg}. Please re-upload a valid xlsx. Ensure upload completed (file not truncated) and file is .xlsx not .xls. Details: calendar={cal_path}", 400)
                 dest = os.path.join(persist_dir, "工作日历快照.xlsx")
                 shutil.copyfile(cal_path, dest)
                 any_saved = True
             if sched_path:
+                ok, msg = _is_valid_xlsx_deep(sched_path)
+                if not ok:
+                    return _json_error(f"Schedule file {os.path.basename(sched_path)} is corrupted/invalid: {msg}. Please re-upload a valid xlsx. Ensure upload completed (file not truncated). Details: schedule={sched_path}", 400)
                 dest = os.path.join(persist_dir, "排产结果表.xlsx")
                 shutil.copyfile(sched_path, dest)
                 any_saved = True
@@ -768,7 +812,27 @@ def api_upload():
                 except Exception as ve:
                     import traceback
                     traceback.print_exc()
-                    results[ver] = {"ready": False, "error": str(ve), "files": ver_files, "detected": f"❌ {ver} failed: {ve}"}
+                    # Check if error is due to corrupted file (EOFError, BadZipFile)
+                    err_str = str(ve).lower()
+                    is_corrupt = any(kw in err_str for kw in ["eof", "truncated", "badzip", "not a zip", "corrupted", "invalid"])
+                    if is_corrupt:
+                        # Try to clean up corrupted persist files to allow re-upload
+                        try:
+                            # Optionally remove corrupted files? Keep for debugging but suggest clear
+                            # For safety, don't auto-delete, just mark as error with suggestion
+                            pass
+                        except:
+                            pass
+                        results[ver] = {
+                            "ready": False,
+                            "error": str(ve),
+                            "files": ver_files,
+                            "detected": f"❌ {ver} failed due to corrupted file: {ve} — Please clear and re-upload. Files may be truncated (network interrupted) or not valid xlsx. Try: 1) Clear (Both Not Ready) 2) Re-upload via zip 3) Ensure files are .xlsx not .xls and upload completes.",
+                            "corrupted": True,
+                            "suggestion": "Clear and re-upload"
+                        }
+                    else:
+                        results[ver] = {"ready": False, "error": str(ve), "files": ver_files, "detected": f"❌ {ver} failed: {ve}"}
             else:
                 has_cal = os.path.exists(cal_persist)
                 has_sched = os.path.exists(sched_persist)
