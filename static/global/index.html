@@ -146,8 +146,22 @@
           <div>• <b>GB CTB</b>：`Modelo GB CTB Publish 0722.xlsx` - 自动提取 MP FrameModule (下一个模块 MP Lens 之前的物料)，按 Style/Color 映射 GB</div>
           <div>• <b>SKU CTB</b>：`Modelo SKU CTB Publish 0722.xlsx` - 有明确 SKU 料号</div>
           <div>• 输出：`CTB.xlsx` (2 sheets: ctb_sku_cum / ctb_gb_cum) - 日期为列，PN为行，值为累计CTB</div>
-          <div style="margin-top:4px;color:#047857">💡 不需要在主流程支持MPM格式，通过此转换器生成标准CTB后再用于主流程</div>
+          <div style="margin-top:4px;color:#047857">💡 不需要在主流程支持MPM格式，通过此转换器生成标准CTB后再用于主流程。支持多文件/文件夹批量上传，自动分类。</div>
         </div>
+        <!-- Quick Upload for Converter: multi-file + folder -->
+        <div class="upload-card" id="card_conv_combined" style="border:2px dashed #10b981;background:#f0fdf4;margin-bottom:10px">
+          <div class="upload-label">⚡ Quick Upload Converter <span style="font-size:10px;background:#065f46;color:#fff;padding:1px 6px;border-radius:8px">Recommended · Auto-classify</span></div>
+          <div class="upload-hint">Select 3 files at once, or pick folder containing them - auto-distributes to 料号表/GB CTB/SKU CTB</div>
+          <input type="file" class="file-input" id="input_conv_combined" accept=".xlsx" multiple style="display:none">
+          <input type="file" class="file-input" id="input_conv_combined_folder" accept=".xlsx" multiple webkitdirectory style="display:none">
+          <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+            <button class="btn btn-sm" id="btn-conv-select-files" style="background:#065f46;border-color:#065f46">📂 Select Files</button>
+            <button class="btn btn-sm btn-outline" id="btn-conv-select-folder">📁 Select Folder</button>
+            <span style="font-size:11px;color:#065f46;display:flex;align-items:center">Supports: multi-file, folder, auto-classify by keywords (料号, GB, SKU, CTB, Modelo)</span>
+          </div>
+          <div class="fname" id="fname_conv_combined" style="font-size:11px;color:#065f46;margin-top:6px;min-height:16px"></div>
+        </div>
+        <div style="font-size:11px;color:#94a3b8;margin:6px 0;text-align:center">— or upload individually —</div>
         <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
           <div class="upload-card" id="card_conv_item" style="border-color:#f59e0b"><div class="upload-label">📁 料号表 <span class="req">*</span></div><div class="upload-hint">料号快照.xlsx - 用于 Style/Color→GB 映射</div><input type="file" class="file-input" id="input_conv_item" accept=".xlsx"><div class="fname" id="fname_conv_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_conv_gb" style="border-color:#10b981"><div class="upload-label">📁 GB CTB (MPM Modelo) <span style="font-size:9px;background:#dcfce7;color:#065f46;padding:1px 4px;border-radius:4px">MP FrameModule</span></div><div class="upload-hint">Modelo GB CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_gb" accept=".xlsx"><div class="fname" id="fname_conv_gb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>

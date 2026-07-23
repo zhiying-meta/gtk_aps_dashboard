@@ -1450,9 +1450,9 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
 
 
 
-// ===== MPM CTB Converter (Expandable) =====
+// ===== MPM CTB Converter (Expandable) - supports multi-file and folder upload =====
 (function(){
-  const convFiles = { item: null, gb: null, sku: null };
+  const convFiles = { item: null, gb: null, sku: null, combined: [] };
 
   function markConvFile(cardId, has){
     const el = document.getElementById(cardId);
@@ -1468,6 +1468,85 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
     markConvFile('card_conv_'+key, !!file);
   }
 
+  function classifyConvFile(name){
+    const low=(name||'').toLowerCase();
+    if(low.includes('料号') || low.includes('item') ){
+      // Check if it's item snapshot (料号快照)
+      if(low.includes('料号') || low.includes('item')) return 'item';
+    }
+    if(low.includes('ctb')){
+      const isGb = low.includes('gb') && !low.includes('sku');
+      const isSku = low.includes('sku') && !low.includes('gb');
+      const isModelo = low.includes('modelo') || low.includes('publish');
+      if(isModelo){
+        if(isGb) return 'gb';
+        if(isSku) return 'sku';
+        if(low.includes('gb')) return 'gb';
+        if(low.includes('sku')) return 'sku';
+      }
+      // Generic CTB - try to infer GB vs SKU by name, fallback to both?
+      if(isGb) return 'gb';
+      if(isSku) return 'sku';
+      // If just CTB without GB/SKU, treat as unknown, let user assign? For converter, we can try both?
+      // We'll treat generic CTB as maybe both? But for simplicity, if contains CTB and not Modelo, we can't know - return null and let auto logic try
+      // For backward compat, if file name contains GB, treat as GB, else SKU
+      if(low.includes('gb')) return 'gb';
+      if(low.includes('sku')) return 'sku';
+      return null;
+    }
+    if(low.includes('modelo')){
+      if(low.includes('gb')) return 'gb';
+      if(low.includes('sku')) return 'sku';
+    }
+    if(low.includes('gb')) return 'gb';
+    if(low.includes('sku')) return 'sku';
+    return null;
+  }
+
+  function updateCombinedDisplay(){
+    const el=document.getElementById('fname_conv_combined');
+    if(!el) return;
+    const all=[...convFiles.combined];
+    if(all.length===0){
+      el.textContent='';
+      markConvFile('card_conv_combined', false);
+      return;
+    }
+    const names=all.slice(0,3).map(f=>f.name).join(', ');
+    const more=all.length>3?` +${all.length-3} more`:'';
+    el.textContent=`✓ ${all.length} files: ${names}${more} (auto-distributed)`;
+    markConvFile('card_conv_combined', true);
+  }
+
+  function distributeFiles(fileList){
+    // fileList is array of File objects
+    const unclassified=[];
+    fileList.forEach(f=>{
+      const cls=classifyConvFile(f.name);
+      if(cls && !convFiles[cls]){
+        convFiles[cls]=f;
+        updateConvFname(cls, f);
+      }else if(cls && convFiles[cls]){
+        // Already have one, push to unclassified to try other slot or keep as combined
+        unclassified.push(f);
+      }else{
+        unclassified.push(f);
+      }
+    });
+    // Fill remaining empty slots with unclassified
+    for(const k of ['item','gb','sku']){
+      if(!convFiles[k] && unclassified.length>0){
+        const f=unclassified.shift();
+        convFiles[k]=f;
+        updateConvFname(k,f);
+      }
+    }
+    // Whatever left, keep as combined for display
+    convFiles.combined = fileList.slice();
+    updateCombinedDisplay();
+  }
+
+  // Individual inputs
   ['item','gb','sku'].forEach(k=>{
     const inp = document.getElementById('input_conv_'+k);
     if(!inp) return;
@@ -1475,6 +1554,11 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
       if(inp.files && inp.files[0]){
         convFiles[k] = inp.files[0];
         updateConvFname(k, inp.files[0]);
+        // If individual changed, clear combined display
+        convFiles.combined = [];
+        const ce=document.getElementById('fname_conv_combined');
+        if(ce) ce.textContent='';
+        markConvFile('card_conv_combined', false);
       }else{
         convFiles[k] = null;
         updateConvFname(k, null);
@@ -1482,14 +1566,56 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
     });
   });
 
+  // Quick upload - Select Files
+  const inputCombined=document.getElementById('input_conv_combined');
+  const btnSelectFiles=document.getElementById('btn-conv-select-files');
+  if(btnSelectFiles && inputCombined){
+    btnSelectFiles.addEventListener('click', ()=> inputCombined.click());
+    inputCombined.addEventListener('change', ()=>{
+      const selected=Array.from(inputCombined.files||[]);
+      if(selected.length===0) return;
+      // Clear individual first
+      ['item','gb','sku'].forEach(k=>{
+        convFiles[k]=null;
+        updateConvFname(k,null);
+      });
+      convFiles.combined=[];
+      distributeFiles(selected);
+    });
+  }
+
+  // Quick upload - Select Folder (webkitdirectory)
+  const inputFolder=document.getElementById('input_conv_combined_folder');
+  const btnSelectFolder=document.getElementById('btn-conv-select-folder');
+  if(btnSelectFolder && inputFolder){
+    btnSelectFolder.addEventListener('click', ()=> inputFolder.click());
+    inputFolder.addEventListener('change', ()=>{
+      const selected=Array.from(inputFolder.files||[]).filter(f=> f.name.toLowerCase().endsWith('.xlsx') && !f.name.startsWith('~$'));
+      if(selected.length===0) return;
+      ['item','gb','sku'].forEach(k=>{
+        convFiles[k]=null;
+        updateConvFname(k,null);
+      });
+      convFiles.combined=[];
+      distributeFiles(selected);
+    });
+  }
+
   document.getElementById('btn-conv-clear')?.addEventListener('click', ()=>{
     if(!confirm('Clear MPM CTB Converter files?')) return;
-    convFiles.item=null; convFiles.gb=null; convFiles.sku=null;
+    convFiles.item=null; convFiles.gb=null; convFiles.sku=null; convFiles.combined=[];
     ['item','gb','sku'].forEach(k=>{
       const inp=document.getElementById('input_conv_'+k);
       if(inp) inp.value='';
       updateConvFname(k, null);
     });
+    const inpC=document.getElementById('input_conv_combined');
+    if(inpC) inpC.value='';
+    const inpF=document.getElementById('input_conv_combined_folder');
+    if(inpF) inpF.value='';
+    const ce=document.getElementById('fname_conv_combined');
+    if(ce) ce.textContent='';
+    markConvFile('card_conv_combined', false);
     const status=document.getElementById('conv-status');
     if(status) status.textContent='';
     const result=document.getElementById('conv-result');
