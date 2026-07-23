@@ -195,6 +195,59 @@ def _find_header_row(ws, expected_keywords, scan_rows=15):
         return 1, []
 
 
+def _find_best_sheet_and_header(wb, expected_keywords, scan_rows=15):
+    """
+    Search all sheets in workbook for best header match.
+    Returns (sheet_name, ws, header_row_idx, headers, score)
+    """
+    best_overall = None
+    best_score_overall = -1
+    best_info = None
+    for sheet_name in wb.sheetnames:
+        try:
+            ws = wb[sheet_name]
+            # For each sheet, find best header
+            header_idx, headers = _find_header_row(ws, expected_keywords, scan_rows=scan_rows)
+            # Compute score for this header
+            if not headers:
+                continue
+            cleaned = [str(c).strip().upper() if c else "" for c in headers]
+            score = 0
+            for kw in expected_keywords:
+                kw_up = kw.upper()
+                for c_up in cleaned:
+                    if kw_up == c_up or kw_up in c_up:
+                        score += 1
+                        break
+            # Also consider if sheet has data rows after header
+            # Count non-empty rows after header (up to 5)
+            data_rows = 0
+            try:
+                for _r in ws.iter_rows(min_row=header_idx + 1, max_row=header_idx + 10, values_only=True):
+                    if _r and any(c is not None and str(c).strip() != "" for c in _r):
+                        data_rows += 1
+            except Exception:
+                data_rows = 0
+            # Prefer sheets with more data rows if score equal
+            combined_score = score * 100 + data_rows
+            if combined_score > best_score_overall:
+                best_score_overall = combined_score
+                best_overall = sheet_name
+                best_info = (ws, header_idx, headers, score, data_rows)
+        except Exception:
+            continue
+    if best_info:
+        ws, header_idx, headers, score, data_rows = best_info
+        return best_overall, ws, header_idx, headers, score
+    # fallback to first sheet
+    try:
+        ws = wb[wb.sheetnames[0]]
+        header_idx, headers = _find_header_row(ws, expected_keywords, scan_rows=scan_rows)
+        return wb.sheetnames[0], ws, header_idx, headers, 0
+    except Exception:
+        return None, None, 1, [], 0
+
+
 # ---------- column defs ----------
 def get_col_defs(sched: List[ScheduleRow], bal: List[BalanceRow], col_dim: str) -> List[dict]:
     seen_date = {}
@@ -457,14 +510,14 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         raise FileNotFoundError(f"料号主表.xlsx not found in {data_dir}")
 
     wb = openpyxl.load_workbook(mm_path, data_only=True, read_only=True)
-    ws = wb[wb.sheetnames[0]]
-    # Robust header detection: scan first 15 rows for ITEM_NO / PRODUCT_CATEGORY
-    header_row_idx, headers = _find_header_row(ws, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE"])
+    # Search best sheet for master: supports file with multiple sheets, pick best match
+    best_sheet, ws, header_row_idx, headers, _score = _find_best_sheet_and_header(wb, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE"])
+    print(f"[IO] Master: best sheet={best_sheet}, header_row={header_row_idx}, score={_score}, headers={headers}")
     item_no_idx = _get_col_index(headers, "ITEM_NO")
     prod_cat_idx = _get_col_index(headers, "PRODUCT_CATEGORY")
     style_idx = _get_col_index(headers, "PRODUCT_STYLE")
     if item_no_idx < 0 or prod_cat_idx < 0:
-        raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers} (detected at row {header_row_idx})")
+        raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers} (detected at row {header_row_idx} in sheet {best_sheet}, score={_score})")
 
     item_to_cat, item_to_style = {}, {}
     fg_items, gb_items = [], []
@@ -532,8 +585,8 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         raise FileNotFoundError(f"排产结果表.xlsx not found in {data_dir}")
 
     wb2 = openpyxl.load_workbook(sched_path, data_only=True, read_only=True)
-    ws2 = wb2[wb2.sheetnames[0]]
-    sched_header_row_idx, headers2 = _find_header_row(ws2, ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE", "SHIFT_NAME"])
+    sched_best_sheet, ws2, sched_header_row_idx, headers2, sched_score = _find_best_sheet_and_header(wb2, ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE", "SHIFT_NAME"])
+    print(f"[IO] Schedule: best sheet={sched_best_sheet}, header_row={sched_header_row_idx}, score={sched_score}/6, headers={headers2}")
     line_idx = _get_col_index(headers2, "LINE_CODE")
     shift_idx = _get_col_index(headers2, "SHIFT_NAME")
     plan_item_idx = _get_col_index(headers2, "PLAN_ITEM")
@@ -649,8 +702,8 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         raise FileNotFoundError(f"结存表.xlsx not found in {data_dir}")
 
     wb3 = openpyxl.load_workbook(bal_path, data_only=True, read_only=True)
-    ws3 = wb3[wb3.sheetnames[0]]
-    bal_header_row_idx, headers3 = _find_header_row(ws3, ["PLAN_DATE", "ITEM_CODE", "BALANCE_QTY", "SHIFT_NAME"])
+    bal_best_sheet, ws3, bal_header_row_idx, headers3, bal_score = _find_best_sheet_and_header(wb3, ["PLAN_DATE", "ITEM_CODE", "BALANCE_QTY", "SHIFT_NAME"])
+    print(f"[IO] Balance: best sheet={bal_best_sheet}, header_row={bal_header_row_idx}, score={bal_score}/4, headers={headers3}")
     bal_date_idx = _get_col_index(headers3, "PLAN_DATE")
     bal_shift_idx = _get_col_index(headers3, "SHIFT_NAME")
     bal_item_idx = _get_col_index(headers3, "ITEM_CODE")

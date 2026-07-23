@@ -355,75 +355,79 @@ def api_upload():
                     400,
                 )
             if total_sched == 0 and total_sched_all == 0:
-                # Try to give detailed debug info about schedule file with robust header detection
+                # Try to give detailed debug info about schedule file with robust header detection across all sheets
                 debug_info = ""
                 try:
                     import openpyxl
                     sched_fp = os.path.join(tmp_dir, TARGET_MAP["schedule"])
                     wb_dbg = openpyxl.load_workbook(sched_fp, data_only=True, read_only=True)
-                    ws_dbg = wb_dbg[wb_dbg.sheetnames[0]]
                     sheet_names_dbg = wb_dbg.sheetnames
-                    # Robust header detection: scan first 15 rows for keywords
                     expected = ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE"]
-                    best_row = 1
-                    best_score = -1
-                    best_headers = []
-                    for r_idx in range(1, 16):
+                    # Analyze all sheets
+                    all_sheet_analysis = []
+                    best_overall = {"sheet": None, "row": 1, "score": -1, "headers": [], "raw_rows": 0, "total_scanned": 0, "sample_skus": [], "sample_pis": []}
+                    for sname in sheet_names_dbg:
                         try:
-                            row_vals = next(ws_dbg.iter_rows(min_row=r_idx, max_row=r_idx, values_only=True), None)
-                            if not row_vals:
-                                continue
-                            cleaned = [str(c).strip().upper() if c else "" for c in row_vals]
-                            score = sum(1 for kw in expected if any(kw in c or c in kw for c in cleaned if c))
-                            if score > best_score:
-                                best_score = score
-                                best_row = r_idx
-                                best_headers = list(row_vals)
-                        except Exception:
-                            continue
-                    headers_dbg = best_headers
-                    # Count raw rows after header
-                    raw_rows = 0
-                    sample_skus = []
-                    sample_plan_items = []
-                    # Also count total rows in sheet (including empty) for diagnostics
-                    total_sheet_rows = 0
-                    for _r in ws_dbg.iter_rows(min_row=best_row + 1, values_only=True):
-                        total_sheet_rows += 1
-                        # Check if row is essentially empty
-                        if not _r or all(c is None or str(c).strip() == "" for c in _r):
-                            continue
-                        raw_rows += 1
-                        if raw_rows <= 5:
-                            try:
-                                # Find SKU col index dynamically
-                                sku_idx_dbg = -1
-                                for idx, h in enumerate(headers_dbg):
-                                    if h and str(h).strip().upper() == "SKU":
-                                        sku_idx_dbg = idx
-                                        break
-                                if sku_idx_dbg < 0:
-                                    sku_idx_dbg = 3
-                                if len(_r) > sku_idx_dbg and _r[sku_idx_dbg]:
-                                    sample_skus.append(str(_r[sku_idx_dbg])[:30])
-                            except Exception:
-                                pass
-                            try:
-                                pi_idx_dbg = -1
-                                for idx, h in enumerate(headers_dbg):
-                                    if h and str(h).strip().upper() == "PLAN_ITEM":
-                                        pi_idx_dbg = idx
-                                        break
-                                if pi_idx_dbg < 0:
-                                    pi_idx_dbg = 2
-                                if len(_r) > pi_idx_dbg and _r[pi_idx_dbg]:
-                                    sample_plan_items.append(str(_r[pi_idx_dbg])[:20])
-                            except Exception:
-                                pass
-                        if raw_rows > 1000:
-                            break
+                            ws = wb_dbg[sname]
+                            # Find best header row in this sheet
+                            best_row = 1
+                            best_score = -1
+                            best_headers = []
+                            for r_idx in range(1, 16):
+                                try:
+                                    row_vals = next(ws.iter_rows(min_row=r_idx, max_row=r_idx, values_only=True), None)
+                                    if not row_vals:
+                                        continue
+                                    cleaned = [str(c).strip().upper() if c else "" for c in row_vals]
+                                    score = sum(1 for kw in expected if any(kw in c for c in cleaned if c))
+                                    if score > best_score:
+                                        best_score = score
+                                        best_row = r_idx
+                                        best_headers = list(row_vals)
+                                except Exception:
+                                    continue
+                            # Count data rows after header
+                            raw_rows = 0
+                            total_scanned = 0
+                            sample_skus = []
+                            sample_pis = []
+                            first_few_rows = []
+                            for _r in ws.iter_rows(min_row=best_row + 1, max_row=best_row + 20, values_only=True):
+                                total_scanned += 1
+                                if _r:
+                                    first_few_rows.append([str(c)[:20] if c is not None else "" for c in _r[:6]])
+                                if not _r or all(c is None or str(c).strip() == "" for c in _r):
+                                    continue
+                                raw_rows += 1
+                                if raw_rows <= 3:
+                                    try:
+                                        sku_idx = -1
+                                        for idx, h in enumerate(best_headers):
+                                            if h and str(h).strip().upper() == "SKU":
+                                                sku_idx = idx
+                                                break
+                                        if sku_idx >=0 and len(_r) > sku_idx and _r[sku_idx]:
+                                            sample_skus.append(str(_r[sku_idx])[:30])
+                                    except Exception:
+                                        pass
+                                    try:
+                                        pi_idx = -1
+                                        for idx, h in enumerate(best_headers):
+                                            if h and str(h).strip().upper() == "PLAN_ITEM":
+                                                pi_idx = idx
+                                                break
+                                        if pi_idx >=0 and len(_r) > pi_idx and _r[pi_idx]:
+                                            sample_pis.append(str(_r[pi_idx])[:20])
+                                    except Exception:
+                                        pass
+                            all_sheet_analysis.append(f"Sheet '{sname}': header_row={best_row} score={best_score}/5 headers={best_headers[:6]} row_count_after_header={raw_rows} first_rows={first_few_rows[:2]}")
+                            # Track best overall
+                            if best_score > best_overall["score"] or (best_score == best_overall["score"] and raw_rows > best_overall["raw_rows"]):
+                                best_overall = {"sheet": sname, "row": best_row, "score": best_score, "headers": best_headers, "raw_rows": raw_rows, "total_scanned": total_scanned, "sample_skus": sample_skus, "sample_pis": sample_pis}
+                        except Exception as se:
+                            all_sheet_analysis.append(f"Sheet '{sname}': error {se}")
                     wb_dbg.close()
-                    debug_info = f" Raw file analysis: sheets={sheet_names_dbg}, detected header at row {best_row} (score {best_score}/5), headers={headers_dbg}, total data rows after header (non-empty)={raw_rows}, total scanned={total_sheet_rows}, sample SKUs={sample_skus[:5]}, sample PLAN_ITEMs={sample_plan_items[:5]}, master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: If header is ['PLAN_ITEM'] only, file may have wrong sheet or only 1 column - check file is valid xlsx with 6 columns. Engine now supports case-insensitive SKU/PLAN_ITEM and header row auto-detect."
+                    debug_info = f" Sheets={sheet_names_dbg}. Best={best_overall}. All analysis: {' | '.join(all_sheet_analysis)}. Master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: If best header is ['PLAN_ITEM'] only with 0 rows, file is invalid - please download template from /api/io/templates/template and check columns. Your uploaded file appears to have only header and no data rows. Please ensure file is not filtered, not empty, and has 6 columns."
                 except Exception as de:
                     import traceback
                     traceback.print_exc()
