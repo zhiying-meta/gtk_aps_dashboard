@@ -116,7 +116,7 @@ function handleProcessedData(data, fileName, isClient){
   const fileInput = document.querySelector('.file-input');
   const card = fileInput ? fileInput.closest('.upload-card') : null;
   if (card) card.classList.add('has-file');
-  _lastLoadedInfo = { fileName, rows:allRows.length, time:timeStr, msg:successMsg, fileMsg };
+  _lastLoadedInfo = { fileName, rows:allRows.length, time:timeStr, msg:`Ready: ${allRows.length} rows`, fileMsg: fileName };
   saveLoadStatus(_lastLoadedInfo);
 
   const savedFilter={};
