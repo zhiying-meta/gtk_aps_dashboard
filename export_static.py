@@ -46,7 +46,7 @@ def is_plan_merge_file(path: Path):
     if name.startswith("~$") or name.startswith("."):
         return False
     lower = name.lower()
-    # Snapshot files should be allowed (IO-style snapshot-only)
+    # Snapshot files should be allowed (snapshot-only)
     snapshot_keywords = ["料号快照", "bom快照", "gated排产", "ungated排产", "fcst主表", "fcst明细", "ctb.xlsx", "fcst"]
     for kw in snapshot_keywords:
         if kw in lower:

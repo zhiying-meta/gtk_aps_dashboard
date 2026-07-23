@@ -96,16 +96,11 @@ function loadIOLoadStatus(){
   return null;
 }
 function getStatusBadgeHTML(){
-  const info = loadIOLoadStatus();
   const st = _lastStatus;
   if(st && st.loaded){
-    const fg = st.fg||0, gb = st.gb||0;
-    const time = info && info.time ? new Date(info.time).toLocaleString() : '';
-    return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">✅ Ready: ${fg} FG / ${gb} GB ${time? '· '+esc(time):''}</span>`;
-  }else if(info){
-    return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">✅ Last: ${esc(info.fg||0)} FG / ${esc(info.gb||0)} GB · ${esc(info.timeStr||'') || 'ready'}</span>`;
+    return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">Ready</span>`;
   }else{
-    return `<span style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:2px 8px;border-radius:12px;font-size:11px">No data loaded</span>`;
+    return `<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
   }
 }
 async function render(){
@@ -329,15 +324,18 @@ function attachUploadLogic(isCompact){
   document.getElementById('uploadBtn_'+suffix)?.addEventListener('click', async ()=>{
     const prog=document.getElementById('uploadProgress_'+suffix);
     const btn=document.getElementById('uploadBtn_'+suffix);
-    btn.disabled=true; btn.textContent='Uploading...'; if(prog) prog.textContent='⏳ Processing...';
+    const badgeEl = document.getElementById('ioStatusBadge_'+suffix);
+    const allSel = [...(files.combined||[]), files.master, files.schedule, files.balance].filter(Boolean);
+    const fileListShort = allSel.map(f=>f.name).join(', ').slice(0,100);
+    btn.disabled=true; btn.textContent='Uploading...';
+    if(prog) prog.textContent=`Loading: ${fileListShort}`;
+    if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px;font-size:11px">Loading: ${fileListShort}</span>`;
     const form=new FormData();
     if(files.combined && files.combined.length>0){
-      // One-click mode: append all combined files, backend will auto-classify and handle zip/combined
       files.combined.forEach((f,i)=>{
         form.append('file_'+i, f);
         form.append('combined_'+i, f);
       });
-      // Also append first file as generic 'file' for combined xlsx detection
       if(files.combined.length===1){
         form.append('combined', files.combined[0]);
         form.append('file', files.combined[0]);
@@ -353,21 +351,20 @@ function attachUploadLogic(isCompact){
         const info = { fg: result.fg||0, gb: result.gb||0, time: now.toISOString(), timeStr: now.toLocaleString() };
         saveIOLoadStatus(info);
         try{ _lastStatus = { loaded:true, ok:true, fg: result.fg, gb: result.gb }; }catch{}
-        if(prog) prog.innerHTML=`<span style="color:#059669">✅ Loaded: ${result.fg||0} FG, ${result.gb||0} GB — Ready, entering reports...</span>`;
-        // update persistent badges immediately
-        const badgeCompact = document.getElementById('ioStatusBadge_compact');
-        const badgeFull = document.getElementById('ioStatusBadge_full');
-        const msgCompact = document.getElementById('ioPersistentMsg_compact');
-        const msgFull = document.getElementById('ioPersistentMsg_full');
-        const htmlBadge = getStatusBadgeHTML();
-        if(badgeCompact) badgeCompact.innerHTML = htmlBadge;
-        if(badgeFull) badgeFull.innerHTML = htmlBadge;
-        if(msgCompact) msgCompact.textContent = `✅ Loaded ${info.fg} FG / ${info.gb} GB at ${info.timeStr} — Ready to use`;
-        if(msgFull) msgFull.textContent = `✅ Loaded ${info.fg} FG / ${info.gb} GB at ${info.timeStr} — Ready to use`;
-        setTimeout(()=>{ renderReportsPage(); }, 900);
+        if(badgeEl) badgeEl.innerHTML=`<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">Ready</span>`;
+        if(prog) prog.textContent='';
+        setTimeout(()=>{ renderReportsPage(); }, 600);
       }
-      else{ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${result.error||JSON.stringify(result)}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
-    }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; btn.disabled=false; btn.textContent='▶ Upload & Analyze'; }
+      else{
+        if(prog) prog.textContent=`Failed: ${result.error||'error'}`;
+        if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
+        btn.disabled=false; btn.textContent='▶ Upload & Analyze';
+      }
+    }catch(e){
+      if(prog) prog.textContent=`Failed: ${e.message}`;
+      if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
+      btn.disabled=false; btn.textContent='▶ Upload & Analyze';
+    }
   });
   document.getElementById('btnRetryLoad_'+suffix)?.addEventListener('click', async ()=>{ const ok=await checkStatus(); if(ok) renderReportsPage(); else alert('No valid data'); });
   document.getElementById('btnClearIO_'+suffix)?.addEventListener('click', async ()=>{
@@ -560,15 +557,12 @@ function renderUploadPage(){ ioRoot.innerHTML=buildUploadSectionHTML(false); att
 
 function renderReportsPage(){
   const _badge = getStatusBadgeHTML();
-  const _info = loadIOLoadStatus();
-  const _persistText = _lastStatus && _lastStatus.loaded ? `✅ Ready: ${_lastStatus.fg||0} FG / ${_lastStatus.gb||0} GB — You can drag dimensions and view reports` : (_info ? `✅ Last loaded: ${_info.fg||0} FG / ${_info.gb||0} GB at ${_info.timeStr||''} — Ready` : '✅ Data loaded — Ready to use');
   ioRoot.innerHTML = buildUploadSectionHTML(true) + `
     <div class="section" id="io-main-section">
       <div class="section-header">
         <div style="display:flex;align-items:center;gap:12px">
           <span class="section-title">📈 I/O Report</span>
           <span id="ioMainStatusBadge">${_badge}</span>
-          <span id="ioMainPersistent" style="font-size:11px;color:#059669;font-weight:500">${_persistText}</span>
         </div>
         <div class="section-actions"><button id="io-dl-all" class="btn btn-sm btn-outline">📥 Download All</button><button id="io-reset-groups" class="btn btn-sm btn-outline">↺ Reset</button><button id="io-clear-all" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button><button id="io-download-static" class="btn btn-sm btn-outline">📥 Download Static HTML</button></div>
       </div>
@@ -648,22 +642,14 @@ function initReportsPage(){
   // allData = null; // removed to preserve
   renderDimWell(); initDimDragDrop();
   refreshMeta().then(()=> loadAllReports());
-  // persistent status: refresh badge from API and show ready message
+  // Refresh badges only - single status
   (async()=>{
     try{
-      const st = await getFullStatus();
+      await getFullStatus();
       const badge = document.getElementById('ioMainStatusBadge');
-      const persist = document.getElementById('ioMainPersistent');
       const upBadge = document.getElementById('ioStatusBadge_compact');
-      const upMsg = document.getElementById('ioPersistentMsg_compact');
       if(badge) badge.innerHTML = getStatusBadgeHTML();
       if(upBadge) upBadge.innerHTML = getStatusBadgeHTML();
-      if(persist && st && st.loaded){
-        persist.textContent = `✅ Ready: ${st.fg||0} FG / ${st.gb||0} GB — Drag dimensions (Line/PN/Style) to start`;
-      }
-      if(upMsg && st && st.loaded){
-        upMsg.textContent = `✅ Data ready: ${st.fg||0} FG / ${st.gb||0} GB — You can now use the reports below. This status persists.`;
-      }
     }catch{}
   })();
   document.getElementById('ioRefreshBtn')?.addEventListener('click', loadAllReports);

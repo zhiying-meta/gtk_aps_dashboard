@@ -101,29 +101,18 @@ function handleProcessedData(data, fileName, isClient){
   document.getElementById('report-section').style.display='block';
   pivotExpanded = new Set();
   const timeStr = new Date().toLocaleTimeString();
-  const usedOffset = data.config ? data.config.etd_packout_offset : document.getElementById('cfg-etd-packout-offset')?.value;
-  const successMsg = `${isClient ? '🖥️' : '✅'} Loaded: ${fileName} — ${allRows.length} rows | ETD offset=${usedOffset}d ${isClient ? '(client)' : ''}`;
-  const fileMsg = `${isClient ? '🖥️' : '✅'} Loaded: ${fileName} (${allRows.length} rows) — ${timeStr} | ETD offset=${usedOffset}d`;
-  const statusEl = document.getElementById('upload-status');
-  if (statusEl) statusEl.textContent = successMsg;
-  const fnMain = document.getElementById('file-name-main');
-  if (fnMain){
-    fnMain.textContent=fileMsg;
-    fnMain.className='file-name success';
-  }
-  const fnCombined = document.getElementById('fname_combined');
-  if (fnCombined){
-    fnCombined.textContent=fileMsg;
-  }
+  // Single status: Ready
   const pmBadge = document.getElementById('pmStatusBadge');
   if (pmBadge){
-    pmBadge.textContent=`✅ Ready: ${allRows.length} rows`;
+    pmBadge.textContent=`Ready: ${allRows.length} rows`;
     pmBadge.style.background='#dcfce7'; pmBadge.style.color='#065f46'; pmBadge.style.borderColor='#86efac';
   }
   const pmMsg = document.getElementById('pmPersistentMsg');
-  if (pmMsg){
-    pmMsg.textContent=`✅ Loaded ${allRows.length} rows at ${timeStr} — Ready`;
-  }
+  if (pmMsg){ pmMsg.textContent=''; }
+  const statusEl = document.getElementById('upload-status');
+  if (statusEl) statusEl.textContent = '';
+  const fnMain = document.getElementById('file-name-main');
+  if (fnMain){ fnMain.textContent=''; fnMain.className='file-name'; }
   const fileInput = document.querySelector('.file-input');
   const card = fileInput ? fileInput.closest('.upload-card') : null;
   if (card) card.classList.add('has-file');
@@ -363,14 +352,11 @@ function loadLastStatus() {
 function restoreLoadStatusUI() {
   const info = loadLastStatus();
   if (!info) return;
-  const statusEl = document.getElementById('upload-status');
-  const fnEl = document.getElementById('file-name-main');
-  if (statusEl && info.msg) statusEl.textContent = info.msg;
-  if (fnEl && info.fileMsg) {
-    fnEl.textContent = info.fileMsg;
-    fnEl.className = 'file-name success';
-    const card = document.querySelector('.upload-card');
-    if (card) card.classList.add('has-file');
+  // Simplified: only show Ready badge, no duplicate file messages
+  const badge = document.getElementById('pmStatusBadge');
+  if (badge && info.rows){
+    badge.textContent = `Ready: ${info.rows} rows`;
+    badge.style.background='#dcfce7'; badge.style.color='#065f46'; badge.style.borderColor='#86efac';
   }
 }
 // Restore on DOM ready
@@ -649,27 +635,25 @@ if (modal) {
 // ===== Generate — Snapshot Only =====
 document.getElementById('btn-generate').addEventListener('click', async () => {
   const btn = document.getElementById('btn-generate');
+  const pmBadge = document.getElementById('pmStatusBadge');
   const status = document.getElementById('upload-status');
-  btn.disabled = true; status.textContent = '⏳ Processing snapshot...';
+  const pmMsg = document.getElementById('pmPersistentMsg');
+  btn.disabled = true;
+  if (status) status.textContent = '';
+  if (pmMsg) pmMsg.textContent = '';
 
   const snapFilesObj = window._pmSnapshotFiles || { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
   const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
 
-  // Collect all snapshot files from individual slots + combined
   let allFiles = [];
   SNAPSHOT_KEYS.forEach(k=>{
     if(snapFilesObj[k]) allFiles.push(snapFilesObj[k]);
   });
-  // If combined has files that are not already in individual slots, add them (for zip or unclassified)
   if(snapFilesObj.combined && snapFilesObj.combined.length>0){
-    // Check if combined files contain files not in individual
-    // If individual slots already filled from combined, avoid duplicate by name, but server handles dedup
-    // For simplicity, if individual slots count < combined length, use combined list as primary
     const individualCount = SNAPSHOT_KEYS.filter(k=>!!snapFilesObj[k]).length;
     if(individualCount===0){
       allFiles = snapFilesObj.combined.slice();
     }else if(individualCount < snapFilesObj.combined.length){
-      // Merge both, dedup by name
       const names = new Set(allFiles.map(f=>f.name));
       snapFilesObj.combined.forEach(f=>{
         if(!names.has(f.name)) allFiles.push(f);
@@ -678,7 +662,10 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   }
 
   if(allFiles.length===0){
-    status.textContent='❌ Please select snapshot files (料号快照, BOM快照, gated/ungated, FCST, CTB) via Quick Upload or individual slots';
+    if (pmBadge){
+      pmBadge.textContent='Not Ready';
+      pmBadge.style.background='#fef2f2'; pmBadge.style.color='#991b1b'; pmBadge.style.borderColor='#fecaca';
+    }
     btn.disabled=false;
     return;
   }
@@ -689,8 +676,12 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
   const totalSize = allFiles.reduce((s,f)=>s+f.size,0);
   const totalSizeKB = (totalSize/1024).toFixed(1);
-  console.log(`[Generate] Snapshot-only mode: ${allFiles.length} files, ${totalSizeKB}KB — ${allFiles.map(f=>f.name).join(', ')}`);
-  status.textContent=`📂 Snapshot mode: ${allFiles.length} files (${totalSizeKB}KB) — server engine...`;
+  const fileListShort = allFiles.map(f=>f.name).join(', ').slice(0,120);
+  console.log(`[Generate] ${allFiles.length} files, ${totalSizeKB}KB — ${fileListShort}`);
+  if (pmBadge){
+    pmBadge.textContent=`Loading: ${fileListShort}${allFiles.length>3?'...':''} (${totalSizeKB}KB)`;
+    pmBadge.style.background='#fef3c7'; pmBadge.style.color='#92400e'; pmBadge.style.borderColor='#fde68a';
+  }
 
   try{
     const form = new FormData();
@@ -705,7 +696,6 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     const offsetEl=document.getElementById('cfg-etd-packout-offset');
     if(offsetEl) form.append('etd_packout_offset', offsetEl.value);
 
-    status.textContent=`⏳ Server processing snapshot (${allFiles.length} files, ${totalSizeKB}KB)...`;
     const resp=await fetch('/api/process', {method:'POST', body:form});
     const text=await resp.text();
     let data;
@@ -714,39 +704,15 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
     const names=allFiles.map(f=>f.name).join(', ');
     handleProcessedData(data, `Snapshot(${allFiles.length} files: ${names.slice(0,120)}...)`, false);
-
-    // Update persistent status
-    const pmBadge=document.getElementById('pmStatusBadge');
-    if(pmBadge) pmBadge.textContent=`✅ Ready: ${allFiles.length} files | ${data.rows?.length||0} rows`;
-    const pmMsg=document.getElementById('pmPersistentMsg');
-    if(pmMsg) pmMsg.textContent=`✅ Loaded ${allFiles.length} files at ${new Date().toLocaleTimeString()} — Ready`;
-
-    status.textContent=`✅ Done (snapshot server) — ${allFiles.length} files, ${allRows.length} rows | ${totalSizeKB}KB | ${data.warnings? data.warnings[0]:''}`;
     document.getElementById('loading').style.display='none';
     btn.disabled=false;
   }catch(e){
     console.error('Snapshot generate failed', e);
-    let msg = e.message||'Unknown error';
-    let hint = '';
-    if(msg.includes('Failed to fetch')){
-      hint = ' — Server not reachable. Check server running on http://localhost:8502 (run ./run.sh), or files too large causing server crash. Try: 1) Restart server ./run.sh --reset 2) Upload zip instead of many xlsx 3) Check server logs in /tmp/server.log. Attempting status check...';
-      // Try to ping status to confirm server alive
-      try{
-        fetch('/api/plan_merge/status').then(r=>r.json()).then(j=>{
-          status.textContent = `⚠️ Server alive but snapshot failed: ${msg}${hint} | Status: ${JSON.stringify(j).slice(0,200)}`;
-        }).catch(()=>{
-          status.textContent = `❌ Snapshot failed: ${msg}${hint} — status endpoint also unreachable, server likely down. Please run ./run.sh`;
-        });
-      }catch{}
-    }else{
-      status.textContent=`❌ Snapshot failed: ${msg}${hint}`;
+    if (pmBadge){
+      pmBadge.textContent='Not Ready';
+      pmBadge.style.background='#fef2f2'; pmBadge.style.color='#991b1b'; pmBadge.style.borderColor='#fecaca';
     }
-    if(!msg.includes('Failed to fetch')){
-      status.textContent=`❌ Snapshot failed: ${msg}${hint}`;
-      try{ alert(`Snapshot failed: ${msg}\n${hint}\n\nCheck: server running? files valid xlsx? Try zip upload or ./run.sh --reset`); }catch{}
-    }else{
-      try{ alert(`Snapshot failed: ${msg}${hint}\n\nPossible fixes:\n- Server down: run ./run.sh\n- Files too large: try zip\n- Check /tmp/server.log\n- Try demo zip first`); }catch{}
-    }
+    if (status) status.textContent=`Failed: ${e.message}`;
     btn.disabled=false; document.getElementById('loading').style.display='none';
   }
 });
@@ -774,9 +740,16 @@ function clearPackout(clearMsg) {
     const warnEl = document.getElementById('upload-warnings');
     if(warnEl){ warnEl.style.display='none'; warnEl.innerHTML=''; }
     const statusEl = document.getElementById('upload-status');
-    if(statusEl) statusEl.textContent='🗑️ Cleared — Not Ready, re-upload supported';
+    if(statusEl) statusEl.textContent='';
     const reportStatus = document.getElementById('report-status');
     if(reportStatus) reportStatus.textContent='';
+    const pmBadge2 = document.getElementById('pmStatusBadge');
+    if(pmBadge2){
+      pmBadge2.textContent='Not Ready';
+      pmBadge2.style.background='#fef2f2'; pmBadge2.style.color='#991b1b'; pmBadge2.style.borderColor='#fecaca';
+    }
+    const pmMsg2 = document.getElementById('pmPersistentMsg');
+    if(pmMsg2) pmMsg2.textContent='';
     // Clear localStorage
     try{
       localStorage.removeItem('plan_merge_last_load');

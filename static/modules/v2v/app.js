@@ -75,21 +75,8 @@ function clearV2VStorage() {
 function updateRestoreBanner() {
   const banner = document.getElementById('v2v-restore-banner');
   if (!banner) return;
-  try {
-    const saved = localStorage.getItem('v2v_last_compare');
-    if (saved) {
-      const d = JSON.parse(saved);
-      if (d.jobId) {
-        banner.style.display = 'flex';
-        banner.innerHTML = `<div>💾 Last comparison saved: <b>${esc(d.versionAName||'Prev')} vs ${esc(d.versionBName||'Latest')}</b> | Job ${d.jobId.slice(0,6)} | ${new Date(d.timestamp).toLocaleString()} | 
-          <button class="btn btn-sm" onclick="tryRestoreV2VFromStorage(true)" style="margin-left:8px;background:#0f172a;color:white">🔄 Restore</button>
-          <button class="btn btn-sm" onclick="clearV2VStorage(); document.getElementById('v2v-restore-banner').style.display='none'" style="background:#f1f5f9">✕ Clear</button>
-        </div><div style="font-size:11px;color:#64748b">Auto-saved to prevent loss on touchpad swipe/refresh. Will auto-restore on page load.</div>`;
-        return;
-      }
-    }
-    banner.style.display = 'none';
-  } catch(e) { if (banner) banner.style.display='none'; }
+  // Simplified: hide banner to avoid duplicate status display
+  banner.style.display = 'none';
 }
 
 async function tryRestoreV2VFromStorage(force=false) {
@@ -115,7 +102,7 @@ async function tryRestoreV2VFromStorage(force=false) {
 
     const statusEl = document.getElementById('v2v-status');
     if (statusEl && !v2vState.jobId) {
-      statusEl.innerHTML = `<div class="v2v-status info">🔄 Found saved comparison <b>${esc(saved.versionAName||'Prev')} vs ${esc(saved.versionBName||'Latest')}</b> from ${new Date(saved.timestamp).toLocaleString()} - Attempting to restore...</div>`;
+      statusEl.innerHTML = `<div class="v2v-status info">Loading: ${esc(saved.versionAName||'Prev')} vs ${esc(saved.versionBName||'Latest')}</div>`;
     }
 
     // Try to fetch existing job
@@ -146,7 +133,7 @@ async function tryRestoreV2VFromStorage(force=false) {
         const selA = document.getElementById('v2v-server-a'); if (selA && saved.a_path) { try { selA.value = saved.a_path; } catch(e){} }
         const selB = document.getElementById('v2v-server-b'); if (selB && saved.b_path) { try { selB.value = saved.b_path; } catch(e){} }
         handleCompareResult(fakeData);
-        if (statusEl) statusEl.innerHTML = `<div class="v2v-status success">✅ Restored previous comparison: <b>${esc(saved.versionAName)} vs ${esc(saved.versionBName)}</b> | Job ${saved.jobId.slice(0,6)} (from localStorage, survives swipe/refresh)</div>`;
+        if (statusEl) statusEl.innerHTML = `<div class="v2v-status success">Ready</div>`;
         updateRestoreBanner();
         return;
       }
@@ -154,9 +141,8 @@ async function tryRestoreV2VFromStorage(force=false) {
       console.log('Fetch existing job failed, will re-compare', e);
     }
 
-    // If job not found (server restarted or expired), re-compare using saved paths
     console.log('Job not in memory, re-comparing using saved paths', saved.a_path, saved.b_path);
-    if (statusEl) statusEl.innerHTML = `<div class="v2v-status info">⏳ Previous job expired (server restarted), re-comparing saved versions <b>${esc(saved.versionAName)} vs ${esc(saved.versionBName)}</b>...</div>`;
+    if (statusEl) statusEl.innerHTML = `<div class="v2v-status info">Loading: ${esc(saved.versionAName||'Prev')} vs ${esc(saved.versionBName||'Latest')}</div>`;
     const resp = await fetch('/v2v/api/compare', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -164,18 +150,17 @@ async function tryRestoreV2VFromStorage(force=false) {
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-    // Restore filters before handle
     v2vState.filters = saved.filters || v2vState.filters;
     v2vState.granularity = saved.granularity || 'week';
     v2vState.activeTable = saved.activeTable || 'bom';
     handleCompareResult(data);
-    if (statusEl) statusEl.innerHTML = `<div class="v2v-status success">✅ Re-compared and restored: <b>${esc(saved.versionAName)} vs ${esc(saved.versionBName)}</b> | New Job ${data.job_id.slice(0,6)} (auto-restored after swipe/refresh)</div>`;
+    if (statusEl) statusEl.innerHTML = `<div class="v2v-status success">Ready</div>`;
     updateRestoreBanner();
 
   } catch(e) {
     console.log('Restore failed', e);
     const statusEl = document.getElementById('v2v-status');
-    if (statusEl) statusEl.innerHTML = `<div class="v2v-status warn">⚠️ Could not restore previous comparison: ${e.message} - Please re-select versions and Compare again</div>`;
+    if (statusEl) statusEl.innerHTML = `<div class="v2v-status warn">Not Ready</div>`;
     updateRestoreBanner();
   }
 }
@@ -598,18 +583,18 @@ function setupV2VServerVersions() {
 
 async function compareServerVersions(aPath,bPath){
   const statusEl=document.getElementById('v2v-status'); const btn=document.getElementById('v2v-btn-load-server');
-  if(statusEl) statusEl.innerHTML='<div class="v2v-status info">⏳ Comparing server folders...</div>';
-  if(btn){ btn.disabled=true; btn.textContent='⏳ Comparing...'; }
+  const shortA = aPath.split('/').pop(); const shortB = bPath.split('/').pop();
+  if(statusEl) statusEl.innerHTML=`<div class="v2v-status info">Loading: ${esc(shortA)} vs ${esc(shortB)}</div>`;
+  if(btn){ btn.disabled=true; btn.textContent='Loading...'; }
   try{
     const resp=await fetch('/v2v/api/compare',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({a_path:aPath,b_path:bPath,granularity:v2vState.granularity})});
     const data=await resp.json(); if(data.error) throw new Error(data.error);
-    // Save paths for persistence
     v2vState.a_path = aPath;
     v2vState.b_path = bPath;
     v2vState.versionAName = aPath.split('/').pop();
     v2vState.versionBName = bPath.split('/').pop();
     handleCompareResult(data);
-  }catch(e){ if(statusEl) statusEl.innerHTML=`<div class="v2v-status error">❌ ${e.message}</div>`; }
+  }catch(e){ if(statusEl) statusEl.innerHTML=`<div class="v2v-status error">Not Ready: ${esc(e.message)}</div>`; }
   finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Compare'; } }
 }
 
@@ -624,7 +609,7 @@ function handleCompareResult(data){
     if (!v2vState.versionBName && data.folders.b) v2vState.versionBName = data.folders.b.split('/').pop();
   }
   const statusEl=document.getElementById('v2v-status');
-  if(statusEl){ statusEl.innerHTML=`<div class="v2v-status success">✅ Compare completed! Job: ${data.job_id} | Tables: ${Object.keys(data.summary).length} | Saved automatically (survives refresh/swipe)</div>`; }
+  if(statusEl){ statusEl.innerHTML=`<div class="v2v-status success">Ready: ${Object.keys(data.summary).length} tables</div>`; }
   const summarySection=document.getElementById('v2v-summary-section'); if(summarySection) summarySection.style.display='block';
   renderSummaryCards(data);
   const detailSection=document.getElementById('v2v-detail-section'); if(detailSection) detailSection.style.display='block';

@@ -1,6 +1,6 @@
 """
-Plan Merge Routes — Snapshot Only (IO report style)
-ExF vs ETD vs Packout vs CTB — only snapshot import, reference IO report implementation.
+Plan Merge Routes — Snapshot Only
+ExF vs ETD vs Packout vs CTB — only snapshot import.
 """
 import io
 import os
