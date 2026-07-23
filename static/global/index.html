@@ -6,6 +6,9 @@
 <title>Production Plan Review</title>
 <link rel="stylesheet" href="/static/global/style.css">
 <link rel="stylesheet" href="/static/modules/plan_merge/style.css">
+<link rel="stylesheet" href="/static/modules/io_report/style.css">
+<link rel="stylesheet" href="/static/modules/utilization/style.css">
+<link rel="stylesheet" href="/static/modules/v2v/style.css">
 </head>
 <body>
 <div class="app-layout">
@@ -48,17 +51,20 @@
 
       <!-- Cross Week -->
       <div class="nav-category" style="margin-top:18px">Cross Week</div>
-      <a href="#" class="nav-item" data-module="version-compare">
+      <a href="#" class="nav-item" data-module="v2v">
         <span class="nav-icon">🔀</span>
-        <span class="nav-text">Version Compare</span>
+        <span class="nav-text">V2V Comparison</span>
       </a>
-      <!-- Legacy route mapping -->
+      <!-- Legacy alias: keep version-compare pointing to v2v for backward compat -->
+      <a href="#" class="nav-item" data-module="version-compare" style="display:none">
+        <span class="nav-text">Version Compare (Legacy)</span>
+      </a>
       <a href="#" class="nav-item" data-module="plan-merge" style="display:none">
         <span class="nav-text">Legacy: Packout</span>
       </a>
     </nav>
     <div class="sidebar-footer">
-      <div class="sidebar-footer-text">Production Plan Review</div>
+      <div class="sidebar-footer-text">Production Plan Review — 5 Modules Integrated</div>
     </div>
   </aside>
 
@@ -70,7 +76,7 @@
       </div>
     </header>
 
-    <!-- ===== Upload Section ===== -->
+    <!-- ===== Upload Section (Packout) ===== -->
     <div class="section" id="upload-section">
       <div class="section-header">
         <span class="section-title">📁 1. Upload Data</span>
@@ -150,7 +156,7 @@
       <div id="upload-warnings" class="warnings" style="display:none;margin-top:8px"></div>
     </div>
 
-    <!-- ===== Report Section ===== -->
+    <!-- ===== Report Section (Packout) ===== -->
     <div class="section" id="report-section" style="display:none">
       <div class="section-header">
         <span class="section-title">📊 3. ExF vs ETD vs Packout vs CTB</span>
@@ -235,22 +241,7 @@
 
     <!-- ===== Utilization ===== -->
     <div id="utilization-section" style="display:none">
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">⚙️ Line Utilization</span>
-          <span class="status-msg" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px">Coming Soon</span>
-        </div>
-        <div style="padding:24px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:12px 0">
-          <h3 style="font-size:14px;margin-bottom:8px">Design</h3>
-          <ul style="line-height:1.8;color:#475569;font-size:13px;margin-left:18px">
-            <li><b>Group:</b> Current Week → Compare (Gated / Ungated)</li>
-            <li>Both Gated+Ungated uploaded → show Δ Utilization = Gated - Ungated (material impact)</li>
-            <li>Single version only → fallback to single view (no delta)</li>
-            <li>Metrics: Utilization % = Load / Capacity</li>
-            <li>Dims: Line / Work Center / Day / Week</li>
-          </ul>
-        </div>
-      </div>
+      <div style="text-align:center;padding:40px;color:#94a3b8">Loading Utilization...</div>
     </div>
 
     <!-- ===== Idle ===== -->
@@ -272,35 +263,109 @@
       </div>
     </div>
 
-    <!-- ===== Version Compare ===== -->
+    <!-- ===== V2V Comparison - Integrated from feat/io-report ===== -->
+    <div id="v2v-section" style="display:none">
+      <div id="v2v-restore-banner" style="display:none;flex-direction:column;gap:4px;background:#eff6ff;border:1px solid #bfdbfe;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:12px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">
+        <button id="v2v-btn-download" class="btn btn-sm" style="background:#0f172a;color:white">📥 Download Current View</button>
+        <button id="v2v-btn-export-html" class="btn btn-sm" style="background:#2563eb;color:white">📄 Export HTML Report</button>
+      </div>
+      <div class="v2v-section" id="v2v-upload-section">
+        <div class="v2v-section-header">
+          <span class="v2v-section-title">Select Version — V2V Comparison (Cross-Week)</span>
+          <span style="font-size:12px;color:#64748b">Auto-scan folders | <span id="v2v-scan-time" style="color:#94a3b8"></span></span>
+        </div>
+        <div class="v2v-server-selector">
+          <div class="config-item">
+            <label style="font-size:12px">Previous Version</label>
+            <select id="v2v-server-a" class="v2v-select"><option>Loading...</option></select>
+          </div>
+          <div class="config-item">
+            <label style="font-size:12px">Latest Version</label>
+            <select id="v2v-server-b" class="v2v-select"><option>Loading...</option></select>
+          </div>
+          <button id="v2v-btn-refresh" class="btn btn-sm" style="height:36px" title="Re-scan folders">🔄 Refresh</button>
+          <button id="v2v-btn-load-server" class="btn btn-lg" style="height:36px;background:#0f172a;color:white">▶ Compare</button>
+        </div>
+        <div style="font-size:11px;color:#64748b;margin-top:8px">💡 Put version folders in project root, v2v_data/, data/, or input_files/. Click Refresh after adding new folder. Supports Ivy-*, 0721, gated etc.</div>
+        <div id="v2v-status" style="margin-top:12px"></div>
+      </div>
+      <div class="v2v-section" id="v2v-detail-section" style="display:none">
+        <div class="v2v-section-header">
+          <span class="v2v-section-title">Detail Comparison</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="v2v-granularity-toggle">
+              <button data-granularity="monthly">Month</button>
+              <button data-granularity="week" class="active">Week</button>
+              <button data-granularity="day">Day</button>
+            </div>
+          </div>
+        </div>
+        <div id="v2v-breadcrumb" class="v2v-breadcrumb"></div>
+        <div class="v2v-detail-tabs" id="v2v-detail-tabs"></div>
+        <div class="v2v-toolbar">
+          <div class="v2v-toolbar-left" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px">Change Type:
+              <select id="v2v-filter-changetype" class="v2v-select" style="width:120px">
+                <option value="ALL">All</option>
+                <option value="ADDED">Added</option>
+                <option value="DELETED">Deleted</option>
+                <option value="MODIFY">Modified</option>
+              </select>
+            </label>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px" id="v2v-sku-filter-label">
+              <span style="white-space:nowrap">SKU Category:</span>
+              <div class="v2v-multi-select" id="v2v-sku-multi">
+                <button class="v2v-multi-btn" id="v2v-sku-btn" type="button">All SKU ▾</button>
+                <div class="v2v-multi-menu" id="v2v-sku-menu" style="display:none">
+                  <label><input type="checkbox" value="ALL" checked> All SKU</label>
+                  <label><input type="checkbox" value="MATERIAL"> 1- Material (3010*)</label>
+                  <label><input type="checkbox" value="FRAME"> 2- Frame (FR-*)</label>
+                  <label><input type="checkbox" value="GB"> 3- GB (GB-*)</label>
+                  <label><input type="checkbox" value="LT"> 4- LT (LT-*)</label>
+                  <label><input type="checkbox" value="RT"> 5- RT (RT-*)</label>
+                  <label><input type="checkbox" value="FG"> 6- FG (SK-*)</label>
+                </div>
+              </div>
+            </div>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px" id="v2v-line-filter-label">
+              <span style="white-space:nowrap">Line Category:</span>
+              <div class="v2v-multi-select" id="v2v-line-multi">
+                <button class="v2v-multi-btn" id="v2v-line-btn" type="button">All Lines ▾</button>
+                <div class="v2v-multi-menu" id="v2v-line-menu" style="display:none">
+                  <label><input type="checkbox" value="ALL" checked> All Lines</label>
+                  <label><input type="checkbox" value="AL1"> 1- AL1 (AL1-*)</label>
+                  <label><input type="checkbox" value="AL2"> 2- AL2 (AL2-*)</label>
+                  <label><input type="checkbox" value="AL3"> 3- AL3 (AL3-*)</label>
+                  <label><input type="checkbox" value="AL4"> 4- AL4 (AL4-*)</label>
+                  <label><input type="checkbox" value="AL5"> 5- AL5 (AL5-*)</label>
+                  <label><input type="checkbox" value="AL6"> 6- AL6 (AL6-*)</label>
+                  <label><input type="checkbox" value="AL7"> 7- AL7 (AL7-*)</label>
+                  <label><input type="checkbox" value="AL8"> 8- AL8 (AL8-*)</label>
+                  <label><input type="checkbox" value="AL9"> 9- AL9 (AL9-*)</label>
+                  <label><input type="checkbox" value="AL10"> 10- AL10 (AL10-*)</label>
+                  <label><input type="checkbox" value="ML2"> 11- ML2 (ML2-*)</label>
+                  <label><input type="checkbox" value="ML5"> 12- ML5 (ML5-*)</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="v2v-detail-content"></div>
+      </div>
+    </div>
+
+    <!-- ===== Version Compare (Legacy placeholder now alias to V2V) ===== -->
     <div id="version-compare-section" style="display:none">
       <div class="section">
         <div class="section-header">
           <span class="section-title">🔀 Version Compare — Cross-Week (True Multi-Version)</span>
-          <span class="status-msg" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:2px 8px;border-radius:12px">True Multi-Version</span>
+          <span class="status-msg" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;padding:2px 8px;border-radius:12px">Redirect to V2V</span>
         </div>
-        <div style="padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:12px 0">
-          <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
-            <div style="flex:1;min-width:260px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:6px;padding:12px">
-              <div style="font-weight:600;font-size:13px;margin-bottom:6px">Definition</div>
-              <div style="font-size:12px;color:#475569;line-height:1.6">
-                <div>• Gated/Ungated are two modes of the same week, not multi-version</div>
-                <div>• True Multi-Version = cross-week: e.g. W29 Gated vs W30 Gated</div>
-                <div>• Reuse same 4 views: Packout, I/O, Utilization, Idle</div>
-              </div>
-            </div>
-            <div style="flex:1;min-width:260px;background:#f0fdf4;border:1px dashed #86efac;border-radius:6px;padding:12px">
-              <div style="font-weight:600;font-size:13px;margin-bottom:6px">Current Impl</div>
-              <div style="font-size:12px;color:#475569;line-height:1.6">
-                <div>• Offline <code>export_static.py</code> supports multi-xlsx → STATIC_DB.versions[]</div>
-                <div>• Frontend has <code>Compare multi</code>: union weeks, rows + PlanVersion field</div>
-                <div>• Next: Base vs Compare selector + diff (Δ Qty, Δ Week)</div>
-              </div>
-            </div>
-          </div>
-          <div id="version-compare-hint" style="text-align:center;padding:20px;color:#94a3b8;border:1px dashed #e2e8f0;border-radius:6px">
-            No offline data. Run <code>export_static.py</code> to build multi-version pack, or use Packout page "Compare multi" for early preview.
-          </div>
+        <div style="padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin:12px 0;text-align:center">
+          <div style="font-size:14px;margin-bottom:12px">This has been upgraded to <b>V2V Comparison</b> module.</div>
+          <button class="btn btn-lg" style="background:#0f172a;color:white" onclick="document.querySelector('[data-module=v2v]').click()">Go to V2V Comparison →</button>
+          <div id="version-compare-hint" style="margin-top:16px;font-size:12px;color:#94a3b8"></div>
           <div id="version-compare-content"></div>
         </div>
       </div>
@@ -322,19 +387,41 @@
         <div class="modal-body" id="schema-body"></div>
       </div>
     </div>
+
+    <!-- V2V Modals -->
+    <div id="v2v-bom-modal" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="document.getElementById('v2v-bom-modal').style.display='none'"></div>
+      <div class="modal-content" style="max-width:800px;width:90%">
+        <div class="modal-header">
+          <span class="modal-title" id="v2v-bom-title">BOM Children</span>
+          <button class="modal-close" onclick="document.getElementById('v2v-bom-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="v2v-bom-body"></div>
+      </div>
+    </div>
+
+    <div id="v2v-breakdown-modal" class="modal" style="display:none">
+      <div class="modal-backdrop" onclick="document.getElementById('v2v-breakdown-modal').style.display='none'"></div>
+      <div class="modal-content" style="max-width:900px;width:90%">
+        <div class="modal-header">
+          <span class="modal-title" id="v2v-breakdown-title">Line/Shift Breakdown</span>
+          <button class="modal-close" onclick="document.getElementById('v2v-breakdown-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body" id="v2v-breakdown-body"></div>
+      </div>
+    </div>
+
   </main>
 </div>
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/modules/plan_merge/engine.js?v=20260724_6_no_fr"></script>
-<script src="/static/modules/io_report/engine.js?v=20260723_3"></script>
-<script src="/static/global/app.js?v=20260723_4"></script>
-<script src="/static/modules/plan_merge/app.js?v=20260724_5"></script>
-<script src="/static/modules/io_report/app.js?v=20260723_3"></script>
-<script src="/static/modules/utilization/app.js?v=20260723_7"></script>
-<link rel="stylesheet" href="/static/modules/io_report/style.css?v=20260723_3">
-<link rel="stylesheet" href="/static/modules/plan_merge/style.css?v=20260723_3">
-<link rel="stylesheet" href="/static/global/style.css?v=20260723_3">
-<link rel="stylesheet" href="/static/modules/utilization/style.css?v=20260723_7">
+  <script src="/static/modules/io_report/engine.js?v=20260723_3"></script>
+  <script src="/static/global/app.js?v=20260723_8_v2v_integrated"></script>
+  <script src="/static/modules/plan_merge/app.js?v=20260724_5"></script>
+  <script src="/static/modules/io_report/app.js?v=20260723_3"></script>
+  <script src="/static/modules/utilization/app.js?v=20260723_7"></script>
+  <script src="/static/modules/v2v/app.js?v=20260723_8_v2v_integrated"></script>
 </body>
 </html>

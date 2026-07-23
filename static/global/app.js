@@ -1,14 +1,15 @@
-// ===== Global: Sidebar Toggle & Nav Switching — V3 =====
+// ===== Global: Sidebar Toggle & Nav Switching — V4 Integrated 5 Modules (io-report, idle, packout, utilization, v2v) =====
 // IA:
 // Current Week
 //   Single: I/O, Idle (standalone, one version)
 //   Compare: Packout, Utilization (Gated vs Ungated, fallback to single if only one uploaded)
 // Cross Week
-//   Version Compare: W29 Gated vs W30 Gated (true multi-version)
-// Legacy: plan-merge -> packout
+//   V2V Comparison: W29 Gated vs W30 Gated (true multi-version, from feat/io-report + feat/v2v)
+// Legacy: plan-merge -> packout, version-compare -> v2v
 document.addEventListener('DOMContentLoaded', () => {
   function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('collapsed');
+    const sb = document.getElementById('sidebar');
+    if (sb) sb.classList.toggle('collapsed');
     setTimeout(() => {
       document.dispatchEvent(new CustomEvent('sidebar-resized'));
     }, 220);
@@ -18,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleAlt = document.getElementById('sidebar-toggle-alt');
   if (toggleAlt) toggleAlt.addEventListener('click', toggleSidebar);
 
-  // Section registry
+  // Section registry - 5 modules integrated
   const S = {
     upload: document.getElementById('upload-section'),
     config: document.getElementById('config-section'),
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     utilization: document.getElementById('utilization-section'),
     idle: document.getElementById('idle-section'),
     versionCompare: document.getElementById('version-compare-section'),
+    v2v: document.getElementById('v2v-section'),
   };
 
   function hideAll() {
@@ -34,11 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showPackout() {
-    // Packout view = upload + config + report (if data exists)
     if (S.upload) S.upload.style.display = 'block';
     if (S.config) S.config.style.display = 'block';
     if (S.report && S.report.dataset.hasData === 'true') S.report.style.display = 'block';
-    // keep report hidden until data if no data yet? legacy shows upload/config anyway
   }
 
   function updateHeaderTitle() {
@@ -65,31 +65,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Module -> visibility map
+  // Module -> visibility map (5 modules)
   function switchModule(mod) {
     // Normalize legacy
     if (mod === 'plan-merge') mod = 'packout';
+    if (mod === 'version-compare') mod = 'v2v'; // alias to v2v
+
     hideAll();
     if (mod === 'packout') {
       showPackout();
     } else if (mod === 'io-report') {
       if (S.io) S.io.style.display = 'block';
+      if (typeof window.ioReportInit === 'function') {
+        try { setTimeout(() => window.ioReportInit(), 100); } catch(e) {}
+      }
     } else if (mod === 'utilization') {
       if (S.utilization) S.utilization.style.display = 'block';
     } else if (mod === 'idle') {
       if (S.idle) S.idle.style.display = 'block';
+    } else if (mod === 'v2v') {
+      if (S.v2v) S.v2v.style.display = 'block';
+      if (typeof window.v2vInit === 'function') {
+        try { setTimeout(() => window.v2vInit(), 100); } catch(e) {}
+      }
+      // Also try to show restore banner
+      try {
+        if (typeof window.updateRestoreBanner === 'function') window.updateRestoreBanner();
+      } catch(e) {}
     } else if (mod === 'version-compare') {
+      // Should have been mapped to v2v, but fallback
       if (S.versionCompare) S.versionCompare.style.display = 'block';
-      // If in static mode with versions, show hint about existing compare
       try {
         const db = window.STATIC_DB || window.PLAN_MERGE_STATIC_DB;
         const hint = document.getElementById('version-compare-hint');
         if (db && db.versions && hint) {
-          hint.innerHTML = `📦 Detected ${db.versions.length} offline versions: ${db.versions.map(v=>'<code>'+ (v.name||'V') +'</code>').join(', ')}<br><span style="font-size:11px">Go to Packout page and check "Compare multi" for early Version vs Version preview, or use Base/Compare selector + diff table here later</span>`;
+          hint.innerHTML = `📦 Detected ${db.versions.length} offline versions: ${db.versions.map(v=>'<code>'+ (v.name||'V') +'</code>').join(', ')}<br><span style="font-size:11px">Go to Packout page and check "Compare multi" for early Version vs Version preview, or use V2V Comparison module</span>`;
         }
       } catch {}
     }
+    // Update header and fire event
     updateHeaderTitle();
+    try {
+      localStorage.setItem('active_module', mod);
+    } catch(e) {}
     document.dispatchEvent(new CustomEvent('module-change', { detail: { module: mod } }));
   }
 
@@ -97,27 +115,67 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-item').forEach(item => {
     item.addEventListener('click', (e) => {
       e.preventDefault();
-      const mod = item.dataset.module;
+      const modRaw = item.dataset.module;
+      if (!modRaw) return;
       // Hidden legacy item should still be clickable but not visible in collapsed
-      if (item.style.display === 'none' && mod === 'plan-merge') return;
+      let mod = modRaw;
+      if (mod === 'plan-merge') mod = 'packout';
+      if (mod === 'version-compare') mod = 'v2v';
+      // Update active states: remove active from all, then activate the clicked visible one or its v2v alias
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-      item.classList.add('active');
+      // If clicked was version-compare hidden, activate v2v nav instead
+      if (modRaw === 'version-compare') {
+        const v2vNav = document.querySelector('.nav-item[data-module="v2v"]');
+        if (v2vNav) v2vNav.classList.add('active');
+        else item.classList.add('active');
+      } else {
+        item.classList.add('active');
+      }
       switchModule(mod);
     });
   });
 
-  // Preserve active state on reload + map old 'plan-merge' to 'packout'
+  // Preserve active state on reload + map old 'plan-merge' / 'version-compare' to new
   (() => {
+    try {
+      const saved = localStorage.getItem('active_module');
+      if (saved) {
+        let mod = saved;
+        if (mod === 'plan-merge') mod = 'packout';
+        if (mod === 'version-compare') mod = 'v2v';
+        const navItem = document.querySelector(`.nav-item[data-module="${mod}"]`) || document.querySelector(`.nav-item[data-module="${saved}"]`);
+        if (navItem) {
+          document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+          // If saved was version-compare, activate v2v nav
+          if (saved === 'version-compare') {
+            const v2vNav = document.querySelector('.nav-item[data-module="v2v"]');
+            if (v2vNav) v2vNav.classList.add('active');
+          } else {
+            navItem.classList.add('active');
+          }
+          switchModule(mod);
+          return;
+        }
+      }
+    } catch(e) {}
+
     const active = document.querySelector('.nav-item.active');
     if (active) {
       let mod = active.dataset.module;
       if (mod === 'plan-merge') {
-        // Migrate active to packout
         const packoutItem = document.querySelector('.nav-item[data-module="packout"]');
         if (packoutItem) {
           document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
           packoutItem.classList.add('active');
           mod = 'packout';
+        }
+      }
+      if (mod === 'version-compare') {
+        const v2vItem = document.querySelector('.nav-item[data-module="v2v"]');
+        if (v2vItem) {
+          document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+          v2vItem.classList.add('active');
+          mod = 'v2v';
         }
       }
       switchModule(mod);
@@ -135,4 +193,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   updateHeaderTitle();
+  window.switchModule = switchModule;
+  console.log('✅ Global app.js V4 loaded: 5 modules (io-report, idle, packout, utilization, v2v) integrated');
 });
