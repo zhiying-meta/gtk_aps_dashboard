@@ -558,7 +558,6 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     # Search best sheet for master: supports file with multiple sheets, pick best match
     # Support alias SYLTE for STYLE (data/20260723/料号快照.xlsx uses SYLTE)
     best_sheet, ws, header_row_idx, headers, _score = _find_best_sheet_and_header(wb, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE", "SYLTE"])
-    print(f"[IO] Master: best sheet={best_sheet}, header_row={header_row_idx}, score={_score}, headers={headers}")
     item_no_idx = _get_col_index_by_candidates(headers, ["ITEM_NO", "ITEM_CODE", "SKU", "PN"])
     prod_cat_idx = _get_col_index_by_candidates(headers, ["PRODUCT_CATEGORY", "CATEGORY", "PRODUCT_CAT"])
     style_idx = _get_col_index_by_candidates(headers, ["PRODUCT_STYLE", "SYLTE", "STYLE", "PRODUCT_STYLE_NAME"])
@@ -632,7 +631,6 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
 
     wb2 = _load_workbook_robust(sched_path)
     sched_best_sheet, ws2, sched_header_row_idx, headers2, sched_score = _find_best_sheet_and_header(wb2, ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE", "SHIFT_NAME"])
-    print(f"[IO] Schedule: best sheet={sched_best_sheet}, header_row={sched_header_row_idx}, score={sched_score}/6, headers={headers2}")
     # Support aliases: SKU can be ITEM_CODE, ITEM_NO, etc. PLAN_VALUE can be SHIFT_OUT_QTY etc for some variants, but we keep strict for schedule
     line_idx = _get_col_index_by_candidates(headers2, ["LINE_CODE", "LINE"])
     shift_idx = _get_col_index_by_candidates(headers2, ["SHIFT_NAME", "SHIFT_CODE"])
@@ -742,7 +740,6 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         if sr.LineCode:
             lines_by_cat[cat_key].add(sr.LineCode)
     wb2.close()
-    print(f"[IO] Sched stats: total={_sched_total}, kept={_sched_kept}, skip_no_sku={_sched_skip_no_sku}, skip_not_in_master={_sched_skip_sku_not_in_master}, skip_no_date={_sched_skip_no_date}, master_count={len(all_items_set)}")
 
     bal_path = _find_file(data_dir, "结存表.xlsx", ["结存表", "结存", "balance"])
     if not bal_path or not os.path.exists(bal_path):
@@ -750,7 +747,6 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
 
     wb3 = _load_workbook_robust(bal_path)
     bal_best_sheet, ws3, bal_header_row_idx, headers3, bal_score = _find_best_sheet_and_header(wb3, ["PLAN_DATE", "ITEM_CODE", "BALANCE_QTY", "SHIFT_NAME"])
-    print(f"[IO] Balance: best sheet={bal_best_sheet}, header_row={bal_header_row_idx}, score={bal_score}/4, headers={headers3}")
     bal_date_idx = _get_col_index_by_candidates(headers3, ["PLAN_DATE", "MPS_DATE", "DATE"])
     bal_shift_idx = _get_col_index_by_candidates(headers3, ["SHIFT_NAME", "SHIFT_CODE"])
     bal_item_idx = _get_col_index_by_candidates(headers3, ["ITEM_CODE", "ITEM_NO", "SKU", "PN"])
