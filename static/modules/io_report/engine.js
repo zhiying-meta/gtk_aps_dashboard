@@ -268,7 +268,7 @@
       if (!seenDate[ym]){
         seenDate[ym]=true;
         let first = new Date(d.getFullYear(), d.getMonth(),1);
-        let label = pad(d.getMonth()+1)+'月';
+        let label = d.getFullYear()+'-'+pad(d.getMonth()+1); // English month label YYYY-MM
         raw.push({Date:first, Label:label, SortDate:first, SortKey:''});
       }
     }
@@ -321,7 +321,7 @@
       let monday = firstDayOfISOWeek(year, diff);
       return fmtMMDD(monday);
     }
-    if (colDim==='month') return pad(d.getMonth()+1)+'月';
+    if (colDim==='month') return d.getFullYear()+'-'+pad(d.getMonth()+1); // English YYYY-MM
     return fmtMMDD(d)+'_'+(r.ShiftName||'');
   }
 
@@ -338,7 +338,7 @@
       let monday = firstDayOfISOWeek(year, diff);
       return fmtMMDD(monday);
     }
-    if (colDim==='month') return pad(d.getMonth()+1)+'月';
+    if (colDim==='month') return d.getFullYear()+'-'+pad(d.getMonth()+1); // English YYYY-MM
     return fmtMMDD(d)+'_'+(r.ShiftName||'');
   }
 
@@ -750,9 +750,9 @@
       // If still missing, try to find any that can be used
       if (!masterFile || !schedFile || !balFile){
         let missing = [];
-        if (!masterFile) missing.push('料号主表');
-        if (!schedFile) missing.push('排产结果表');
-        if (!balFile) missing.push('结存表');
+        if (!masterFile) missing.push('Item Master');
+        if (!schedFile) missing.push('Schedule Result');
+        if (!balFile) missing.push('BOH Balance');
         throw new Error('Missing files: '+missing.join(', ')+' — please select 3 files (master/schedule/balance) or a combined file with 3 sheets');
       }
     }

@@ -186,26 +186,28 @@
 
         <div class="util-upload-grid">
           <div class="util-upload-card" id="card-gated" style="border:2px dashed #f59e0b;background:#fffbeb">
-            <div class="util-upload-label">🟡 Gated</div>
+            <div class="util-upload-label">🟡 Gated – Upload & Generate</div>
             <input type="file" id="input-gated" accept=".xlsx,.zip" multiple style="margin:8px 0;width:100%">
             <div id="fname-gated" style="font-size:11px;color:#92400e;min-height:16px;word-break:break-all">No file selected</div>
-            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center">
-              <button class="util-btn" id="btn-upload-gated" disabled style="background:#f59e0b;border-color:#f59e0b">Upload Gated</button>
-            </div>
-            <div id="status-gated-files" style="font-size:11px;margin-top:8px;padding:6px 8px;border-radius:6px;text-align:center;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">
-              ${isGatedReady? 'Ready: Gated' : 'Not Ready: Gated'}
+            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+              <button class="util-btn" id="btn-upload-gated" disabled style="background:#0f172a;border-color:#0f172a">▶ Generate Gated</button>
+              <span id="util-inline-spinner-gated" style="display:none;align-items:center;gap:6px;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:10px"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span>Loading...</span>
+              <span id="status-gated-files" style="font-size:11px;padding:4px 8px;border-radius:6px;text-align:center;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">
+                ${isGatedReady? '✅ Ready: Gated' : '❌ Not Ready: Gated'}
+              </span>
             </div>
           </div>
 
           <div class="util-upload-card" id="card-ungated" style="border:2px dashed #10b981;background:#ecfdf5">
-            <div class="util-upload-label">🟢 Ungated</div>
+            <div class="util-upload-label">🟢 Ungated – Upload & Generate</div>
             <input type="file" id="input-ungated" accept=".xlsx,.zip" multiple style="margin:8px 0;width:100%">
             <div id="fname-ungated" style="font-size:11px;color:#065f46;min-height:16px;word-break:break-all">No file selected</div>
-            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center">
-              <button class="util-btn" id="btn-upload-ungated" disabled style="background:#10b981;border-color:#10b981">Upload Ungated</button>
-            </div>
-            <div id="status-ungated-files" style="font-size:11px;margin-top:8px;padding:6px 8px;border-radius:6px;text-align:center;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">
-              ${isUngatedReady? 'Ready: Ungated' : 'Not Ready: Ungated'}
+            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+              <button class="util-btn" id="btn-upload-ungated" disabled style="background:#0f172a;border-color:#0f172a">▶ Generate Ungated</button>
+              <span id="util-inline-spinner-ungated" style="display:none;align-items:center;gap:6px;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:10px"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span>Loading...</span>
+              <span id="status-ungated-files" style="font-size:11px;padding:4px 8px;border-radius:6px;text-align:center;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">
+                ${isUngatedReady? '✅ Ready: Ungated' : '❌ Not Ready: Ungated'}
+              </span>
             </div>
           </div>
         </div>
@@ -703,10 +705,12 @@
 
       btn.addEventListener('click', async () => {
         if (selectedFiles.length === 0) return;
-        const fileListShort = selectedFiles.map(f=>f.name).join(', ').slice(0,100);
+        const fileListShort = selectedFiles.map(f=>f.name).join(', ').slice(0,80);
+        const spinnerEl = document.getElementById(`util-inline-spinner-${ver}`);
+        if (spinnerEl){ spinnerEl.style.display='inline-flex'; spinnerEl.querySelector('span:last-child')?.replaceChildren(); spinnerEl.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span> Loading: ${fileListShort}`; }
         if (statusEl){
           statusEl.style.background='#fef3c7'; statusEl.style.border='1px solid #fde68a'; statusEl.style.color='#92400e';
-          statusEl.textContent = `Loading: ${fileListShort}`;
+          statusEl.textContent = `⏳ Loading: ${fileListShort}`;
         }
         const badge = document.getElementById('util-status-badge');
         btn.disabled = true;
@@ -721,10 +725,12 @@
           const text = await r.text();
           let j; try{ j = JSON.parse(text); }catch(e){ throw new Error(`Server error ${r.status}: ${text.slice(0,300)}`); }
           if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-          // Success -> Ready
+          // Success -> Ready – status near generate button
+          const spinnerEl2 = document.getElementById(`util-inline-spinner-${ver}`);
+          if (spinnerEl2) spinnerEl2.style.display='none';
           if (statusEl){
             statusEl.style.background='#dcfce7'; statusEl.style.border='1px solid #86efac'; statusEl.style.color='#065f46';
-            statusEl.textContent = `Ready: ${ver}`;
+            statusEl.textContent = `✅ Ready: ${ver} – Generated`;
           }
           try{ localStorage.setItem(UTIL_LS_KEY, JSON.stringify({time:new Date().toISOString(), [ver]:{files:selectedFiles.map(f=>f.name)}})); }catch{}
           setTimeout(async () => {
@@ -747,9 +753,11 @@
             btn.disabled = false;
           }, 600);
         } catch (e) {
+          const spinnerEl3 = document.getElementById(`util-inline-spinner-${ver}`);
+          if (spinnerEl3) spinnerEl3.style.display='none';
           if (statusEl){
             statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
-            statusEl.textContent = `Not Ready: ${ver}`;
+            statusEl.textContent = `❌ Not Ready: ${ver} – ${e.message.slice(0,60)}`;
           }
           if (badge){
             // keep overall badge as Not Ready

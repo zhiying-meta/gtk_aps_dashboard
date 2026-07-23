@@ -287,3 +287,14 @@ tr.row-CTB td.data-cell { background: #faf5ff; }
 }
 .dim-FG { background: #e0e7ff; color: #3730a3; }
 .dim-GB { background: #fce7f3; color: #9d174d; }
+
+/* Generate status area – unified near generate button */
+.generate-status-area {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:1; min-width:200px;
+  background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:6px 10px;
+}
+.generate-status-area .spinner {
+  width:14px; height:14px; border-width:2px; display:inline-block; vertical-align:middle; margin:0;
+  border-style:solid; border-color:#e2e8f0; border-top-color:#3b82f6; border-radius:50%;
+  animation: spin 0.8s linear infinite;
+}

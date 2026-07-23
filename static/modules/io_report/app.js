@@ -150,11 +150,12 @@ async function render(){
 function buildUploadSectionHTML(isCompact){
   const title = isCompact ? '📁 Upload I/O Data' : '📁 Upload I/O Data';
   const statusBadge = getStatusBadgeHTML();
+  // Keep a minimal header badge but main status will be near the Generate button
   return `<div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
       <div class="section-header">
         <div style="display:flex;align-items:center;gap:10px">
           <span class="section-title">${title}</span>
-          <span id="ioStatusBadge_${isCompact?'compact':'full'}">${statusBadge}</span>
+          <span id="ioStatusBadge_header_${isCompact?'compact':'full'}" style="display:none">${statusBadge}</span>
         </div>
         <div class="section-actions">
           <a href="/api/io/templates/input_template.xlsx" class="btn btn-sm btn-outline">📄 Combined Template</a>
@@ -181,10 +182,14 @@ function buildUploadSectionHTML(isCompact){
           <div class="upload-card" id="card_schedule_${isCompact?'compact':'full'}"><div class="upload-label">📁 Schedule <span class="req">*</span></div><input type="file" class="file-input" id="input_schedule_${isCompact?'compact':'full'}" accept=".xlsx"><div class="fname" id="fname_schedule_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_balance_${isCompact?'compact':'full'}"><div class="upload-label">📁 BOH Balance <span class="req">*</span></div><input type="file" class="file-input" id="input_balance_${isCompact?'compact':'full'}" accept=".xlsx"><div class="fname" id="fname_balance_${isCompact?'compact':'full'}" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
         </div>
-        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled>▶ Upload & Analyze</button>
-          <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}">↻ Recheck</button>
-          <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+          <button class="btn" id="uploadBtn_${isCompact?'compact':'full'}" disabled style="background:#0f172a;border-color:#0f172a">▶ Generate I/O Report</button>
+          <div id="ioGenerateStatusArea_${isCompact?'compact':'full'}" class="generate-status-area" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:200px">
+            <span id="ioStatusBadge_${isCompact?'compact':'full'}">${statusBadge}</span>
+            <span id="ioInlineSpinner_${isCompact?'compact':'full'}" style="display:none;align-items:center;gap:6px;font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:3px 8px;border-radius:12px"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin:0"></span><span>Loading...</span></span>
+            <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
+          </div>
+          <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}" style="margin-left:auto">↻ Recheck Status</button>
         </div>
       </div>
     </div>`;
@@ -324,11 +329,13 @@ function attachUploadLogic(isCompact){
     const prog=document.getElementById('uploadProgress_'+suffix);
     const btn=document.getElementById('uploadBtn_'+suffix);
     const badgeEl = document.getElementById('ioStatusBadge_'+suffix);
+    const spinner = document.getElementById('ioInlineSpinner_'+suffix);
     const allSel = [...(files.combined||[]), files.master, files.schedule, files.balance].filter(Boolean);
-    const fileListShort = allSel.map(f=>f.name).join(', ').slice(0,100);
-    btn.disabled=true; btn.textContent='Uploading...';
-    if(prog) prog.textContent=`Loading: ${fileListShort}`;
-    if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px;font-size:11px">Loading: ${fileListShort}</span>`;
+    const fileListShort = allSel.map(f=>f.name).join(', ').slice(0,80);
+    btn.disabled=true; btn.textContent='⏳ Generating...';
+    if(spinner){ spinner.style.display='inline-flex'; spinner.querySelector('span:last-child').textContent=`Loading: ${fileListShort}`; }
+    if(prog) prog.textContent=`Processing ${allSel.length} file(s) – please wait…`;
+    if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px;font-size:11px">⏳ Loading: ${allSel.length} files</span>`;
     const form=new FormData();
     if(files.combined && files.combined.length>0){
       files.combined.forEach((f,i)=>{
@@ -350,19 +357,25 @@ function attachUploadLogic(isCompact){
         const info = { fg: result.fg||0, gb: result.gb||0, time: now.toISOString(), timeStr: now.toLocaleString() };
         saveIOLoadStatus(info);
         try{ _lastStatus = { loaded:true, ok:true, fg: result.fg, gb: result.gb }; }catch{}
-        if(badgeEl) badgeEl.innerHTML=`<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">Ready</span>`;
-        if(prog) prog.textContent='';
+        if(badgeEl) badgeEl.innerHTML=`<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">✅ Ready – ${result.fg||0} FG / ${result.gb||0} GB</span>`;
+        if(prog) prog.textContent=`✅ Success – Ready, rendering report...`;
+        const sp = document.getElementById('ioInlineSpinner_'+suffix);
+        if(sp) sp.style.display='none';
         setTimeout(()=>{ renderReportsPage(); }, 600);
       }
       else{
-        if(prog) prog.textContent=`Failed: ${result.error||'error'}`;
-        if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
-        btn.disabled=false; btn.textContent='▶ Upload & Analyze';
+        if(prog) prog.textContent=`❌ Failed: ${result.error||'error'}`;
+        if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">❌ Not Ready</span>`;
+        const sp = document.getElementById('ioInlineSpinner_'+suffix);
+        if(sp) sp.style.display='none';
+        btn.disabled=false; btn.textContent='▶ Generate I/O Report';
       }
     }catch(e){
-      if(prog) prog.textContent=`Failed: ${e.message}`;
-      if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
-      btn.disabled=false; btn.textContent='▶ Upload & Analyze';
+      if(prog) prog.textContent=`❌ Failed: ${e.message}`;
+      if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">❌ Not Ready</span>`;
+      const sp = document.getElementById('ioInlineSpinner_'+suffix);
+      if(sp) sp.style.display='none';
+      btn.disabled=false; btn.textContent='▶ Generate I/O Report';
     }
   });
   document.getElementById('btnRetryLoad_'+suffix)?.addEventListener('click', async ()=>{ const ok=await checkStatus(); if(ok) renderReportsPage(); else alert('No valid data'); });

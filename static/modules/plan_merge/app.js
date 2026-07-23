@@ -101,16 +101,18 @@ function handleProcessedData(data, fileName, isClient){
   document.getElementById('report-section').style.display='block';
   pivotExpanded = new Set();
   const timeStr = new Date().toLocaleTimeString();
-  // Single status: Ready
+  // Single status: Ready – near generate button
   const pmBadge = document.getElementById('pmStatusBadge');
   if (pmBadge){
-    pmBadge.textContent=`Ready: ${allRows.length} rows`;
+    pmBadge.textContent=`Ready: ${allRows.length} rows – Generated at ${timeStr}`;
     pmBadge.style.background='#dcfce7'; pmBadge.style.color='#065f46'; pmBadge.style.borderColor='#86efac';
   }
   const pmMsg = document.getElementById('pmPersistentMsg');
-  if (pmMsg){ pmMsg.textContent=''; }
+  if (pmMsg){ pmMsg.textContent=`✅ Report ready – ${allRows.length} rows`; }
   const statusEl = document.getElementById('upload-status');
-  if (statusEl) statusEl.textContent = '';
+  if (statusEl) statusEl.textContent = `✅ Success: ${allRows.length} rows loaded – see table below`;
+  const spinner = document.getElementById('pmInlineSpinner');
+  if (spinner) spinner.style.display='none';
   const fnMain = document.getElementById('file-name-main');
   if (fnMain){ fnMain.textContent=''; fnMain.className='file-name'; }
   const fileInput = document.querySelector('.file-input');
@@ -629,12 +631,14 @@ if (modal) {
   modal.querySelector('.modal-backdrop').addEventListener('click', () => modal.style.display = 'none');
 }
 
-// ===== Generate — Snapshot Only =====
+// ===== Generate — Snapshot Only — with inline status near button =====
 document.getElementById('btn-generate').addEventListener('click', async () => {
   const btn = document.getElementById('btn-generate');
   const pmBadge = document.getElementById('pmStatusBadge');
   const status = document.getElementById('upload-status');
   const pmMsg = document.getElementById('pmPersistentMsg');
+  const spinner = document.getElementById('pmInlineSpinner');
+  const spinnerText = document.getElementById('pmSpinnerText');
   btn.disabled = true;
   if (status) status.textContent = '';
   if (pmMsg) pmMsg.textContent = '';
@@ -660,10 +664,12 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
   if(allFiles.length===0){
     if (pmBadge){
-      pmBadge.textContent='Not Ready';
+      pmBadge.textContent='Not Ready – No files selected';
       pmBadge.style.background='#fef2f2'; pmBadge.style.color='#991b1b'; pmBadge.style.borderColor='#fecaca';
     }
+    if (status) status.textContent='Please select files first – 4 required (Item, BOM, FCST Main, FCST Detail)';
     btn.disabled=false;
+    if (spinner) spinner.style.display='none';
     return;
   }
 
@@ -673,12 +679,17 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
   const totalSize = allFiles.reduce((s,f)=>s+f.size,0);
   const totalSizeKB = (totalSize/1024).toFixed(1);
-  const fileListShort = allFiles.map(f=>f.name).join(', ').slice(0,120);
+  const fileListShort = allFiles.map(f=>f.name).join(', ').slice(0,100);
   console.log(`[Generate] ${allFiles.length} files, ${totalSizeKB}KB — ${fileListShort}`);
   if (pmBadge){
-    pmBadge.textContent=`Loading: ${fileListShort}${allFiles.length>3?'...':''} (${totalSizeKB}KB)`;
+    pmBadge.textContent=`Processing – ${allFiles.length} files`;
     pmBadge.style.background='#fef3c7'; pmBadge.style.color='#92400e'; pmBadge.style.borderColor='#fde68a';
   }
+  if (spinner){
+    spinner.style.display='inline-flex';
+    if (spinnerText) spinnerText.textContent=`Loading: ${allFiles.length} files (${totalSizeKB}KB) – ${fileListShort}${allFiles.length>2?'...':''}`;
+  }
+  if (status) status.textContent=`Processing ${allFiles.length} files – please wait...`;
 
   try{
     const form = new FormData();
@@ -702,13 +713,15 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     const names=allFiles.map(f=>f.name).join(', ');
     handleProcessedData(data, `Snapshot(${allFiles.length} files: ${names.slice(0,120)}...)`, false);
     document.getElementById('loading').style.display='none';
+    if (spinner) spinner.style.display='none';
     btn.disabled=false;
   }catch(e){
     console.error('Snapshot generate failed', e);
     if (pmBadge){
-      pmBadge.textContent='Not Ready';
+      pmBadge.textContent='Failed – Not Ready';
       pmBadge.style.background='#fef2f2'; pmBadge.style.color='#991b1b'; pmBadge.style.borderColor='#fecaca';
     }
+    if (spinner) spinner.style.display='none';
     if (status) status.textContent=`Failed: ${e.message}`;
     btn.disabled=false; document.getElementById('loading').style.display='none';
   }
@@ -1327,7 +1340,7 @@ function escAttr(s){
     const fnEl = document.getElementById('fname_combined');
     const last = loadLastStatus();
     if (!last && fnEl && !fnEl.textContent){
-      fnEl.textContent = `💡 Demo available: snapshot_demo.zip (${(blob.size/1024/1024).toFixed(2)} MB) — contains 7 snapshot xlsx (料号快照, BOM快照, gated/ungated, FCST主/明细, CTB). Click download or upload your own.`;
+      fnEl.textContent = `💡 Demo available: snapshot_demo.zip (${(blob.size/1024/1024).toFixed(2)} MB) — contains 7 snapshot xlsx (Item Snapshot, BOM Snapshot, Gated/Ungated Schedule, FCST Main/Detail, CTB). Click download or upload your own.`;
       fnEl.className = 'fname';
     }
     console.log('[Demo] Snapshot demo blob ready, size', (blob.size/1024).toFixed(1), 'KB');

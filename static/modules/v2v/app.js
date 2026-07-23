@@ -583,9 +583,12 @@ function setupV2VServerVersions() {
 
 async function compareServerVersions(aPath,bPath){
   const statusEl=document.getElementById('v2v-status'); const btn=document.getElementById('v2v-btn-load-server');
+  const spinner = document.getElementById('v2v-inline-spinner');
+  const spinnerText = document.getElementById('v2v-spinner-text');
   const shortA = aPath.split('/').pop(); const shortB = bPath.split('/').pop();
-  if(statusEl) statusEl.innerHTML=`<div class="v2v-status info">Loading: ${esc(shortA)} vs ${esc(shortB)}</div>`;
-  if(btn){ btn.disabled=true; btn.textContent='Loading...'; }
+  if(statusEl) statusEl.innerHTML=`<div class="v2v-status info" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:3px 8px;border-radius:12px;font-size:11px">⏳ Loading: ${esc(shortA)} vs ${esc(shortB)}</div>`;
+  if(spinner){ spinner.style.display='inline-flex'; if(spinnerText) spinnerText.textContent=`Loading: ${esc(shortA)} vs ${esc(shortB)} – comparing...`; }
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Comparing...'; }
   try{
     const resp=await fetch('/v2v/api/compare',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({a_path:aPath,b_path:bPath,granularity:v2vState.granularity})});
     const data=await resp.json(); if(data.error) throw new Error(data.error);
@@ -594,8 +597,11 @@ async function compareServerVersions(aPath,bPath){
     v2vState.versionAName = aPath.split('/').pop();
     v2vState.versionBName = bPath.split('/').pop();
     handleCompareResult(data);
-  }catch(e){ if(statusEl) statusEl.innerHTML=`<div class="v2v-status error">Not Ready: ${esc(e.message)}</div>`; }
-  finally{ if(btn){ btn.disabled=false; btn.textContent='▶ Compare'; } }
+  }catch(e){ if(statusEl) statusEl.innerHTML=`<div class="v2v-status error" style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:3px 8px;border-radius:12px;font-size:11px">❌ Not Ready: ${esc(e.message)}</div>`; }
+  finally{
+    if(spinner) spinner.style.display='none';
+    if(btn){ btn.disabled=false; btn.textContent='▶ Compare Versions'; }
+  }
 }
 
 function handleCompareResult(data){
@@ -609,7 +615,7 @@ function handleCompareResult(data){
     if (!v2vState.versionBName && data.folders.b) v2vState.versionBName = data.folders.b.split('/').pop();
   }
   const statusEl=document.getElementById('v2v-status');
-  if(statusEl){ statusEl.innerHTML=`<div class="v2v-status success">Ready: ${Object.keys(data.summary).length} tables</div>`; }
+  if(statusEl){ statusEl.innerHTML=`<div class="v2v-status success" style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:3px 8px;border-radius:12px;font-size:11px">✅ Ready: ${Object.keys(data.summary).length} tables compared – ${esc(v2vState.versionAName||'Prev')} vs ${esc(v2vState.versionBName||'Latest')}</div>`; }
   const summarySection=document.getElementById('v2v-summary-section'); if(summarySection) summarySection.style.display='block';
   renderSummaryCards(data);
   const detailSection=document.getElementById('v2v-detail-section'); if(detailSection) detailSection.style.display='block';

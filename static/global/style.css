@@ -124,7 +124,56 @@ header {
 .header-menu-btn:hover { background: #f1f5f9; color: #0f172a; }
 .header-breadcrumb { font-size: 14px; font-weight: 500; color: #0f172a; }
 
+/* ===== Generate Status Area – near generate button, easy to find ===== */
+.generate-status-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 200px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.generate-status-area .spinner {
+  width: 14px; height: 14px;
+  border-width: 2px;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+  border-style: solid;
+  border-color: #e2e8f0;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.generate-status-area .status-badge {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid;
+}
+.generate-status-area .status-badge.loading {
+  background:#fef3c7; color:#92400e; border-color:#fde68a;
+}
+.generate-status-area .status-badge.ready {
+  background:#dcfce7; color:#065f46; border-color:#86efac;
+}
+.generate-status-area .status-badge.not-ready {
+  background:#fef2f2; color:#991b1b; border-color:#fecaca;
+}
+.generate-status-area .status-badge.idle {
+  background:#f1f5f9; color:#64748b; border-color:#e2e8f0;
+}
+
 @media (max-width: 768px) {
   .header-menu-btn { display: block; }
   .sidebar:not(.collapsed) ~ .main-content .header-menu-btn { display: none; }
+  .generate-status-area {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
