@@ -602,12 +602,16 @@ def process():
                 if base == target and key not in file_map:
                     file_map[key] = fp
 
-        # Validation: at least item + bom
+        # Validation: item, bom, FCST main+detail are required per user request; gated/ungated/CTB optional (show empty if missing)
         missing_required = []
         if "item" not in file_map:
             missing_required.append(SNAPSHOT_TARGET_MAP["item"])
         if "bom" not in file_map:
             missing_required.append(SNAPSHOT_TARGET_MAP["bom"])
+        if "fcst_main" not in file_map:
+            missing_required.append(SNAPSHOT_TARGET_MAP["fcst_main"])
+        if "fcst_detail" not in file_map:
+            missing_required.append(SNAPSHOT_TARGET_MAP["fcst_detail"])
 
         if missing_required:
             existing_names = [f"{os.path.basename(p)} ({os.path.getsize(p)} bytes, {round(os.path.getsize(p)/1024,1)}KB)" for p in final_files]
@@ -619,7 +623,7 @@ def process():
                 except:
                     detected_list.append(f"{k}:{os.path.basename(v)}")
             return _json_error(
-                f"Missing required files {missing_required}. Detected {len(file_map)} files: {', '.join(detected_list)}. All uploaded files: {existing_names}. Need at least 料号快照.xlsx and BOM快照.xlsx. Optional: gated/ungated/FCST/CTB will be empty if not provided. Tip: Ensure filenames contain keywords like 料号, BOM, gated, ungated, FCST, CTB or use exact names {list(SNAPSHOT_TARGET_MAP.values())}.",
+                f"Missing required files {missing_required}. Required: 料号快照, BOM快照, FCST主表, FCST明细表. Detected {len(file_map)} files: {', '.join(detected_list)}. All uploaded files: {existing_names}. Optional (can be empty): gated排产, ungated排产, CTB — if missing, corresponding values will show empty/null. Tip: Ensure filenames contain keywords like 料号, BOM, FCST主表, FCST明细表, gated, ungated, CTB or use exact names {list(SNAPSHOT_TARGET_MAP.values())}.",
                 400,
             )
 
