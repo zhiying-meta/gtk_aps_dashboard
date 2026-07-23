@@ -344,14 +344,56 @@ def api_upload():
             tmp_cache = _load_tmp(tmp_dir)
             total_items = len(tmp_cache.fg_items) + len(tmp_cache.gb_items)
             total_sched = len(tmp_cache.sched_fg) + len(tmp_cache.sched_gb)
+            # Count all sched_by_cat as fallback (includes RAW etc)
+            try:
+                total_sched_all = sum(len(v) for v in (tmp_cache.sched_by_cat or {}).values())
+            except Exception:
+                total_sched_all = total_sched
             if total_items == 0:
                 return _json_error(
-                    f"validation failed: 0 FG/GB items found. Check 料号主表.xlsx has PRODUCT_CATEGORY=成品/GB and ITEM_NO column.",
+                    f"validation failed: 0 FG/GB items found. Check 料号主表.xlsx has PRODUCT_CATEGORY=成品/GB and ITEM_NO column. Found {len(tmp_cache.item_to_cat)} total items, cats={tmp_cache.cats}",
                     400,
                 )
-            if total_sched == 0:
+            if total_sched == 0 and total_sched_all == 0:
+                # Try to give detailed debug info about schedule file
+                debug_info = ""
+                try:
+                    import openpyxl
+                    sched_fp = os.path.join(tmp_dir, TARGET_MAP["schedule"])
+                    wb_dbg = openpyxl.load_workbook(sched_fp, data_only=True, read_only=True)
+                    ws_dbg = wb_dbg[wb_dbg.sheetnames[0]]
+                    headers_dbg = list(next(ws_dbg.iter_rows(min_row=1, max_row=1, values_only=True)))
+                    # Count raw rows
+                    raw_rows = 0
+                    sample_skus = []
+                    sample_plan_items = []
+                    for _r in ws_dbg.iter_rows(min_row=2, values_only=True):
+                        raw_rows += 1
+                        if raw_rows <= 5:
+                            # Try to guess SKU col is 3 (index 3) or find via header
+                            try:
+                                sku_idx_dbg = headers_dbg.index("SKU") if "SKU" in headers_dbg else 3
+                            except Exception:
+                                sku_idx_dbg = 3
+                            try:
+                                if len(_r) > sku_idx_dbg and _r[sku_idx_dbg]:
+                                    sample_skus.append(str(_r[sku_idx_dbg])[:20])
+                            except Exception:
+                                pass
+                            try:
+                                pi_idx_dbg = headers_dbg.index("PLAN_ITEM") if "PLAN_ITEM" in headers_dbg else 2
+                                if len(_r) > pi_idx_dbg and _r[pi_idx_dbg]:
+                                    sample_plan_items.append(str(_r[pi_idx_dbg])[:15])
+                            except Exception:
+                                pass
+                        if raw_rows > 1000:
+                            break
+                    wb_dbg.close()
+                    debug_info = f" Raw schedule file: {raw_rows} rows, headers={headers_dbg}, sample SKUs={sample_skus[:5]}, sample PLAN_ITEMs={sample_plan_items[:5]}, master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: SKU may not match master (case insensitive now supported) or PLAN_DATE invalid or PLAN_ITEM not INPUT/OUTPUT/CHECKIN/CHECKOUT. Now engine supports case-insensitive SKU and PLAN_ITEM."
+                except Exception as de:
+                    debug_info = f" debug failed: {de}"
                 return _json_error(
-                    f"validation failed: 0 schedule rows. Check 排产结果表.xlsx has LINE_CODE, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, PLAN_DATE, PLAN_VALUE and SKU exists in master.",
+                    f"validation failed: 0 schedule rows. Check 排产结果表.xlsx has LINE_CODE, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, PLAN_DATE, PLAN_VALUE and SKU exists in master. {debug_info}",
                     400,
                 )
         except Exception as ve:

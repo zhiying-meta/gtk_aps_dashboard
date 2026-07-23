@@ -199,10 +199,16 @@ function attachUploadLogic(isCompact){
   const files = { master: null, schedule: null, balance: null, combined: [] };
   function markHasFile(cardId, has){ document.getElementById(cardId)?.classList.toggle('has-file', !!has); }
   function classifyByName(name){
+    if (!name) return null;
     const low = (name||'').toLowerCase();
-    if (low.includes('master')) return 'master';
-    if (low.includes('sched')) return 'schedule';
-    if (low.includes('bal') || low.includes('boh')) return 'balance';
+    const raw = name||'';
+    // Master: 料号主表 / master / item master / 料号
+    if (raw.includes('料号') || raw.includes('主表') || low.includes('master') || low.includes('item_master') || low.includes('item master')) return 'master';
+    // Schedule: 排产结果表 / schedule / 排产
+    if (raw.includes('排产') || low.includes('sched') || low.includes('排产结果')) return 'schedule';
+    // Balance: 结存表 / balance / boh
+    if (raw.includes('结存') || low.includes('bal') || low.includes('boh')) return 'balance';
+    // Fallback: if filename contains SKU/PN etc? Keep for compat
     return null;
   }
   function updateBtn(){

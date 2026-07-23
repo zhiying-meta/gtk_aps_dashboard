@@ -258,7 +258,9 @@ def bal_col_key(r: BalanceRow, col_dim: str) -> str:
 
 # ---------- aggregation ----------
 def build_io_sched(sched: List[ScheduleRow], dim_col: str, cols: List[dict], plan_item: str, cumulative: bool, col_dim: str):
-    filtered = [r for r in sched if r.PlanItem == plan_item]
+    # Case-insensitive PlanItem matching (fix 0 rows when INPUT is lowercase or with spaces)
+    plan_upper = (plan_item or "").strip().upper()
+    filtered = [r for r in sched if (r.PlanItem or "").strip().upper() == plan_upper]
     if not filtered:
         return [], []
 
@@ -294,7 +296,8 @@ def build_io_sched(sched: List[ScheduleRow], dim_col: str, cols: List[dict], pla
 
 
 def build_io_sched_detail(sched: List[ScheduleRow], cols: List[dict], plan_item: str, cumulative: bool, col_dim: str):
-    filtered = [r for r in sched if r.PlanItem == plan_item]
+    plan_upper = (plan_item or "").strip().upper()
+    filtered = [r for r in sched if (r.PlanItem or "").strip().upper() == plan_upper]
     if not filtered:
         return [], []
 
@@ -463,6 +466,19 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     wb.close()
 
     fg_set, gb_set = set(fg_items), set(gb_items)
+    # Build case-insensitive maps for robust SKU matching (fix 0 schedule rows when master/schedule case differs)
+    sku_upper_map = {}  # upper -> original canonical
+    sku_lower_map = {}  # lower -> original
+    for _it in all_items_set:
+        _up = str(_it).strip().upper()
+        _lo = str(_it).strip().lower()
+        if _up not in sku_upper_map:
+            sku_upper_map[_up] = _it
+        if _lo not in sku_lower_map:
+            sku_lower_map[_lo] = _it
+    sku_upper_set = set(sku_upper_map.keys())
+    sku_lower_set = set(sku_lower_map.keys())
+
     # for generic filtering, include all known items
     sched_by_cat = defaultdict(list)
     bal_by_cat = defaultdict(list)
@@ -482,18 +498,48 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     plan_date_idx = _get_col_index(headers2, "PLAN_DATE")
     plan_val_idx = _get_col_index(headers2, "PLAN_VALUE")
 
+    # If headers missing, try fallback by position (common when user file has different header names)
+    if line_idx < 0: line_idx = 0
+    if shift_idx < 0: shift_idx = 1
+    if plan_item_idx < 0: plan_item_idx = 2
+    if sku_idx < 0: sku_idx = 3
+    if plan_date_idx < 0: plan_date_idx = 4
+    if plan_val_idx < 0: plan_val_idx = 5
+
     sched_fg, sched_gb = [], []
     line_fg_set, line_gb_set = set(), set()
+    # stats for debugging 0 rows
+    _sched_total = 0
+    _sched_skip_no_sku = 0
+    _sched_skip_sku_not_in_master = 0
+    _sched_skip_no_date = 0
+    _sched_kept = 0
 
     for row in ws2.iter_rows(min_row=2, values_only=True):
+        _sched_total += 1
         if not row or len(row) <= max(line_idx, shift_idx, plan_item_idx, sku_idx, plan_date_idx, plan_val_idx):
+            _sched_skip_no_sku += 1
             continue
         sku_raw = row[sku_idx]
         if not sku_raw:
+            _sched_skip_no_sku += 1
             continue
-        sku = str(sku_raw).strip()
-        if sku not in all_items_set:
+        sku_stripped = str(sku_raw).strip()
+        if not sku_stripped:
+            _sched_skip_no_sku += 1
             continue
+        # Robust SKU lookup: exact -> upper -> lower
+        sku_canonical = None
+        if sku_stripped in all_items_set:
+            sku_canonical = sku_stripped
+        elif sku_stripped.upper() in sku_upper_map:
+            sku_canonical = sku_upper_map[sku_stripped.upper()]
+        elif sku_stripped.lower() in sku_lower_map:
+            sku_canonical = sku_lower_map[sku_stripped.lower()]
+        else:
+            _sched_skip_sku_not_in_master += 1
+            continue
+        sku = sku_canonical
         try:
             val = float(row[plan_val_idx]) if row[plan_val_idx] not in (None, "") else 0.0
         except Exception:
@@ -503,25 +549,42 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
                 val = 0.0
         pd = _to_datetime(row[plan_date_idx])
         if not pd:
+            _sched_skip_no_date += 1
             continue
+        # Normalize PlanItem to upper trimmed for case-insensitive matching (INPUT/OUTPUT etc)
+        plan_item_raw = str(row[plan_item_idx] or "").strip()
+        plan_item_norm = plan_item_raw.upper()
         sr = ScheduleRow(
             LineCode=str(row[line_idx] or "").strip(),
             ShiftName=str(row[shift_idx] or "").strip(),
-            PlanItem=str(row[plan_item_idx] or "").strip(),
+            PlanItem=plan_item_norm,
             SKU=sku,
             PlanDate=pd,
             PlanValue=val,
-            Style=item_to_style.get(sku, ""),
+            Style=item_to_style.get(sku, "") or item_to_style.get(sku_canonical, ""),
         )
-        # legacy FG/GB
-        if sku in fg_set:
+        _sched_kept += 1
+        # legacy FG/GB - use canonical mapping
+        if sku in fg_set or sku_upper_map.get(sku.upper(), "") in fg_set or sku_lower_map.get(sku.lower(), "") in fg_set:
             sched_fg.append(sr)
             if sr.LineCode:
                 line_fg_set.add(sr.LineCode)
-        elif sku in gb_set:
+        elif sku in gb_set or sku_upper_map.get(sku.upper(), "") in gb_set or sku_lower_map.get(sku.lower(), "") in gb_set:
             sched_gb.append(sr)
             if sr.LineCode:
                 line_gb_set.add(sr.LineCode)
+        else:
+            # If SKU not in FG/GB set but in all_items, still check via cat mapping (generic)
+            # For legacy counters, try cat
+            _cat_tmp = item_to_cat.get(sku, "")
+            if _cat_tmp == "成品":
+                sched_fg.append(sr)
+                if sr.LineCode:
+                    line_fg_set.add(sr.LineCode)
+            elif _cat_tmp == "GB":
+                sched_gb.append(sr)
+                if sr.LineCode:
+                    line_gb_set.add(sr.LineCode)
 
         # generic
         cat = item_to_cat.get(sku, "RAW")
@@ -536,6 +599,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         if sr.LineCode:
             lines_by_cat[cat_key].add(sr.LineCode)
     wb2.close()
+    print(f"[IO] Sched stats: total={_sched_total}, kept={_sched_kept}, skip_no_sku={_sched_skip_no_sku}, skip_not_in_master={_sched_skip_sku_not_in_master}, skip_no_date={_sched_skip_no_date}, master_count={len(all_items_set)}")
 
     bal_path = _find_file(data_dir, "结存表.xlsx", ["结存表", "结存", "balance"])
     if not bal_path or not os.path.exists(bal_path):
@@ -556,9 +620,20 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         item_raw = row[bal_item_idx]
         if not item_raw:
             continue
-        item_code = str(item_raw).strip()
-        if item_code not in all_items_set:
+        item_stripped = str(item_raw).strip()
+        if not item_stripped:
             continue
+        # robust lookup
+        item_canonical = None
+        if item_stripped in all_items_set:
+            item_canonical = item_stripped
+        elif item_stripped.upper() in sku_upper_map:
+            item_canonical = sku_upper_map[item_stripped.upper()]
+        elif item_stripped.lower() in sku_lower_map:
+            item_canonical = sku_lower_map[item_stripped.lower()]
+        else:
+            continue
+        item_code = item_canonical
         try:
             qty = float(row[bal_qty_idx]) if row[bal_qty_idx] not in (None, "") else 0.0
         except Exception:
@@ -576,9 +651,9 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
             BalanceQty=qty,
             Style=item_to_style.get(item_code, ""),
         )
-        if item_code in fg_set:
+        if item_code in fg_set or sku_upper_map.get(item_code.upper(), "") in fg_set:
             bal_fg.append(br)
-        elif item_code in gb_set:
+        elif item_code in gb_set or sku_upper_map.get(item_code.upper(), "") in gb_set:
             bal_gb.append(br)
 
         # generic

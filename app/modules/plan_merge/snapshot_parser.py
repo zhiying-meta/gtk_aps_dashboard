@@ -257,28 +257,79 @@ def parse_plan_output(file_path):
     """
     Parse gated/ungated排产结果表.xlsx -> {PN: {date: value}}
     Filter PLAN_ITEM == OUTPUT, group by SKU + PLAN_DATE sum PLAN_VALUE
+    Robust: case-insensitive column names & values, trims spaces, fallback if no OUTPUT found.
     """
     df = _read_excel_safe(file_path, sheet_name=0)
-    # Expected columns: SKU, PLAN_DATE, PLAN_VALUE, PLAN_ITEM
-    if "PLAN_ITEM" in df.columns:
-        df = df[df["PLAN_ITEM"] == "OUTPUT"]
+    if df.empty:
+        return {}
+    # Normalize column names: trim and upper for lookup, but keep original
+    col_map = {str(c).strip(): str(c).strip() for c in df.columns}
+    col_upper_map = {str(c).strip().upper(): c for c in df.columns}
+    # Find actual column names (case-insensitive)
+    def _find_col(candidates):
+        for cand in candidates:
+            if cand in df.columns:
+                return cand
+            # case-insensitive search
+            upper = cand.upper()
+            if upper in col_upper_map:
+                return col_upper_map[upper]
+        return None
+
+    plan_item_col = _find_col(["PLAN_ITEM", "Plan_Item", "plan_item"])
+    sku_col = _find_col(["SKU", "PN", "PN_CODE", "ITEM_NO", "sku"])
+    plan_date_col = _find_col(["PLAN_DATE", "Plan_Date", "DATE", "plan_date"])
+    plan_value_col = _find_col(["PLAN_VALUE", "Plan_Value", "VALUE", "QTY", "PlanValue"])
+
+    if not sku_col or not plan_date_col or not plan_value_col:
+        # Try fallback: guess by position or existing columns
+        # If critical columns missing, return empty but log
+        print(f"[parse_plan_output] Missing critical columns in {os.path.basename(str(file_path))}: found {list(df.columns)}")
+        # Attempt to use whatever available
+        sku_col = sku_col or (df.columns[6] if len(df.columns) > 6 else None)
+        plan_date_col = plan_date_col or (df.columns[7] if len(df.columns) > 7 else None)
+        plan_value_col = plan_value_col or (df.columns[8] if len(df.columns) > 8 else None)
+        if not sku_col or not plan_date_col or not plan_value_col:
+            return {}
+
+    # Filter by PLAN_ITEM == OUTPUT (case-insensitive, trimmed)
+    if plan_item_col and plan_item_col in df.columns:
+        # Normalize values
+        series = df[plan_item_col].astype(str).str.strip().str.upper()
+        # Keep rows where normalized == OUTPUT
+        filtered = df[series == "OUTPUT"]
+        if not filtered.empty:
+            df = filtered
+        else:
+            # Fallback: if no OUTPUT found, check if all values are non-OUTPUT (e.g., user file has no PLAN_ITEM filtering)
+            # If original df had rows but filtered empty, log and use original (treat all as OUTPUT) to avoid silent empty
+            # Only fallback if original had >0 rows and no OUTPUT at all
+            if len(df) > 0 and (series == "OUTPUT").sum() == 0:
+                print(f"[parse_plan_output] No OUTPUT rows found in {os.path.basename(str(file_path))} (values: {series.unique()[:5]}), fallback to use all rows as OUTPUT")
+                # Use original df (no filter) – user may have file without PLAN_ITEM distinction
+                pass
+            else:
+                df = filtered
+
     if df.empty:
         return {}
     # Clean
-    df["SKU"] = df["SKU"].astype(str).str.strip()
-    df["PLAN_DATE_NORM"] = df["PLAN_DATE"].apply(_norm_date)
-    df["PLAN_VALUE"] = pd.to_numeric(df["PLAN_VALUE"], errors="coerce").fillna(0)
+    df[sku_col] = df[sku_col].astype(str).str.strip()
+    # Use normalized date column name for grouping
+    df["PLAN_DATE_NORM"] = df[plan_date_col].apply(_norm_date)
+    df["PLAN_VALUE_NORM"] = pd.to_numeric(df[plan_value_col], errors="coerce").fillna(0)
+    # Use found column names for grouping
+    grouped = df.groupby([sku_col, "PLAN_DATE_NORM"])["PLAN_VALUE_NORM"].sum().reset_index()
 
-    grouped = df.groupby(["SKU", "PLAN_DATE_NORM"])["PLAN_VALUE"].sum().reset_index()
     result = defaultdict(dict)
     for _, row in grouped.iterrows():
-        sku = str(row["SKU"]).strip()
+        sku = str(row[sku_col]).strip()
         if not sku or sku.lower() == "nan":
             continue
         date = row["PLAN_DATE_NORM"]
         if not date:
             continue
-        val = float(row["PLAN_VALUE"])
+        val = float(row["PLAN_VALUE_NORM"])
         if val == 0:
             # Keep zero? In legacy read_sheet, only non-zero? But we keep zeros? Engine filters later
             # To match legacy, only keep if value is int/float, but we can keep all and engine will handle
@@ -589,38 +640,29 @@ def detect_snapshot_files(uploaded_files):
     mapping = {}
     for fp in uploaded_files:
         name = os.path.basename(str(fp)).lower()
-        # Item
-        if "料号快照" in name or "item" in name or "料号" in name:
+        # Item - check first, avoid matching bom containing item? but item keyword is generic
+        # Use more specific: if "料号快照" or exact item pattern, but keep simple
+        if "料号快照" in name or ("item" in name and "snapshot" in name) or name.startswith("item") or "料号" in name:
             # Prefer filled
             if "filled" in name or "filled" in str(fp).lower():
                 mapping["item_filled"] = str(fp)
             if "item" not in mapping or "filled" in name:
-                # Keep filled as primary
                 pass
-            # Use filled as item if exists
             mapping["item"] = str(fp) if "item" not in mapping else mapping["item"]
-            # If filled exists, override
             if "filled" in name:
                 mapping["item"] = str(fp)
+        # BOM needs to be checked before generic item to avoid overlap? Keep separate
         if "bom" in name:
             mapping["bom"] = str(fp)
-        if "gated" in name and "ungated" not in name and ("排产" in name or "plan" in name or "output" in name or "gated" in name):
-            # Distinguish gated vs ungated
-            if "ungated" in name:
-                mapping["ungated"] = str(fp)
-            else:
-                # Check if filename contains gated but not ungated
-                if "gated" in name and "ungated" not in name:
-                    # Could be gated
-                    # If name has "gated" and not "ungated", assign gated
-                    # Need to avoid overwriting if both contain gated
-                    if "gated" in mapping and "ungated" not in mapping:
-                        # already have gated, this might be ungated if name contains ungated?
-                        pass
-                    if "ungated" not in name:
-                        mapping["gated"] = str(fp)
+        # Gated/Ungated - IMPORTANT: check ungated BEFORE gated because ungated contains gated substring
+        # Support both Chinese and English naming like Gated_Schedule.xlsx, Ungated_Schedule.xlsx
         if "ungated" in name:
             mapping["ungated"] = str(fp)
+        elif "gated" in name:
+            # Only assign gated if not already ungated (already handled by if-elif)
+            # Additional check: ensure it's plausibly a schedule file (contains 排产, schedule, plan, output, gated)
+            # But even if not, if name contains gated, treat as gated schedule
+            mapping["gated"] = str(fp)
         if "fcst" in name and "主表" in name:
             mapping["fcst_main"] = str(fp)
         if "fcst" in name and "明细" in name:
@@ -663,29 +705,24 @@ def detect_snapshot_files(uploaded_files):
     if "item_filled" in mapping:
         mapping["item"] = mapping["item_filled"]
 
-    # Heuristics for gated/ungated when filenames are exactly "gated排产结果表.xlsx"
+    # Heuristics for gated/ungated - second pass to ensure correct mapping
     # Must check ungated first because "ungated" contains "gated" substring
     for fp in uploaded_files:
         base = os.path.basename(str(fp)).lower()
-        # Ungated first
-        if "ungated排产" in base or base == "ungated排产结果表.xlsx":
+        # English Schedule naming: support schedule keyword
+        # Check ungated first
+        if "ungated" in base:
             mapping["ungated"] = str(fp)
-        elif "gated排产" in base or base == "gated排产结果表.xlsx":
-            # Ensure not ungated (already handled)
-            if "ungated" not in base:
+        elif "gated" in base:
+            # Ensure not overwriting ungated file as gated
+            # Only set if gated not already pointing to ungated file
+            if "gated" not in mapping or "ungated" not in mapping.get("gated", "").lower():
                 mapping["gated"] = str(fp)
-            else:
-                # If base is ungated but also contains gated排产, it was already set as ungated above
-                # To be safe, if gated not yet set and base contains gated but not ungated, set gated
-                pass
-        # Fallback English simple
-        if "ungated" in base and "gated" in base:
-            # This is ungated file (since ungated contains gated)
+        # Chinese exact names
+        if "ungated排产" in base:
             mapping["ungated"] = str(fp)
-        elif "gated" in base and "ungated" not in base:
-            # Only gated
-            if "gated" not in mapping or "ungated" in mapping.get("gated","").lower():
-                mapping["gated"] = str(fp)
+        elif "gated排产" in base and "ungated" not in base:
+            mapping["gated"] = str(fp)
 
     # Final pass: ensure gated not pointing to ungated file
     if "gated" in mapping and "ungated" in mapping:

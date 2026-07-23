@@ -121,37 +121,16 @@ function handleProcessedData(data, fileName, isClient){
   _lastLoadedInfo = { fileName, rows:allRows.length, time:timeStr, msg:`Ready: ${allRows.length} rows`, fileMsg: fileName };
   saveLoadStatus(_lastLoadedInfo);
 
-  const savedFilter={};
-  for (const n of ['sku','usage','style','color','type','detail']){
-    const m=document.getElementById(n+'-menu');
-    if(!m) continue;
-    savedFilter[n]=Array.from(m.querySelectorAll('input[data-val]:checked')).map(cb=>cb.dataset.val);
-    const menu=m;
-    const total=parseInt(menu.dataset.totalVals)||0;
-    savedFilter[n]._all=savedFilter[n].length===total;
-  }
-  const savedAgg=Array.from(document.querySelectorAll('.pivot-field:checked')).map(cb=>cb.value);
-  setupDropdowns(); applyFilters();
-  for (const n of ['sku','usage','style','color','type','detail']){
-    const vals=savedFilter[n];
-    if(!vals) continue;
-    const m=document.getElementById(n+'-menu');
-    if(!m) continue;
-    const total=parseInt(m.dataset.totalVals)||0;
-    if(vals._all || vals.length===total) continue;
-    const allCb=m.querySelector('.dropdown-all input');
-    if(allCb && allCb.checked){ allCb.checked=false; allCb.dispatchEvent(new Event('change')); }
-    for(const val of vals){
-      const menuEl=document.getElementById(n+'-menu');
-      const cb=Array.from(menuEl.querySelectorAll('input[data-val]')).find(c=>c.dataset.val===val);
-      if(cb && !cb.checked){ cb.checked=true; cb.dispatchEvent(new Event('change')); }
-    }
-  }
-  document.querySelectorAll('.pivot-field').forEach(cb=>{
-    const shouldCheck=savedAgg.includes(cb.value);
-    if(cb.checked!==shouldCheck){ cb.checked=shouldCheck; cb.dispatchEvent(new Event('change')); }
-  });
-  applyFilters(); render();
+  // Fix: Reset all filters to show all data on new upload.
+  // Previously saved filters could hide Ungated (e.g., if user unchecked Ungated before, re-upload kept it hidden).
+  // Now we always reset to All checked to ensure Gated/Ungated/ExF/CTB all visible after import.
+  // Clear pivot aggregate as well to show detail view by default
+  pivotFields = [];
+  document.querySelectorAll('.pivot-field').forEach(cb=>{ cb.checked=false; });
+  // Setup dropdowns with all checked and apply
+  setupDropdowns();
+  applyFilters();
+  render();
 }
 
 function initStaticUI(){
@@ -1668,10 +1647,27 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
       a.click();
       setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 
-      if(status) status.textContent='✅ Generated: ' + fname + ' (' + (blob.size/1024).toFixed(1) + 'KB)';
+      if(status) status.textContent='✅ Downloaded: ' + fname + ' (' + (blob.size/1024).toFixed(1) + 'KB) → Check your Downloads folder';
       if(resultDiv){
         resultDiv.style.display='block';
-        resultDiv.innerHTML='<div style="background:#dcfce7;border:1px solid #86efac;padding:8px;border-radius:6px;color:#065f46">✅ Success - Standard CTB.xlsx generated<br>• Contains 2 sheets: ctb_sku_cum (SKU PN x dates) and ctb_gb_cum (GB PN x dates)<br>• GB mapped via 料号表 Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>• SKU has explicit SKU PN<br>• You can now use this file in main Packout upload as CTB.xlsx</div>';
+        const sizeKB = (blob.size/1024).toFixed(1);
+        resultDiv.innerHTML=`
+          <div style="background:#dcfce7;border:1px solid #86efac;padding:10px 12px;border-radius:8px;color:#065f46;line-height:1.6">
+            <div style="font-weight:700;font-size:12px;margin-bottom:6px">✅ Success - Standard CTB.xlsx generated & downloaded</div>
+            <div style="background:#fff;border:1px solid #bbf7d0;border-radius:6px;padding:6px 8px;margin:6px 0;font-family:monospace;font-size:11px">
+              📁 File: <b>${fname}</b> (${sizeKB}KB)<br>
+              📂 Saved to: <b>Browser Downloads folder</b><br>
+              <span style="color:#047857">• macOS: ~/Downloads/${fname}</span><br>
+              <span style="color:#047857">• Windows: C:\\Users\\YourName\\Downloads\\${fname}</span><br>
+              <span style="color:#64748b">💡 Check bottom download bar or chrome://downloads/ | If blocked, allow download in browser</span>
+            </div>
+            <div style="font-size:11px;color:#065f46">
+              • Contains 2 sheets: <code>ctb_sku_cum</code> (SKU PN x dates) and <code>ctb_gb_cum</code> (GB PN x dates)<br>
+              • GB mapped via 料号表 Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>
+              • SKU has explicit SKU PN<br>
+              • 👉 Next: Use this file in main Packout flow as <b>CTB.xlsx</b> (drag to CTB upload slot)
+            </div>
+          </div>`;
       }
 
     }catch(e){
