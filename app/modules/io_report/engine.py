@@ -153,6 +153,47 @@ def _get_col_index(headers: List, target: str) -> int:
     return -1
 
 
+def _get_col_index_by_candidates(headers: List, candidates: List[str]) -> int:
+    """Try multiple candidate names for same column, return first found index"""
+    if not headers or not candidates:
+        return -1
+    # Normalize headers for matching
+    norm_headers = [(str(h).strip() if h else "", str(h).strip().upper() if h else "") for h in headers]
+    for cand in candidates:
+        cand_strip = str(cand).strip()
+        cand_up = cand_strip.upper()
+        for i, (orig, up) in enumerate(norm_headers):
+            if orig == cand_strip:
+                return i
+            if up == cand_up:
+                return i
+    # Fallback: contains match
+    for cand in candidates:
+        cand_up = str(cand).strip().upper()
+        for i, (orig, up) in enumerate(norm_headers):
+            if cand_up and (cand_up in up or up in cand_up):
+                return i
+    return -1
+
+
+def _load_workbook_robust(path: str):
+    """
+    Robustly load workbook: try read_only=False first (handles files with no default style and 17M large files),
+    fallback to read_only=True if needed. Returns workbook.
+    """
+    import openpyxl
+    # First try read_only=False (handles 17M files in data/20260723 that fail with read_only=True)
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
+        return wb
+    except Exception as e1:
+        try:
+            wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+            return wb
+        except Exception as e2:
+            raise FileNotFoundError(f"Failed to open {path}: {e1} / {e2}")
+
+
 def _find_header_row(ws, expected_keywords, scan_rows=15):
     """
     Scan first scan_rows rows to find header row containing at least 2 expected keywords.
@@ -509,13 +550,14 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     if not mm_path or not os.path.exists(mm_path):
         raise FileNotFoundError(f"料号主表.xlsx not found in {data_dir}")
 
-    wb = openpyxl.load_workbook(mm_path, data_only=True, read_only=True)
+    wb = _load_workbook_robust(mm_path)
     # Search best sheet for master: supports file with multiple sheets, pick best match
-    best_sheet, ws, header_row_idx, headers, _score = _find_best_sheet_and_header(wb, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE"])
+    # Support alias SYLTE for STYLE (data/20260723/料号快照.xlsx uses SYLTE)
+    best_sheet, ws, header_row_idx, headers, _score = _find_best_sheet_and_header(wb, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE", "SYLTE"])
     print(f"[IO] Master: best sheet={best_sheet}, header_row={header_row_idx}, score={_score}, headers={headers}")
-    item_no_idx = _get_col_index(headers, "ITEM_NO")
-    prod_cat_idx = _get_col_index(headers, "PRODUCT_CATEGORY")
-    style_idx = _get_col_index(headers, "PRODUCT_STYLE")
+    item_no_idx = _get_col_index_by_candidates(headers, ["ITEM_NO", "ITEM_CODE", "SKU", "PN"])
+    prod_cat_idx = _get_col_index_by_candidates(headers, ["PRODUCT_CATEGORY", "CATEGORY", "PRODUCT_CAT"])
+    style_idx = _get_col_index_by_candidates(headers, ["PRODUCT_STYLE", "SYLTE", "STYLE", "PRODUCT_STYLE_NAME"])
     if item_no_idx < 0 or prod_cat_idx < 0:
         raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers} (detected at row {header_row_idx} in sheet {best_sheet}, score={_score})")
 
@@ -584,15 +626,16 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     if not sched_path or not os.path.exists(sched_path):
         raise FileNotFoundError(f"排产结果表.xlsx not found in {data_dir}")
 
-    wb2 = openpyxl.load_workbook(sched_path, data_only=True, read_only=True)
+    wb2 = _load_workbook_robust(sched_path)
     sched_best_sheet, ws2, sched_header_row_idx, headers2, sched_score = _find_best_sheet_and_header(wb2, ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE", "SHIFT_NAME"])
     print(f"[IO] Schedule: best sheet={sched_best_sheet}, header_row={sched_header_row_idx}, score={sched_score}/6, headers={headers2}")
-    line_idx = _get_col_index(headers2, "LINE_CODE")
-    shift_idx = _get_col_index(headers2, "SHIFT_NAME")
-    plan_item_idx = _get_col_index(headers2, "PLAN_ITEM")
-    sku_idx = _get_col_index(headers2, "SKU")
-    plan_date_idx = _get_col_index(headers2, "PLAN_DATE")
-    plan_val_idx = _get_col_index(headers2, "PLAN_VALUE")
+    # Support aliases: SKU can be ITEM_CODE, ITEM_NO, etc. PLAN_VALUE can be SHIFT_OUT_QTY etc for some variants, but we keep strict for schedule
+    line_idx = _get_col_index_by_candidates(headers2, ["LINE_CODE", "LINE"])
+    shift_idx = _get_col_index_by_candidates(headers2, ["SHIFT_NAME", "SHIFT_CODE"])
+    plan_item_idx = _get_col_index_by_candidates(headers2, ["PLAN_ITEM", "PLAN_TYPE"])
+    sku_idx = _get_col_index_by_candidates(headers2, ["SKU", "ITEM_NO", "ITEM_CODE", "PN", "SKU_CODE"])
+    plan_date_idx = _get_col_index_by_candidates(headers2, ["PLAN_DATE", "MPS_DATE", "DATE"])
+    plan_val_idx = _get_col_index_by_candidates(headers2, ["PLAN_VALUE", "VALUE", "QTY", "PLAN_QTY", "SHIFT_OUT_QTY"])
 
     # If headers missing, try fallback by position (common when user file has different header names)
     if line_idx < 0: line_idx = 0
@@ -701,13 +744,13 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     if not bal_path or not os.path.exists(bal_path):
         raise FileNotFoundError(f"结存表.xlsx not found in {data_dir}")
 
-    wb3 = openpyxl.load_workbook(bal_path, data_only=True, read_only=True)
+    wb3 = _load_workbook_robust(bal_path)
     bal_best_sheet, ws3, bal_header_row_idx, headers3, bal_score = _find_best_sheet_and_header(wb3, ["PLAN_DATE", "ITEM_CODE", "BALANCE_QTY", "SHIFT_NAME"])
     print(f"[IO] Balance: best sheet={bal_best_sheet}, header_row={bal_header_row_idx}, score={bal_score}/4, headers={headers3}")
-    bal_date_idx = _get_col_index(headers3, "PLAN_DATE")
-    bal_shift_idx = _get_col_index(headers3, "SHIFT_NAME")
-    bal_item_idx = _get_col_index(headers3, "ITEM_CODE")
-    bal_qty_idx = _get_col_index(headers3, "BALANCE_QTY")
+    bal_date_idx = _get_col_index_by_candidates(headers3, ["PLAN_DATE", "MPS_DATE", "DATE"])
+    bal_shift_idx = _get_col_index_by_candidates(headers3, ["SHIFT_NAME", "SHIFT_CODE"])
+    bal_item_idx = _get_col_index_by_candidates(headers3, ["ITEM_CODE", "ITEM_NO", "SKU", "PN"])
+    bal_qty_idx = _get_col_index_by_candidates(headers3, ["BALANCE_QTY", "BALANCE", "QTY", "SHIFT_OUT_QTY"])
 
     bal_fg, bal_gb = [], []
     for row in ws3.iter_rows(min_row=bal_header_row_idx + 1, values_only=True):
