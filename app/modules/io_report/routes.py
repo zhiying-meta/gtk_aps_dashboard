@@ -17,15 +17,26 @@ DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 
 def _ensure_cache():
+    # Lazy check: don't auto-load large files on import (data/ may have 17M files, causes slow startup)
+    # Only check if files exist, not load them
     try:
+        import pathlib
+        base = pathlib.Path(DEFAULT_DATA_DIR)
+        has_files = any((base / fn).exists() for fn in TARGET_MAP.values())
+        if not has_files:
+            # No persisted files, not ready
+            return False
+        # Has files, try to get cache but don't print heavy logs
         get_cache(DEFAULT_DATA_DIR)
         return True
     except Exception as e:
-        print(f"[IO] cache not ready: {e}")
+        # Don't print on every startup to keep logs clean, only debug
+        # print(f"[IO] cache not ready: {e}")
         return False
 
 
-_ensure_cache()
+# Don't auto-load at import to keep startup fast (especially with 17M files in data/20260723 pattern)
+# _ensure_cache() will be called lazily in status endpoint
 
 
 def _json_error(msg, code=500):
@@ -474,12 +485,19 @@ def api_upload():
             traceback.print_exc()
             return _json_error(f"validation failed: {ve}", 400)
 
-        os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
-        for fn in TARGET_MAP.values():
-            shutil.copyfile(os.path.join(tmp_dir, fn), os.path.join(DEFAULT_DATA_DIR, fn))
-
-        cache = reload_cache(DEFAULT_DATA_DIR)
-        return jsonify({"ok": True, "fg": len(cache.fg_items), "gb": len(cache.gb_items)})
+        # User request: load之后的文件不要再次保存 (don't persist to data/ folder)
+        # Keep cache in memory only, so restart = Not Ready
+        import app.modules.io_report.engine as eng
+        from app.modules.io_report.engine import _resolve_data_dir as _resolve
+        eng._global_cache = tmp_cache
+        # Set data_dir to default data dir path so subsequent get_cache calls return memory cache (not reload from disk)
+        # Even though files are not saved to disk, cache is kept in memory
+        try:
+            eng._global_data_dir = _resolve(DEFAULT_DATA_DIR)
+        except Exception:
+            eng._global_data_dir = DEFAULT_DATA_DIR
+        cache = tmp_cache
+        return jsonify({"ok": True, "fg": len(cache.fg_items), "gb": len(cache.gb_items), "persist": False, "note": "In-memory only, not saved to data/ per user request - restart will be Not Ready"})
     except Exception as e:
         import traceback
 
