@@ -8,49 +8,26 @@ from functools import lru_cache
 
 from app.modules.plan_merge.config import DEFAULT_PALLET_QTY
 
-_DATE_FORMATS = [
-    "%Y-%m-%d",
-    "%Y/%m/%d",
-    "%Y.%m.%d",
-    "%Y年%m月%d日",
-    "%Y年%m月%d",
-    "%Y-%m-%d %H:%M:%S",
-    "%Y/%m/%d %H:%M:%S",
-    "%m/%d/%Y",
-    "%d/%m/%Y",
-    "%Y%m%d",
-]
+# Refactored: use common date_utils to remove duplication, wrappers preserve original caching behavior
+from app.common.date_utils import to_dt as _common_to_dt, to_saturday_label as _common_to_sat, date_to_week_label_cached as _common_week_label, DATE_FORMATS as _DATE_FORMATS
 
 @lru_cache(maxsize=2048)
 def _to_dt(s):
-    """Parse date string with multiple format support (cached)."""
-    s = str(s).strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(s, fmt)
-        except ValueError:
-            continue
-    raise ValueError(f"unrecognized date: {s}")
+    """Wrapper around common - preserves lru_cache for backward compat"""
+    return _common_to_dt(s)
 
 
 @lru_cache(maxsize=2048)
 def _to_saturday_label(ds):
-    try: dt = _to_dt(ds)
-    except: return ds
-    dow = dt.weekday()
-    sat = dt + timedelta(days=5 - dow)
-    return sat.strftime("%Y-%m-%d")
+    try:
+        return _common_to_sat(ds)
+    except Exception:
+        return ds
 
-# cache for week label per (ds, cut_day)
+
 @lru_cache(maxsize=4096)
 def _date_to_week_label_cached(ds, cut_day):
-    td_map = {"Monday":0,"Tuesday":1,"Wednesday":2,"Thursday":3,"Friday":4,"Saturday":5,"Sunday":6}
-    td = td_map.get(cut_day, 5)
-    dt = _to_dt(ds)
-    cd = dt.weekday()
-    diff = (td - cd) % 7
-    week_end = dt + timedelta(days=diff)
-    return _to_saturday_label(week_end.strftime("%Y-%m-%d"))
+    return _common_week_label(ds, cut_day)
 
 
 def aggregate_cumulative(daily, cut_day):

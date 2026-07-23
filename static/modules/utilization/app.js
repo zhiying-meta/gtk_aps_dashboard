@@ -707,10 +707,10 @@
         if (selectedFiles.length === 0) return;
         const fileListShort = selectedFiles.map(f=>f.name).join(', ').slice(0,80);
         const spinnerEl = document.getElementById(`util-inline-spinner-${ver}`);
-        if (spinnerEl){ spinnerEl.style.display='inline-flex'; spinnerEl.querySelector('span:last-child')?.replaceChildren(); spinnerEl.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span> Loading: ${fileListShort}`; }
+        if (spinnerEl){ spinnerEl.style.display='inline-flex'; spinnerEl.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span> Loading: ${fileListShort}`; }
         if (statusEl){
           statusEl.style.background='#fef3c7'; statusEl.style.border='1px solid #fde68a'; statusEl.style.color='#92400e';
-          statusEl.textContent = `⏳ Loading: ${fileListShort}`;
+          statusEl.textContent = `⏳ Processing ${selectedFiles.length} file(s)...`;
         }
         const badge = document.getElementById('util-status-badge');
         btn.disabled = true;
@@ -776,6 +776,8 @@
       const fname = document.getElementById(`fname-${ver}`);
       const uploadBtn = document.getElementById(`btn-upload-${ver}`);
       const statusEl = document.getElementById(`status-${ver}-files`);
+      const spinnerEl = document.getElementById(`util-inline-spinner-${ver}`);
+      if(spinnerEl) spinnerEl.style.display='none';
       if(input) input.value = '';
       if(fname) fname.textContent = 'No file selected';
       if(uploadBtn) uploadBtn.disabled = true;
@@ -788,30 +790,34 @@
     document.getElementById('btn-clear-util')?.addEventListener('click', async ()=>{
       if(!confirm('Clear Utilization? Both will become Not Ready.')) return;
       const msgEl = document.getElementById('msg-clear-util');
-      if(msgEl) msgEl.textContent='Clearing...';
+      // Immediate Not Ready - loading is loading, clear is immediately Not Ready
+      if(msgEl) msgEl.textContent='Clearing... → Not Ready';
+      const badge = document.getElementById('util-status-badge');
+      if(badge) badge.innerHTML = `<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
+      const wrapper = document.getElementById('util-matrix-wrapper');
+      if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">Clearing... → Not Ready</div>`;
+      const mbadge = document.getElementById('util-matrix-badge');
+      if(mbadge) mbadge.textContent = 'Not Ready';
+      resetUploadInput('gated');
+      resetUploadInput('ungated');
+      try{ localStorage.removeItem(UTIL_LS_KEY); }catch{}
+      updateCardStatuses({loaded:false, versions:[], details:{}});
       try{
         const r = await fetch(`${API_CLEAR}?version=all`, {method:'POST'});
         const j = await r.json();
         if(!r.ok) throw new Error(j.error||'clear failed');
         if(msgEl) msgEl.textContent='Cleared — Not Ready';
-        resetUploadInput('gated');
-        resetUploadInput('ungated');
-        try{ localStorage.removeItem(UTIL_LS_KEY); }catch{}
         setTimeout(async ()=>{
           const st = await checkStatus();
-          const badge = document.getElementById('util-status-badge');
-          if(badge) badge.innerHTML = statusBadgeHTML(st);
+          const badge2 = document.getElementById('util-status-badge');
+          if(badge2) badge2.innerHTML = statusBadgeHTML(st);
           updateCardStatuses(st);
           await loadMeta().catch(()=>{});
           setupLineDropdown([]);
           setupVersionTypeDropdown();
-          const wrapper = document.getElementById('util-matrix-wrapper');
-          if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">All cleared — Not Ready</div>`;
-          const mbadge = document.getElementById('util-matrix-badge');
-          if(mbadge) mbadge.textContent = 'Not Ready';
-        }, 500);
+        }, 300);
       }catch(e){
-        if(msgEl) msgEl.textContent='Failed: '+e.message;
+        if(msgEl) msgEl.textContent='Cleared locally — Not Ready (server error: '+e.message+')';
       }
     });
 

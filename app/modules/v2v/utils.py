@@ -9,86 +9,9 @@ import openpyxl
 
 from .config import TABLE_DEFS
 
-# Date parsing - reuse from plan_merge
-_DATE_FORMATS = [
-    "%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y",
-    "%Y年%m月%d日", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S",
-    "%Y%m%d", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M"
-]
-
-def normalize_date_str(value):
-    """Try to normalize various date formats to YYYY-MM-DD"""
-    if value is None or value == "":
-        return ""
-    if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d")
-    s = str(value).strip()
-    # Try known formats
-    for fmt in _DATE_FORMATS:
-        try:
-            dt = datetime.strptime(s, fmt)
-            return dt.strftime("%Y-%m-%d")
-        except:
-            continue
-    # Try openpyxl date
-    try:
-        # If excel stored as datetime
-        if isinstance(value, (int, float)):
-            return s
-    except:
-        pass
-    return s
-
-def to_saturday(date_str: str) -> str:
-    """Convert any date to Saturday of that week (week ending)"""
-    try:
-        for fmt in _DATE_FORMATS:
-            try:
-                dt = datetime.strptime(str(date_str), fmt)
-                break
-            except:
-                continue
-        else:
-            # Try YYYY-MM-DD
-            dt = datetime.fromisoformat(str(date_str).split()[0].replace("/", "-"))
-        # weekday: Mon=0 ... Sun=6, Sat=5
-        # Calculate days to Saturday
-        dow = dt.weekday()
-        delta = (5 - dow) % 7
-        if delta == 0:
-            # If already Saturday, keep it
-            sat = dt
-        else:
-            from datetime import timedelta
-            sat = dt + timedelta(days=delta)
-            # If previous Saturday needed? Keep future Saturday for week ending
-            # Actually for week grouping Sun-Sat, if date is Sun, Sat is +6, etc.
-            # So using delta as above works for grouping to next Saturday?
-            # For past Saturday: if we want week ending Sat, dates Sun-Sat map to Sat
-            # Let's compute: For Mon (0), Sat is +5; for Sun (6), Sat is -1 (previous)
-            # So adjust:
-            if dow == 6:  # Sunday -> next Sat is +6? Actually week Sun-Sat, Sun is start, Sat is end +6? Wait.
-                # Define week Sun-Sat: Sun is day 0, Sat is day 6.
-                # So Saturday of same week: if today is Sunday, Saturday is in 6 days.
-                # Using future Saturday logic:
-                pass
-            # Recompute for Sun-Sat week definition:
-            # Let's use: days to Saturday = (5 - dow) if dow <=5 else -1? No.
-            # Simpler: For Sun-Sat week, Saturday is end. So Sun (6) +6 days = next Sat? That's next week.
-            # Actually if week is Sun-Sat, then Sunday of week W, Saturday of same week is +6 days.
-            # So Sun Jan 5 2025 -> Sat Jan 11 2025.
-            # Using weekday() Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
-            # For Sun (6), offset to Sat = +6? No, Sun is start, Sat is +6? Let's map:
-            # Sun=6, Mon=0...Sat=5
-            # For Sun (6), to get Sat of same week (Sun-Sat), Sat is 6 days later.
-            # For Mon (0), Sat is 5 days later.
-            # For Sat (5), Sat is 0 days.
-            # So formula: (5 - dow) %7 for Mon-Sat, but for Sun (6) -> (5-6)%7=6 which is +6, correct!
-            # So above delta is correct.
-            pass
-        return sat.strftime("%Y-%m-%d")
-    except Exception as e:
-        return str(date_str)
+# Refactored: use common date utils to remove duplication
+from app.common.date_utils import DATE_FORMATS as _DATE_FORMATS
+from app.common.date_utils import normalize_date_str, to_saturday
 
 
 def identify_table_type(filename: str) -> Optional[str]:

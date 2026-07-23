@@ -4,11 +4,13 @@ import shutil
 import tempfile
 import zipfile
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import jsonify, request, send_file
 
 from app.modules.io_report.engine import build_reports_for_group, get_cache, get_meta, reload_cache
-
-io_bp = Blueprint("io_report", __name__)
+from app.modules.io_report import io_bp
+from app.common.zip_handler import is_zip_file as _common_is_zip, extract_all_xlsx as _common_extract_all
+from app.common.template_builder import xlsx_buf as _common_xlsx_buf, zip_files as _common_zip_files
+from app.common.xlsx_validator import is_valid_xlsx_by_content
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -135,31 +137,11 @@ def _classify_upload(filename: str, field: str) -> str | None:
 
 
 def _is_zip_file(filename: str) -> bool:
-    return filename.lower().endswith(".zip")
+    return _common_is_zip(filename)
 
 
 def _extract_zip_to_tmp(zip_path: str, tmp_dir: str):
-    extracted = []
-    try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            for info in zf.infolist():
-                if info.is_dir():
-                    continue
-                # only care about xlsx
-                if not info.filename.lower().endswith(".xlsx"):
-                    continue
-                # extract
-                base = os.path.basename(info.filename)
-                # sanitize
-                target_path = os.path.join(tmp_dir, base)
-                # avoid overwrite with incremental
-                # read and write
-                with zf.open(info) as src, open(target_path, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                extracted.append(target_path)
-    except Exception as e:
-        print(f"[IO] zip extract failed {e}")
-    return extracted
+    return _common_extract_all(zip_path, tmp_dir)
 
 
 def _try_split_combined_xlsx(xlsx_path: str, tmp_dir: str) -> bool:
@@ -471,17 +453,7 @@ IO_SCHEMA = {
 
 
 def _xlsx_buf(header, rows=None):
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(header)
-    for r in rows or []:
-        ws.append(r)
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
+    return _common_xlsx_buf(header, rows)
 
 
 def _zip_io(empty=True):

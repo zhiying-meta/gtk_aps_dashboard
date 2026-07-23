@@ -17,6 +17,11 @@ from app.modules.plan_merge import plan_merge_bp
 from app.modules.plan_merge.engine import generate_excel, process_snapshot_data
 from app.modules.plan_merge.snapshot_parser import detect_snapshot_files
 
+# --- Refactored: use common utilities to reduce duplication ---
+from app.common.zip_handler import is_zip_file as _common_is_zip, extract_zip_to_tmp as _common_extract_zip
+from app.common.xlsx_validator import is_valid_xlsx_by_content as _common_is_valid_xlsx
+from app.common.template_builder import xlsx_buf as _common_xlsx_buf
+
 MODULE_DIR = os.path.dirname(__file__)
 TEMPLATE_DIR = os.path.join(MODULE_DIR, "templates")
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -90,119 +95,28 @@ def _classify_to_key(filename: str, field: str) -> str | None:
     return None
 
 def _is_zip_file(filename: str) -> bool:
-    return filename.lower().endswith(".zip")
+    return _common_is_zip(filename)
+
 
 def _is_valid_xlsx_by_content(file_path: str) -> bool:
-    """Check if file is xlsx by reading magic number PK"""
-    try:
-        if not os.path.exists(file_path):
-            return False
-        if os.path.getsize(file_path) < 10:
-            return False
-        with open(file_path, 'rb') as fh:
-            head = fh.read(4)
-            # xlsx is zip file, starts with PK
-            return head[:2] == b'PK'
-    except Exception:
-        return False
+    return _common_is_valid_xlsx(file_path)
 
 def _extract_zip_to_tmp(zip_path: str, tmp_dir: str):
-    extracted = []
-    try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            for info in zf.infolist():
-                if info.is_dir():
-                    continue
-                # Be more permissive: extract all files, not just .xlsx, and let later filtering decide
-                # But still skip obvious non-data files
-                raw_name = info.filename
-                # Try to handle encoding issues: zipfile may have cp437 encoded filenames
-                # os.path.basename handles both / and \
-                base = os.path.basename(raw_name)
-                # Skip hidden files and temp files
-                if not base or base.startswith('.') or base.startswith('~$'):
-                    continue
-                # If file doesn't look like xlsx and not in our target list, we still extract if size reasonable
-                # We'll check content later, but for now extract if name contains our keywords or ends with xlsx
-                low = base.lower()
-                # Extract if it ends with xlsx or contains known keywords (for files without extension due to encoding)
-                should_extract = low.endswith('.xlsx') or any(kw in low for kw in ["料号", "bom", "gated", "ungated", "fcst", "ctb"]) or any(kw in raw_name.lower() for kw in ["料号", "bom", "gated", "ungated", "fcst", "ctb"])
-                # Also extract if file has no extension but size > 1KB (could be xlsx with garbled name)
-                if not should_extract:
-                    # Check if file size > 1KB and maybe is xlsx
-                    try:
-                        # We need to peek without extracting fully – just check file size from ZipInfo
-                        if info.file_size > 1024:
-                            # If file name has no extension but is in our expected set, still extract
-                            # For safety, extract all files >1KB that are not obviously non-excel (like .txt, .docx etc)
-                            # We'll extract and later validate by content
-                            if '.' not in low or low.endswith(('.xls', '.xlsx')):
-                                should_extract = True
-                    except:
-                        pass
-                if not should_extract:
-                    # As fallback, extract any file that might be xlsx by content? We can't know without extracting.
-                    # We'll extract all files with size > 1KB to be safe, except known non-excel
-                    if info.file_size > 1024 and not low.endswith(('.txt', '.csv', '.pdf', '.png', '.jpg', '.docx')):
-                        should_extract = True
+    # Delegated to common with snapshot keywords to preserve original permissive behavior
+    return _common_extract_zip(
+        zip_path, tmp_dir,
+        allowed_keywords=["料号", "bom", "gated", "ungated", "fcst", "ctb"],
+        min_size=1024,
+        skip_exts=('.txt', '.csv', '.pdf', '.png', '.jpg', '.docx')
+    )
 
-                if not should_extract:
-                    continue
-
-                target_path = os.path.join(tmp_dir, base)
-                # Sanitize base to avoid path traversal and strip spaces
-                base = base.strip()
-                if not base:
-                    continue
-                target_path = os.path.join(tmp_dir, base)
-                # avoid overwrite
-                c = 1
-                b, e = os.path.splitext(target_path)
-                while os.path.exists(target_path):
-                    target_path = f"{b}_{c}{e}"
-                    c += 1
-                try:
-                    with zf.open(info) as src, open(target_path, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    # Validate content is xlsx (PK header)
-                    if _is_valid_xlsx_by_content(target_path):
-                        extracted.append(target_path)
-                    else:
-                        # If not valid xlsx, keep but mark? For now, if file is small and not PK, maybe still try to keep if name matches
-                        # Check if name matches expected snapshot names, keep even if content not PK (could be old xls)
-                        if any(kw in base.lower() for kw in ["料号", "bom", "gated", "ungated", "fcst", "ctb"]):
-                            extracted.append(target_path)
-                        else:
-                            # Remove invalid
-                            try:
-                                os.remove(target_path)
-                            except:
-                                pass
-                except Exception as ex:
-                    print(f"[PlanMerge] extract file {base} failed: {ex}")
-                    continue
-    except Exception as e:
-        print(f"[PlanMerge] zip extract failed {e}")
-        import traceback
-        traceback.print_exc()
-    return extracted
 
 def _json_error(msg, code=400):
     return jsonify({"error": msg}), code
 
 # ---------- Helpers for template/demo generation (like IO) ----------
 def _xlsx_buf(header, rows=None, sheet_name="Sheet1"):
-    import openpyxl
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet_name
-    ws.append(header)
-    for r in rows or []:
-        ws.append(r)
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
+    return _common_xlsx_buf(header, rows, sheet_name=sheet_name)
 
 def _zip_snapshot_templates(empty=True):
     """

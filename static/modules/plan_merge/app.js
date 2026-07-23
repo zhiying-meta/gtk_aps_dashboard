@@ -760,6 +760,10 @@ function clearPackout(clearMsg) {
     }
     const pmMsg2 = document.getElementById('pmPersistentMsg');
     if(pmMsg2) pmMsg2.textContent='';
+    const spinner2 = document.getElementById('pmInlineSpinner');
+    if(spinner2) spinner2.style.display='none';
+    const loadingEl = document.getElementById('loading');
+    if(loadingEl) loadingEl.style.display='none';
     // Clear localStorage
     try{
       localStorage.removeItem('plan_merge_last_load');

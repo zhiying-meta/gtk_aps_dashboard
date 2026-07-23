@@ -315,10 +315,10 @@ function attachUploadLogic(isCompact){
         const ce=document.getElementById('fname_combined_'+suffix);
         if(ce) ce.textContent=`✓ ${selected.length} files selected, classified ${['master','schedule','balance'].filter(k=>!!files[k]).length}/3. Click Upload to try auto-detect.`;
       }
-      // If we have 3 individual filled, enable
+      // If we have 3 individual filled, enable - combined stays empty to avoid duplicate display
       updateBtn();
-      // If we have partial but user selected 3 files, we will actually upload all 3 as combined via backend auto-classify
-      if(selected.length>=3){
+      // Only fallback to combined if not all 3 individual are filled (avoid duplicate 6 files display)
+      if(selected.length>=3 && !(files.master && files.schedule && files.balance)){
         files.combined=selected;
         markHasFile('card_combined_'+suffix,true);
         updateBtn();
@@ -330,24 +330,29 @@ function attachUploadLogic(isCompact){
     const btn=document.getElementById('uploadBtn_'+suffix);
     const badgeEl = document.getElementById('ioStatusBadge_'+suffix);
     const spinner = document.getElementById('ioInlineSpinner_'+suffix);
-    const allSel = [...(files.combined||[]), files.master, files.schedule, files.balance].filter(Boolean);
+    // Deduplicate: if combined already contains same files as individual, show only one set
+    const rawSel = [...(files.combined||[]), files.master, files.schedule, files.balance].filter(Boolean);
+    const seen = new Set();
+    const allSel = [];
+    for(const f of rawSel){
+      const key = f.name + '_' + (f.size||0);
+      if(!seen.has(key)){ seen.add(key); allSel.push(f); }
+    }
     const fileListShort = allSel.map(f=>f.name).join(', ').slice(0,80);
     btn.disabled=true; btn.textContent='⏳ Generating...';
     if(spinner){ spinner.style.display='inline-flex'; spinner.querySelector('span:last-child').textContent=`Loading: ${fileListShort}`; }
     if(prog) prog.textContent=`Processing ${allSel.length} file(s) – please wait…`;
     if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:12px;font-size:11px">⏳ Loading: ${allSel.length} files</span>`;
     const form=new FormData();
+    // Deduplicated upload: use combined if present, else individual - avoid double append that caused 6 files display
     if(files.combined && files.combined.length>0){
-      files.combined.forEach((f,i)=>{
-        form.append('file_'+i, f);
-        form.append('combined_'+i, f);
+      files.combined.forEach((f)=>{
+        form.append('files', f);
       });
-      if(files.combined.length===1){
-        form.append('combined', files.combined[0]);
-        form.append('file', files.combined[0]);
-      }
     } else {
-      form.append('master',files.master); form.append('schedule',files.schedule); form.append('balance',files.balance);
+      if(files.master) form.append('master',files.master);
+      if(files.schedule) form.append('schedule',files.schedule);
+      if(files.balance) form.append('balance',files.balance);
     }
     try{
       const resp=await fetch('/api/io/upload',{method:'POST',body:form});
@@ -382,21 +387,37 @@ function attachUploadLogic(isCompact){
   document.getElementById('btnClearIO_'+suffix)?.addEventListener('click', async ()=>{
     if(!confirm('Clear IO Report cache and files? It will become Not Ready, you can re-upload new files.')) return;
     const prog=document.getElementById('uploadProgress_'+suffix);
-    if(prog) prog.textContent='Clearing...';
+    const badgeEl = document.getElementById('ioStatusBadge_'+suffix);
+    const spinner = document.getElementById('ioInlineSpinner_'+suffix);
+    // Immediate Not Ready feedback - loading is loading, clear is immediately Not Ready
+    if(spinner) spinner.style.display='none';
+    if(badgeEl) badgeEl.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
+    if(prog) prog.innerHTML=`<span style="color:#92400e">⏳ Clearing... → Not Ready</span>`;
+    try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
+    _ioClientCache=null;
+    // Clear file inputs immediately
+    ['master','schedule','balance','combined'].forEach(k=>{
+      const el=document.getElementById('fname_'+k+'_'+suffix);
+      if(el) el.textContent='';
+      const card=document.getElementById('card_'+k+'_'+suffix);
+      if(card) card.classList.remove('has-file');
+      const inp=document.getElementById('input_'+k+'_'+suffix);
+      if(inp) inp.value='';
+    });
     try{
       const r=await fetch('/api/io/clear',{method:'POST'});
       const text = await r.text();
       let j;
       try{ j=JSON.parse(text); }catch{
-        // If not JSON (e.g., 404 HTML), throw with status and snippet
         throw new Error(`Clear failed: HTTP ${r.status} — ${text.slice(0,200)} — Please restart server to load new clear endpoint`);
       }
       if(!r.ok) throw new Error(j.error||'clear failed');
-      if(prog) prog.innerHTML=`<span style="color:#059669">✅ Cleared — ${j.message} — Now Not Ready, re-upload supported</span>`;
-      try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
-      _ioClientCache=null;
-      setTimeout(()=>{ renderUploadPage(); }, 800);
-    }catch(e){ if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message}</span>`; }
+      if(prog) prog.innerHTML=`<span style="color:#059669">✅ Cleared — ${j.message} — Not Ready, re-upload supported</span>`;
+      setTimeout(()=>{ renderUploadPage(); }, 400);
+    }catch(e){
+      if(prog) prog.innerHTML=`<span style="color:#dc2626">❌ ${e.message} — Local cleared to Not Ready</span>`;
+      setTimeout(()=>{ renderUploadPage(); }, 400);
+    }
   });
   if(isCompact) document.getElementById('toggleUploadBar')?.addEventListener('click', ()=>{ const c=document.getElementById('uploadBarContent'); if(!c) return; const hid=c.style.display==='none'; c.style.display=hid?'block':'none'; document.getElementById('toggleUploadBar').textContent=hid?'▼ Collapse':'▶ Expand'; });
 }
@@ -505,6 +526,13 @@ function initReportsPage(){
   document.getElementById('addEmptyGroupBtn')?.addEventListener('click', ()=>{ reportGroups.push([]); renderAllReports(); });
   document.getElementById('io-clear-all')?.addEventListener('click', async ()=>{
     if(!confirm('Clear IO Report cache and files? It will become Not Ready, you can re-upload new files.')) return;
+    // Immediate Not Ready - loading is loading, clear is immediately Not Ready
+    try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
+    _ioClientCache=null;
+    const mainBadge=document.getElementById('ioMainStatusBadge');
+    if(mainBadge) mainBadge.innerHTML=`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
+    const mainContent=document.getElementById('ioReportContent');
+    if(mainContent) mainContent.innerHTML=`<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">Clearing... → Not Ready</div>`;
     try{
       const r=await fetch('/api/io/clear',{method:'POST'});
       const text = await r.text();
@@ -514,10 +542,11 @@ function initReportsPage(){
       }
       if(!r.ok) throw new Error(j.error||'clear failed');
       alert('✅ Cleared IO Report — now Not Ready. Re-upload supported.');
-      try{ localStorage.removeItem('io_report_last_load'); localStorage.removeItem('io_report_status'); _lastStatus=null; }catch{}
-      _ioClientCache=null;
       renderUploadPage();
-    }catch(e){ alert('❌ Clear failed: '+e.message); }
+    }catch(e){
+      alert('❌ Clear failed: '+e.message+' — Local set to Not Ready');
+      renderUploadPage();
+    }
   });
   document.getElementById('io-download-static')?.addEventListener('click', async ()=>{
     const btn = document.getElementById('io-download-static');

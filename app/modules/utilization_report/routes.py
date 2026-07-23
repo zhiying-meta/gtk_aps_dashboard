@@ -2,9 +2,11 @@ import os
 import shutil
 import tempfile
 import pathlib
+from app.common.zip_handler import is_zip_file as _common_is_zip, extract_zip_to_tmp as _common_extract_zip
+from app.common.xlsx_validator import is_valid_xlsx_by_content as _common_is_valid_xlsx, is_valid_xlsx_deep as _common_is_valid_xlsx_deep
 
-from flask import Blueprint, jsonify, request
-
+from flask import jsonify, request
+from app.modules.utilization_report import util_bp
 from app.modules.utilization_report.engine import (
     get_all_caches,
     get_cache_for_version,
@@ -14,8 +16,6 @@ from app.modules.utilization_report.engine import (
     reload_all,
     _compute_records,
 )
-
-util_bp = Blueprint("utilization_report", __name__)
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -113,10 +113,28 @@ def api_status():
             if util_dir.exists() and cal_path.exists() and sched_path.exists():
                 files_found.append(ver)
 
-        # No fallback to IVY folders — after clear all, files_found should be empty, so UI shows Not Ready and matrix empty
-        # Only Ready if files exist AND cache exists (validated above)
+        # If files exist but cache empty (e.g., after server restart), try to reload from disk — this ensures Gated import shows immediately
+        if not cached_versions and files_found:
+            try:
+                from app.modules.utilization_report.engine import reload_all, get_all_caches
+                reload_all(str(base_path))
+                # Rebuild cached_versions from _CACHES after reload
+                cached_versions = {}
+                for k in list(_CACHES.keys()):
+                    if k.startswith(DEFAULT_DATA_DIR + "::"):
+                        ver = k.split("::")[-1]
+                        c = _CACHES[k]
+                        cached_versions[ver] = {
+                            'lines': len(c.lines),
+                            'dates': len(c.dates),
+                            'shifts': len(c.shifts),
+                            'records_shift': len(c.records_shift),
+                            'records_day': len(c.records_day),
+                        }
+            except Exception as e:
+                print(f"[util status] reload failed: {e}")
 
-        # Truly ready only when cache exists and files exist
+        # Truly ready when cache exists and files exist
         if cached_versions:
             return jsonify({
                 "loaded": True,
@@ -128,7 +146,7 @@ def api_status():
                 "detected_message": f"✅ Utilization: detected {sum(len(v) for v in file_details.values())} files — " + "; ".join([f"{ver}: {file_summary.get(ver,'')}" for ver in files_found]) if files_found else "No files",
             })
         else:
-            # Not yet computed, but files may exist
+            # Files exist but still not computed (e.g., corrupted)
             return jsonify({
                 "loaded": False,
                 "versions": [],
@@ -460,87 +478,19 @@ def api_upload():
         if not all_files:
             return _json_error("No files uploaded", 400)
 
-        # Helper: check xlsx by content PK header
         def _is_valid_xlsx_content(p):
-            try:
-                if not os.path.exists(p) or os.path.getsize(p) < 10:
-                    return False
-                with open(p, 'rb') as fh:
-                    return fh.read(2) == b'PK'
-            except:
-                return False
+            return _common_is_valid_xlsx(p)
 
         def _is_valid_xlsx_deep(p):
-            """Deep validation: try to open with zipfile + openpyxl to catch truncated files (EOFError)"""
-            try:
-                if not os.path.exists(p) or os.path.getsize(p) < 100:
-                    return False, "File too small or not exists"
-                # Check PK header first
-                with open(p, 'rb') as fh:
-                    if fh.read(2) != b'PK':
-                        return False, "Not a zip/xlsx (no PK header)"
-                # Try zipfile
-                import zipfile
-                try:
-                    with zipfile.ZipFile(p, 'r') as zf:
-                        # Try to list and read central directory
-                        namelist = zf.namelist()
-                        if not namelist:
-                            return False, "Empty zip"
-                except Exception as e:
-                    return False, f"Bad zip: {e}"
-                # Try openpyxl read_only to catch EOFError as in user report
-                try:
-                    import openpyxl
-                    wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
-                    # Try to read at least sheet names
-                    _ = wb.sheetnames
-                    wb.close()
-                except EOFError as e:
-                    return False, f"Truncated/corrupted (EOFError): {e} — file may have been incompletely uploaded"
-                except Exception as e:
-                    err = str(e).lower()
-                    if "eof" in err or "truncated" in err or "not a zip" in err or "badzip" in err:
-                        return False, f"Corrupted xlsx ({e})"
-                    # For other openpyxl errors, still consider valid if zip ok (let pandas handle later)
-                return True, "OK"
-            except Exception as e:
-                return False, f"Validation failed: {e}"
+            return _common_is_valid_xlsx_deep(p)
 
         def _extract_zip_to_tmp(zip_path, out_dir):
-            extracted = []
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zf:
-                    for info in zf.infolist():
-                        if info.is_dir():
-                            continue
-                        # Be permissive: extract xlsx or files containing keywords
-                        base = os.path.basename(info.filename)
-                        if not base or base.startswith('.') or base.startswith('~$'):
-                            continue
-                        low = base.lower()
-                        # Only care about xlsx or files with our keywords (calendar/schedule)
-                        if not (low.endswith('.xlsx') or any(kw in low for kw in ["工作日历", "日历", "calendar", "排产", "schedule"])):
-                            # Also extract if size >1KB and not obviously non-excel
-                            if info.file_size < 1024 or low.endswith(('.txt','.csv','.pdf')):
-                                continue
-                        target = os.path.join(out_dir, base)
-                        c = 1
-                        b, e = os.path.splitext(target)
-                        while os.path.exists(target):
-                            target = f"{b}_{c}{e}"
-                            c += 1
-                        with zf.open(info) as src, open(target, 'wb') as dst:
-                            shutil.copyfileobj(src, dst)
-                        if _is_valid_xlsx_content(target):
-                            extracted.append(target)
-                        else:
-                            # Keep if name matches expected
-                            if any(kw in low for kw in ["工作日历","日历","calendar","排产","schedule"]):
-                                extracted.append(target)
-            except Exception as e:
-                print(f"[util] zip extract failed {e}")
-            return extracted
+            return _common_extract_zip(
+                zip_path, out_dir,
+                allowed_keywords=["工作日历", "日历", "calendar", "排产", "schedule"],
+                min_size=1024,
+                skip_exts=('.txt', '.csv', '.pdf')
+            )
 
         pending_regular = []
         for field_key, f in all_files:
