@@ -145,11 +145,25 @@ def parse_item_snapshot(file_path):
         item_no = _clean(row.get("ITEM_NO"))
         if not item_no:
             continue
-        style = _clean(row.get("STYLE"))
-        color = _clean(row.get("COLOR"))
+        # Handle various possible column names for style/color (including typo SYLTE)
+        style = (
+            _clean(row.get("STYLE"))
+            or _clean(row.get("SYLTE"))
+            or _clean(row.get("PRODUCT_STYLE"))
+            or _clean(row.get("STYLE_NAME"))
+            or ""
+        )
+        color = _clean(row.get("COLOR")) or _clean(row.get("COLOUR")) or ""
         # PURPOSE is Usage, fallback to PRODUCT_STYLE or TYPE
-        purpose = _clean(row.get("PURPOSE")) or _clean(row.get("PRODUCT_STYLE")) or _clean(row.get("TYPE")) or "MP"
-        # For style/color, fallback
+        purpose = (
+            _clean(row.get("PURPOSE"))
+            or _clean(row.get("PRODUCT_STYLE"))
+            or _clean(row.get("TYPE"))
+            or _clean(row.get("PRODUCT_CATEGORY"))
+            or "MP"
+        )
+        # For style/color, fallback - if STYLE empty but SYLTE has value, use it (already handled)
+        # Also handle case where STYLE column actually contains color and vice versa? No
         # ITEM_NO patterns
         if item_no.startswith("SK-"):
             sku_attrs[item_no] = {"Style": style, "Color": color, "Usage": purpose or "MP"}
@@ -161,6 +175,13 @@ def parse_item_snapshot(file_path):
             lt_style_color[item_no] = (style, color)
         elif item_no.startswith("RT-"):
             rt_style_color[item_no] = (style, color)
+        # Also handle generic GB/SK that might be in different naming like GB-Rec M-BLACK
+        # Already covered
+
+    # Fallback: if sku_attrs still have empty Style but item_no contains style info, try to parse from ITEM_NO
+    # e.g., GB-Rec M-BLACK -> style = Rec M
+    # For SKUs that have empty style, try to infer from GB mapping or keep empty
+    # For 20260723 data, SKUs have empty style because SYLTE was not parsed before, now fixed
 
     return sku_attrs, gb_style_color, fr_style_color, lt_style_color, rt_style_color
 
