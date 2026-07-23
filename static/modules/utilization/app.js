@@ -892,14 +892,24 @@
           alert('Please select files first (calendar + schedule or zip)');
           return;
         }
-        if (msgEl) msgEl.innerHTML = `⏳ Uploading ${ver} module... detected ${selectedFiles.length} files: ${selectedFiles.map(f=>`${f.name}(${(f.size/1024).toFixed(1)}KB)`).join(', ')} — uploading (independent)`;
+        if (msgEl) msgEl.innerHTML = `⏳ Uploading ${ver} module... detected ${selectedFiles.length} files: ${selectedFiles.map(f=>`${f.name}(${(f.size/1024).toFixed(1)}KB)`).join(', ')} — uploading (independent) may take 10-40s for large files, please wait...`;
         try {
           const fd = new FormData();
           selectedFiles.forEach(f => fd.append('file', f));
           // Force version to this module, so backend only touches this version folder
-          const r = await fetch(`${API_UPLOAD}?version=${ver}`, { method: 'POST', body: fd });
-          const j = await r.json();
-          if (!r.ok) throw new Error(j.error || 'upload failed');
+          // Add timeout handling via AbortController like IO does for large files
+          const controller = new AbortController();
+          const timeoutId = setTimeout(()=> controller.abort(), 120000); // 120s timeout for large files
+          let r;
+          try{
+            r = await fetch(`${API_UPLOAD}?version=${ver}`, { method: 'POST', body: fd, signal: controller.signal });
+          }finally{
+            clearTimeout(timeoutId);
+          }
+          const text = await r.text();
+          let j;
+          try{ j = JSON.parse(text); }catch(e){ throw new Error(`Server returned non-JSON (status ${r.status}): ${text.slice(0,500)}`); }
+          if (!r.ok) throw new Error(j.error || `upload failed HTTP ${r.status}: ${text.slice(0,500)}`);
 
           // Show specifically what was uploaded from backend response
           const res = j.results && j.results[ver] ? j.results[ver] : {};
@@ -979,7 +989,15 @@
             } catch (e) { console.warn(e); }
           }, 800);
         } catch (e) {
-          if (msgEl) msgEl.textContent = '❌ ' + e.message;
+          console.error('Util upload failed', e);
+          let hint = '';
+          if(e.name==='AbortError'){
+            hint = ' — Timeout after 120s, files too large or server busy. Try smaller files or zip, or check server logs. First compute may take 40s.';
+          }else if(e.message && e.message.includes('Failed to fetch')){
+            hint = ' — Server not reachable. Check server running on http://localhost:8502 (./run.sh), try ./run.sh --reset, or files too large.';
+          }
+          if (msgEl) msgEl.innerHTML = `❌ Upload failed for ${ver}: ${esc(e.message)}${esc(hint)}<br><span style="font-size:10px;color:#64748b">Files attempted: ${selectedFiles.map(f=>`${f.name}(${(f.size/1024).toFixed(1)}KB)`).join(', ')} — Try: 1) Ensure files are valid xlsx (not 0 bytes) 2) Names contain calendar/schedule or use exact names 工作日历快照.xlsx + 排产结果表.xlsx 3) Try zip 4) Check server logs /tmp/server.log 5) ./run.sh --reset</span>`;
+          try{ alert(`Upload failed for ${ver}: ${e.message}${hint}\nFiles: ${selectedFiles.map(f=>f.name).join(', ')}\nTry zip or check server logs`); }catch{}
         }
       });
     };

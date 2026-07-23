@@ -546,20 +546,38 @@ def api_upload():
             if not os.path.exists(src_path):
                 continue
             base = os.path.basename(src_path)
-            # Remove _raw_ prefix for display
+            # Remove _raw_ prefix for display – format is _raw_{field_key}_{safe_name}
             display_name = base
             if base.startswith("_raw_"):
-                # Extract original: _raw_{field_key}_{safe_name}
-                parts = base.split("_", 2)
-                display_name = parts[-1] if len(parts) >= 3 else base[5:]
+                prefix = f"_raw_{field_key}_"
+                if base.startswith(prefix):
+                    display_name = base[len(prefix):]
+                else:
+                    # Fallback: split _raw_ + field + original
+                    # _raw_{field_key}_{safe_name} -> safe_name is after second underscore
+                    try:
+                        # Remove leading _raw_
+                        remainder = base[5:]  # after _raw_
+                        # remainder = {field_key}_{safe_name}
+                        # Find first underscore after field_key
+                        idx = remainder.find("_")
+                        if idx != -1:
+                            display_name = remainder[idx+1:]
+                        else:
+                            display_name = remainder
+                    except:
+                        display_name = base[5:]
 
             sz = os.path.getsize(src_path)
-            # Only include xlsx (by content) or files with relevant keywords
+            # IO-style permissive: keep all files with size >0, even if not PK, to allow proper error reporting later
+            # Only skip if size 0 or tiny and name doesn't contain relevant keywords
+            if sz < 10:
+                continue
             if not _is_valid_xlsx_content(src_path):
-                # Skip if not valid and not containing keywords? But keep for error reporting
-                # For now, keep only if name contains our keywords
+                # If not valid xlsx, still keep if name contains relevant keywords or size >1KB (could be old xls or corrupted, let later validation report)
                 low = display_name.lower()
-                if not any(kw in low for kw in ["工作日历","日历","calendar","排产","schedule","gated","ungated"]):
+                # Keep if contains keywords or size >1KB (permissive)
+                if not (any(kw in low for kw in ["工作日历","日历","calendar","排产","schedule","gated","ungated","xlsx","xls"]) or sz > 1024):
                     continue
 
             final_files.append(src_path)
@@ -575,13 +593,22 @@ def api_upload():
             existing = os.listdir(tmp_extract_dir)
             return _json_error(f"No xlsx files found (including inside zip). Got {existing}. Expected 工作日历快照.xlsx and 排产结果表.xlsx for gated/ungated.", 400)
 
-        # Classification helpers – IO-style
+        # Classification helpers – IO-style (simplified, no pandas for speed, like IO's _classify_upload)
         def classify_content_type(path):
             name = os.path.basename(path).lower()
             # Also check original display name if path is _raw_
-            # Remove _raw_ prefix
             if name.startswith("_raw_"):
-                name = "_".join(name.split("_")[2:]).lower() if "_" in name else name[5:].lower()
+                # Format _raw_{field}_{safe_name} -> extract safe_name
+                # Find prefix _raw_{field}_
+                try:
+                    remainder = name[5:]  # after _raw_
+                    idx = remainder.find("_")
+                    if idx != -1:
+                        name = remainder[idx+1:].lower()
+                    else:
+                        name = remainder.lower()
+                except:
+                    name = name[5:].lower()
             is_calendar = False
             is_schedule = False
             if "工作日历" in name or "calendar" in name or "日历" in name:
@@ -589,16 +616,11 @@ def api_upload():
             elif "排产结果" in name or "schedule" in name or "排产" in name:
                 is_schedule = True
             else:
-                try:
-                    import pandas as pd
-                    df = pd.read_excel(path, nrows=5, engine='openpyxl')
-                    txt = df.to_string()
-                    if "UPH" in txt and "工时" in txt:
-                        is_calendar = True
-                    else:
-                        is_schedule = True
-                except:
-                    is_schedule = True
+                # Fallback: if name contains uph or capacity keywords? Assume calendar if unknown? But for upload robustness, check file size? No, default to unknown and let caller assign to empty slot
+                # To avoid pandas overhead (which can be slow and fail for large files), we use simple heuristic:
+                # If file larger than typical schedule? No, use first file as calendar, second as schedule in caller
+                is_calendar = False
+                is_schedule = False
             return is_calendar, is_schedule
 
         def classify_file(path):
