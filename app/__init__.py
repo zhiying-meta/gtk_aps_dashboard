@@ -41,6 +41,30 @@ def create_app():
 
     _register_blueprints(app)
 
+    @app.errorhandler(413)
+    def handle_413(e):
+        # Return JSON for API routes, HTML for others
+        from flask import request, jsonify
+        if request.path.startswith('/api/'):
+            return jsonify({"error": f"File too large (413), max {app.config.get('MAX_CONTENT_LENGTH', 0)//1024//1024}MB"}), 413
+        return e
+
+    @app.errorhandler(500)
+    def handle_500(e):
+        from flask import request, jsonify
+        if request.path.startswith('/api/'):
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": f"Internal server error (500): {e}"}), 500
+        return e
+
+    @app.errorhandler(404)
+    def handle_404(e):
+        from flask import request, jsonify
+        if request.path.startswith('/api/'):
+            return jsonify({"error": f"API not found (404): {request.path}"}), 404
+        return e
+
     @app.after_request
     def no_cache(resp):
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

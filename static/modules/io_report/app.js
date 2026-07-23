@@ -362,7 +362,14 @@ function attachUploadLogic(isCompact){
     }
     try{
       const resp=await fetch('/api/io/upload',{method:'POST',body:form});
-      const result=await resp.json();
+      const text=await resp.text();
+      let result;
+      try{
+        result=JSON.parse(text);
+      }catch(parseErr){
+        // Server returned HTML (e.g., 500 page) instead of JSON - show first 500 chars
+        throw new Error(`Server returned non-JSON (${resp.status}): ${text.slice(0,600).replace(/</g,'&lt;')}`);
+      }
       if(result.ok){
         const now = new Date();
         const info = { fg: result.fg||0, gb: result.gb||0, time: now.toISOString(), timeStr: now.toLocaleString() };

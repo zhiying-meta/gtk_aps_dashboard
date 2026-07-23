@@ -364,7 +364,6 @@ def api_upload():
                     sched_src = os.path.join(tmp_dir, TARGET_MAP["schedule"])
                     if os.path.exists(sched_src):
                         # Copy to debug dir with timestamp
-                        import shutil
                         dst = dbg_dir / f"sched_fail_{ts}_headers_{len(tmp_cache.item_to_cat)}items.xlsx"
                         shutil.copyfile(sched_src, str(dst))
                         print(f"[IO] Saved failed schedule file to {dst} for debugging")
