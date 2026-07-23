@@ -355,6 +355,26 @@ def api_upload():
                     400,
                 )
             if total_sched == 0 and total_sched_all == 0:
+                # Save failed file to debug folder for inspection (so we can see what user uploaded)
+                try:
+                    import datetime, pathlib
+                    dbg_dir = pathlib.Path(DEFAULT_DATA_DIR) / "debug_uploads"
+                    dbg_dir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    sched_src = os.path.join(tmp_dir, TARGET_MAP["schedule"])
+                    if os.path.exists(sched_src):
+                        # Copy to debug dir with timestamp
+                        import shutil
+                        dst = dbg_dir / f"sched_fail_{ts}_headers_{len(tmp_cache.item_to_cat)}items.xlsx"
+                        shutil.copyfile(sched_src, str(dst))
+                        print(f"[IO] Saved failed schedule file to {dst} for debugging")
+                    # Also save master for reference
+                    master_src = os.path.join(tmp_dir, TARGET_MAP["master"])
+                    if os.path.exists(master_src):
+                        dst2 = dbg_dir / f"master_{ts}.xlsx"
+                        shutil.copyfile(master_src, str(dst2))
+                except Exception as e:
+                    print(f"[IO] Failed to save debug files: {e}")
                 # Try to give detailed debug info about schedule file with robust header detection across all sheets
                 debug_info = ""
                 try:
@@ -427,7 +447,20 @@ def api_upload():
                         except Exception as se:
                             all_sheet_analysis.append(f"Sheet '{sname}': error {se}")
                     wb_dbg.close()
-                    debug_info = f" Sheets={sheet_names_dbg}. Best={best_overall}. All analysis: {' | '.join(all_sheet_analysis)}. Master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: If best header is ['PLAN_ITEM'] only with 0 rows, file is invalid - please download template from /api/io/templates/template and check columns. Your uploaded file appears to have only header and no data rows. Please ensure file is not filtered, not empty, and has 6 columns."
+                    # Try pandas fallback reading to see if openpyxl failed due to formatting
+                    pandas_info = ""
+                    try:
+                        import pandas as pd
+                        xls = pd.ExcelFile(sched_fp)
+                        for sname in xls.sheet_names[:3]:
+                            try:
+                                df = xls.parse(sname, nrows=5)
+                                pandas_info += f" Pandas sheet '{sname}': shape={df.shape}, cols={list(df.columns)[:6]}, head={df.head(1).to_dict(orient='records')[:1]} |"
+                            except Exception as pe:
+                                pandas_info += f" Pandas sheet '{sname}' error: {pe} |"
+                    except Exception as pe:
+                        pandas_info = f" Pandas fallback failed: {pe}"
+                    debug_info = f" Sheets={sheet_names_dbg}. Best={best_overall}. All analysis: {' | '.join(all_sheet_analysis)}. {pandas_info} Master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: If best header is ['PLAN_ITEM'] only with 0 rows, file is invalid - please download template from /api/io/templates/template and check columns. Your uploaded file appears to have only header and no data rows. Please ensure file is not filtered, not empty, and has 6 columns. File saved to data/debug_uploads/ for dev inspection."
                 except Exception as de:
                     import traceback
                     traceback.print_exc()
