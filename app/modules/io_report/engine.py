@@ -153,6 +153,101 @@ def _get_col_index(headers: List, target: str) -> int:
     return -1
 
 
+def _find_header_row(ws, expected_keywords, scan_rows=15):
+    """
+    Scan first scan_rows rows to find header row containing at least 2 expected keywords.
+    Returns (header_row_idx (1-based), headers list) or (1, first row headers) if not found.
+    Robust for files where header is not in row 1 (e.g., user file has title row or empty rows).
+    """
+    best = None
+    best_score = -1
+    best_headers = None
+    for r_idx in range(1, scan_rows + 1):
+        try:
+            row = next(ws.iter_rows(min_row=r_idx, max_row=r_idx, values_only=True), None)
+            if not row:
+                continue
+            # Clean row: strip and upper for matching, keep original for _get_col_index
+            cleaned = [str(c).strip() if c is not None else "" for c in row]
+            cleaned_upper = [c.upper() for c in cleaned]
+            # Count how many expected keywords appear (exact or case-insensitive)
+            score = 0
+            for kw in expected_keywords:
+                kw_up = kw.upper()
+                for c_up in cleaned_upper:
+                    if kw_up == c_up or kw_up in c_up or c_up in kw_up:
+                        score += 1
+                        break
+            if score > best_score:
+                best_score = score
+                best = r_idx
+                best_headers = list(row)
+        except Exception:
+            continue
+    # If best_score >=2, use it, else fallback to row 1
+    if best is not None and best_score >= 2:
+        return best, best_headers
+    # fallback row 1
+    try:
+        first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        return 1, list(first) if first else []
+    except Exception:
+        return 1, []
+
+
+def _find_best_sheet_and_header(wb, expected_keywords, scan_rows=15):
+    """
+    Search all sheets in workbook for best header match.
+    Returns (sheet_name, ws, header_row_idx, headers, score)
+    """
+    best_overall = None
+    best_score_overall = -1
+    best_info = None
+    for sheet_name in wb.sheetnames:
+        try:
+            ws = wb[sheet_name]
+            # For each sheet, find best header
+            header_idx, headers = _find_header_row(ws, expected_keywords, scan_rows=scan_rows)
+            # Compute score for this header
+            if not headers:
+                continue
+            cleaned = [str(c).strip().upper() if c else "" for c in headers]
+            score = 0
+            for kw in expected_keywords:
+                kw_up = kw.upper()
+                for c_up in cleaned:
+                    if kw_up == c_up or kw_up in c_up:
+                        score += 1
+                        break
+            # Also consider if sheet has data rows after header
+            # Count non-empty rows after header (up to 5)
+            data_rows = 0
+            try:
+                for _r in ws.iter_rows(min_row=header_idx + 1, max_row=header_idx + 10, values_only=True):
+                    if _r and any(c is not None and str(c).strip() != "" for c in _r):
+                        data_rows += 1
+            except Exception:
+                data_rows = 0
+            # Prefer sheets with more data rows if score equal
+            combined_score = score * 100 + data_rows
+            if combined_score > best_score_overall:
+                best_score_overall = combined_score
+                best_overall = sheet_name
+                best_info = (ws, header_idx, headers, score, data_rows)
+        except Exception:
+            continue
+    if best_info:
+        ws, header_idx, headers, score, data_rows = best_info
+        return best_overall, ws, header_idx, headers, score
+    # fallback to first sheet
+    try:
+        ws = wb[wb.sheetnames[0]]
+        header_idx, headers = _find_header_row(ws, expected_keywords, scan_rows=scan_rows)
+        return wb.sheetnames[0], ws, header_idx, headers, 0
+    except Exception:
+        return None, None, 1, [], 0
+
+
 # ---------- column defs ----------
 def get_col_defs(sched: List[ScheduleRow], bal: List[BalanceRow], col_dim: str) -> List[dict]:
     seen_date = {}
@@ -258,7 +353,9 @@ def bal_col_key(r: BalanceRow, col_dim: str) -> str:
 
 # ---------- aggregation ----------
 def build_io_sched(sched: List[ScheduleRow], dim_col: str, cols: List[dict], plan_item: str, cumulative: bool, col_dim: str):
-    filtered = [r for r in sched if r.PlanItem == plan_item]
+    # Case-insensitive PlanItem matching (fix 0 rows when INPUT is lowercase or with spaces)
+    plan_upper = (plan_item or "").strip().upper()
+    filtered = [r for r in sched if (r.PlanItem or "").strip().upper() == plan_upper]
     if not filtered:
         return [], []
 
@@ -294,7 +391,8 @@ def build_io_sched(sched: List[ScheduleRow], dim_col: str, cols: List[dict], pla
 
 
 def build_io_sched_detail(sched: List[ScheduleRow], cols: List[dict], plan_item: str, cumulative: bool, col_dim: str):
-    filtered = [r for r in sched if r.PlanItem == plan_item]
+    plan_upper = (plan_item or "").strip().upper()
+    filtered = [r for r in sched if (r.PlanItem or "").strip().upper() == plan_upper]
     if not filtered:
         return [], []
 
@@ -412,13 +510,14 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         raise FileNotFoundError(f"料号主表.xlsx not found in {data_dir}")
 
     wb = openpyxl.load_workbook(mm_path, data_only=True, read_only=True)
-    ws = wb[wb.sheetnames[0]]
-    headers = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+    # Search best sheet for master: supports file with multiple sheets, pick best match
+    best_sheet, ws, header_row_idx, headers, _score = _find_best_sheet_and_header(wb, ["ITEM_NO", "PRODUCT_CATEGORY", "PRODUCT_STYLE"])
+    print(f"[IO] Master: best sheet={best_sheet}, header_row={header_row_idx}, score={_score}, headers={headers}")
     item_no_idx = _get_col_index(headers, "ITEM_NO")
     prod_cat_idx = _get_col_index(headers, "PRODUCT_CATEGORY")
     style_idx = _get_col_index(headers, "PRODUCT_STYLE")
     if item_no_idx < 0 or prod_cat_idx < 0:
-        raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers}")
+        raise ValueError(f"料号主表 missing ITEM_NO or PRODUCT_CATEGORY, headers={headers} (detected at row {header_row_idx} in sheet {best_sheet}, score={_score})")
 
     item_to_cat, item_to_style = {}, {}
     fg_items, gb_items = [], []
@@ -430,7 +529,7 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     styles_by_cat = defaultdict(set)
     all_items_set = set()
 
-    for row in ws.iter_rows(min_row=2, values_only=True):
+    for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
         if not row or item_no_idx >= len(row) or prod_cat_idx >= len(row):
             continue
         item_raw, cat_raw = row[item_no_idx], row[prod_cat_idx]
@@ -463,6 +562,19 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     wb.close()
 
     fg_set, gb_set = set(fg_items), set(gb_items)
+    # Build case-insensitive maps for robust SKU matching (fix 0 schedule rows when master/schedule case differs)
+    sku_upper_map = {}  # upper -> original canonical
+    sku_lower_map = {}  # lower -> original
+    for _it in all_items_set:
+        _up = str(_it).strip().upper()
+        _lo = str(_it).strip().lower()
+        if _up not in sku_upper_map:
+            sku_upper_map[_up] = _it
+        if _lo not in sku_lower_map:
+            sku_lower_map[_lo] = _it
+    sku_upper_set = set(sku_upper_map.keys())
+    sku_lower_set = set(sku_lower_map.keys())
+
     # for generic filtering, include all known items
     sched_by_cat = defaultdict(list)
     bal_by_cat = defaultdict(list)
@@ -473,8 +585,8 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         raise FileNotFoundError(f"排产结果表.xlsx not found in {data_dir}")
 
     wb2 = openpyxl.load_workbook(sched_path, data_only=True, read_only=True)
-    ws2 = wb2[wb2.sheetnames[0]]
-    headers2 = list(next(ws2.iter_rows(min_row=1, max_row=1, values_only=True)))
+    sched_best_sheet, ws2, sched_header_row_idx, headers2, sched_score = _find_best_sheet_and_header(wb2, ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE", "SHIFT_NAME"])
+    print(f"[IO] Schedule: best sheet={sched_best_sheet}, header_row={sched_header_row_idx}, score={sched_score}/6, headers={headers2}")
     line_idx = _get_col_index(headers2, "LINE_CODE")
     shift_idx = _get_col_index(headers2, "SHIFT_NAME")
     plan_item_idx = _get_col_index(headers2, "PLAN_ITEM")
@@ -482,18 +594,48 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
     plan_date_idx = _get_col_index(headers2, "PLAN_DATE")
     plan_val_idx = _get_col_index(headers2, "PLAN_VALUE")
 
+    # If headers missing, try fallback by position (common when user file has different header names)
+    if line_idx < 0: line_idx = 0
+    if shift_idx < 0: shift_idx = 1
+    if plan_item_idx < 0: plan_item_idx = 2
+    if sku_idx < 0: sku_idx = 3
+    if plan_date_idx < 0: plan_date_idx = 4
+    if plan_val_idx < 0: plan_val_idx = 5
+
     sched_fg, sched_gb = [], []
     line_fg_set, line_gb_set = set(), set()
+    # stats for debugging 0 rows
+    _sched_total = 0
+    _sched_skip_no_sku = 0
+    _sched_skip_sku_not_in_master = 0
+    _sched_skip_no_date = 0
+    _sched_kept = 0
 
-    for row in ws2.iter_rows(min_row=2, values_only=True):
+    for row in ws2.iter_rows(min_row=sched_header_row_idx + 1, values_only=True):
+        _sched_total += 1
         if not row or len(row) <= max(line_idx, shift_idx, plan_item_idx, sku_idx, plan_date_idx, plan_val_idx):
+            _sched_skip_no_sku += 1
             continue
         sku_raw = row[sku_idx]
         if not sku_raw:
+            _sched_skip_no_sku += 1
             continue
-        sku = str(sku_raw).strip()
-        if sku not in all_items_set:
+        sku_stripped = str(sku_raw).strip()
+        if not sku_stripped:
+            _sched_skip_no_sku += 1
             continue
+        # Robust SKU lookup: exact -> upper -> lower
+        sku_canonical = None
+        if sku_stripped in all_items_set:
+            sku_canonical = sku_stripped
+        elif sku_stripped.upper() in sku_upper_map:
+            sku_canonical = sku_upper_map[sku_stripped.upper()]
+        elif sku_stripped.lower() in sku_lower_map:
+            sku_canonical = sku_lower_map[sku_stripped.lower()]
+        else:
+            _sched_skip_sku_not_in_master += 1
+            continue
+        sku = sku_canonical
         try:
             val = float(row[plan_val_idx]) if row[plan_val_idx] not in (None, "") else 0.0
         except Exception:
@@ -503,25 +645,42 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
                 val = 0.0
         pd = _to_datetime(row[plan_date_idx])
         if not pd:
+            _sched_skip_no_date += 1
             continue
+        # Normalize PlanItem to upper trimmed for case-insensitive matching (INPUT/OUTPUT etc)
+        plan_item_raw = str(row[plan_item_idx] or "").strip()
+        plan_item_norm = plan_item_raw.upper()
         sr = ScheduleRow(
             LineCode=str(row[line_idx] or "").strip(),
             ShiftName=str(row[shift_idx] or "").strip(),
-            PlanItem=str(row[plan_item_idx] or "").strip(),
+            PlanItem=plan_item_norm,
             SKU=sku,
             PlanDate=pd,
             PlanValue=val,
-            Style=item_to_style.get(sku, ""),
+            Style=item_to_style.get(sku, "") or item_to_style.get(sku_canonical, ""),
         )
-        # legacy FG/GB
-        if sku in fg_set:
+        _sched_kept += 1
+        # legacy FG/GB - use canonical mapping
+        if sku in fg_set or sku_upper_map.get(sku.upper(), "") in fg_set or sku_lower_map.get(sku.lower(), "") in fg_set:
             sched_fg.append(sr)
             if sr.LineCode:
                 line_fg_set.add(sr.LineCode)
-        elif sku in gb_set:
+        elif sku in gb_set or sku_upper_map.get(sku.upper(), "") in gb_set or sku_lower_map.get(sku.lower(), "") in gb_set:
             sched_gb.append(sr)
             if sr.LineCode:
                 line_gb_set.add(sr.LineCode)
+        else:
+            # If SKU not in FG/GB set but in all_items, still check via cat mapping (generic)
+            # For legacy counters, try cat
+            _cat_tmp = item_to_cat.get(sku, "")
+            if _cat_tmp == "成品":
+                sched_fg.append(sr)
+                if sr.LineCode:
+                    line_fg_set.add(sr.LineCode)
+            elif _cat_tmp == "GB":
+                sched_gb.append(sr)
+                if sr.LineCode:
+                    line_gb_set.add(sr.LineCode)
 
         # generic
         cat = item_to_cat.get(sku, "RAW")
@@ -536,29 +695,41 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
         if sr.LineCode:
             lines_by_cat[cat_key].add(sr.LineCode)
     wb2.close()
+    print(f"[IO] Sched stats: total={_sched_total}, kept={_sched_kept}, skip_no_sku={_sched_skip_no_sku}, skip_not_in_master={_sched_skip_sku_not_in_master}, skip_no_date={_sched_skip_no_date}, master_count={len(all_items_set)}")
 
     bal_path = _find_file(data_dir, "结存表.xlsx", ["结存表", "结存", "balance"])
     if not bal_path or not os.path.exists(bal_path):
         raise FileNotFoundError(f"结存表.xlsx not found in {data_dir}")
 
     wb3 = openpyxl.load_workbook(bal_path, data_only=True, read_only=True)
-    ws3 = wb3[wb3.sheetnames[0]]
-    headers3 = list(next(ws3.iter_rows(min_row=1, max_row=1, values_only=True)))
+    bal_best_sheet, ws3, bal_header_row_idx, headers3, bal_score = _find_best_sheet_and_header(wb3, ["PLAN_DATE", "ITEM_CODE", "BALANCE_QTY", "SHIFT_NAME"])
+    print(f"[IO] Balance: best sheet={bal_best_sheet}, header_row={bal_header_row_idx}, score={bal_score}/4, headers={headers3}")
     bal_date_idx = _get_col_index(headers3, "PLAN_DATE")
     bal_shift_idx = _get_col_index(headers3, "SHIFT_NAME")
     bal_item_idx = _get_col_index(headers3, "ITEM_CODE")
     bal_qty_idx = _get_col_index(headers3, "BALANCE_QTY")
 
     bal_fg, bal_gb = [], []
-    for row in ws3.iter_rows(min_row=2, values_only=True):
+    for row in ws3.iter_rows(min_row=bal_header_row_idx + 1, values_only=True):
         if not row or len(row) <= max(bal_date_idx, bal_shift_idx, bal_item_idx, bal_qty_idx):
             continue
         item_raw = row[bal_item_idx]
         if not item_raw:
             continue
-        item_code = str(item_raw).strip()
-        if item_code not in all_items_set:
+        item_stripped = str(item_raw).strip()
+        if not item_stripped:
             continue
+        # robust lookup
+        item_canonical = None
+        if item_stripped in all_items_set:
+            item_canonical = item_stripped
+        elif item_stripped.upper() in sku_upper_map:
+            item_canonical = sku_upper_map[item_stripped.upper()]
+        elif item_stripped.lower() in sku_lower_map:
+            item_canonical = sku_lower_map[item_stripped.lower()]
+        else:
+            continue
+        item_code = item_canonical
         try:
             qty = float(row[bal_qty_idx]) if row[bal_qty_idx] not in (None, "") else 0.0
         except Exception:
@@ -576,9 +747,9 @@ def _load_openpyxl_data(data_dir: str) -> DataCache:
             BalanceQty=qty,
             Style=item_to_style.get(item_code, ""),
         )
-        if item_code in fg_set:
+        if item_code in fg_set or sku_upper_map.get(item_code.upper(), "") in fg_set:
             bal_fg.append(br)
-        elif item_code in gb_set:
+        elif item_code in gb_set or sku_upper_map.get(item_code.upper(), "") in gb_set:
             bal_gb.append(br)
 
         # generic

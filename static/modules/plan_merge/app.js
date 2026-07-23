@@ -767,6 +767,7 @@ function clearPackout(clearMsg) {
   }catch(e){ console.error('clear packout failed', e); }
 }
 document.getElementById('btn-clear-packout-report')?.addEventListener('click', ()=> clearPackout());
+document.getElementById('btn-clear-packout')?.addEventListener('click', ()=> clearPackout());
 
 async function downloadStaticPackout(){
   // Try backend export_static first (like campus-planning-system/frontend/dist)

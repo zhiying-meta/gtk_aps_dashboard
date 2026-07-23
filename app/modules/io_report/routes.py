@@ -344,14 +344,129 @@ def api_upload():
             tmp_cache = _load_tmp(tmp_dir)
             total_items = len(tmp_cache.fg_items) + len(tmp_cache.gb_items)
             total_sched = len(tmp_cache.sched_fg) + len(tmp_cache.sched_gb)
+            # Count all sched_by_cat as fallback (includes RAW etc)
+            try:
+                total_sched_all = sum(len(v) for v in (tmp_cache.sched_by_cat or {}).values())
+            except Exception:
+                total_sched_all = total_sched
             if total_items == 0:
                 return _json_error(
-                    f"validation failed: 0 FG/GB items found. Check 料号主表.xlsx has PRODUCT_CATEGORY=成品/GB and ITEM_NO column.",
+                    f"validation failed: 0 FG/GB items found. Check 料号主表.xlsx has PRODUCT_CATEGORY=成品/GB and ITEM_NO column. Found {len(tmp_cache.item_to_cat)} total items, cats={tmp_cache.cats}",
                     400,
                 )
-            if total_sched == 0:
+            if total_sched == 0 and total_sched_all == 0:
+                # Save failed file to debug folder for inspection (so we can see what user uploaded)
+                try:
+                    import datetime, pathlib
+                    dbg_dir = pathlib.Path(DEFAULT_DATA_DIR) / "debug_uploads"
+                    dbg_dir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    sched_src = os.path.join(tmp_dir, TARGET_MAP["schedule"])
+                    if os.path.exists(sched_src):
+                        # Copy to debug dir with timestamp
+                        import shutil
+                        dst = dbg_dir / f"sched_fail_{ts}_headers_{len(tmp_cache.item_to_cat)}items.xlsx"
+                        shutil.copyfile(sched_src, str(dst))
+                        print(f"[IO] Saved failed schedule file to {dst} for debugging")
+                    # Also save master for reference
+                    master_src = os.path.join(tmp_dir, TARGET_MAP["master"])
+                    if os.path.exists(master_src):
+                        dst2 = dbg_dir / f"master_{ts}.xlsx"
+                        shutil.copyfile(master_src, str(dst2))
+                except Exception as e:
+                    print(f"[IO] Failed to save debug files: {e}")
+                # Try to give detailed debug info about schedule file with robust header detection across all sheets
+                debug_info = ""
+                try:
+                    import openpyxl
+                    sched_fp = os.path.join(tmp_dir, TARGET_MAP["schedule"])
+                    wb_dbg = openpyxl.load_workbook(sched_fp, data_only=True, read_only=True)
+                    sheet_names_dbg = wb_dbg.sheetnames
+                    expected = ["LINE_CODE", "PLAN_ITEM", "SKU", "PLAN_DATE", "PLAN_VALUE"]
+                    # Analyze all sheets
+                    all_sheet_analysis = []
+                    best_overall = {"sheet": None, "row": 1, "score": -1, "headers": [], "raw_rows": 0, "total_scanned": 0, "sample_skus": [], "sample_pis": []}
+                    for sname in sheet_names_dbg:
+                        try:
+                            ws = wb_dbg[sname]
+                            # Find best header row in this sheet
+                            best_row = 1
+                            best_score = -1
+                            best_headers = []
+                            for r_idx in range(1, 16):
+                                try:
+                                    row_vals = next(ws.iter_rows(min_row=r_idx, max_row=r_idx, values_only=True), None)
+                                    if not row_vals:
+                                        continue
+                                    cleaned = [str(c).strip().upper() if c else "" for c in row_vals]
+                                    score = sum(1 for kw in expected if any(kw in c for c in cleaned if c))
+                                    if score > best_score:
+                                        best_score = score
+                                        best_row = r_idx
+                                        best_headers = list(row_vals)
+                                except Exception:
+                                    continue
+                            # Count data rows after header
+                            raw_rows = 0
+                            total_scanned = 0
+                            sample_skus = []
+                            sample_pis = []
+                            first_few_rows = []
+                            for _r in ws.iter_rows(min_row=best_row + 1, max_row=best_row + 20, values_only=True):
+                                total_scanned += 1
+                                if _r:
+                                    first_few_rows.append([str(c)[:20] if c is not None else "" for c in _r[:6]])
+                                if not _r or all(c is None or str(c).strip() == "" for c in _r):
+                                    continue
+                                raw_rows += 1
+                                if raw_rows <= 3:
+                                    try:
+                                        sku_idx = -1
+                                        for idx, h in enumerate(best_headers):
+                                            if h and str(h).strip().upper() == "SKU":
+                                                sku_idx = idx
+                                                break
+                                        if sku_idx >=0 and len(_r) > sku_idx and _r[sku_idx]:
+                                            sample_skus.append(str(_r[sku_idx])[:30])
+                                    except Exception:
+                                        pass
+                                    try:
+                                        pi_idx = -1
+                                        for idx, h in enumerate(best_headers):
+                                            if h and str(h).strip().upper() == "PLAN_ITEM":
+                                                pi_idx = idx
+                                                break
+                                        if pi_idx >=0 and len(_r) > pi_idx and _r[pi_idx]:
+                                            sample_pis.append(str(_r[pi_idx])[:20])
+                                    except Exception:
+                                        pass
+                            all_sheet_analysis.append(f"Sheet '{sname}': header_row={best_row} score={best_score}/5 headers={best_headers[:6]} row_count_after_header={raw_rows} first_rows={first_few_rows[:2]}")
+                            # Track best overall
+                            if best_score > best_overall["score"] or (best_score == best_overall["score"] and raw_rows > best_overall["raw_rows"]):
+                                best_overall = {"sheet": sname, "row": best_row, "score": best_score, "headers": best_headers, "raw_rows": raw_rows, "total_scanned": total_scanned, "sample_skus": sample_skus, "sample_pis": sample_pis}
+                        except Exception as se:
+                            all_sheet_analysis.append(f"Sheet '{sname}': error {se}")
+                    wb_dbg.close()
+                    # Try pandas fallback reading to see if openpyxl failed due to formatting
+                    pandas_info = ""
+                    try:
+                        import pandas as pd
+                        xls = pd.ExcelFile(sched_fp)
+                        for sname in xls.sheet_names[:3]:
+                            try:
+                                df = xls.parse(sname, nrows=5)
+                                pandas_info += f" Pandas sheet '{sname}': shape={df.shape}, cols={list(df.columns)[:6]}, head={df.head(1).to_dict(orient='records')[:1]} |"
+                            except Exception as pe:
+                                pandas_info += f" Pandas sheet '{sname}' error: {pe} |"
+                    except Exception as pe:
+                        pandas_info = f" Pandas fallback failed: {pe}"
+                    debug_info = f" Sheets={sheet_names_dbg}. Best={best_overall}. All analysis: {' | '.join(all_sheet_analysis)}. {pandas_info} Master has {len(tmp_cache.item_to_cat)} items (FG={len(tmp_cache.fg_items)}, GB={len(tmp_cache.gb_items)}). Hint: If best header is ['PLAN_ITEM'] only with 0 rows, file is invalid - please download template from /api/io/templates/template and check columns. Your uploaded file appears to have only header and no data rows. Please ensure file is not filtered, not empty, and has 6 columns. File saved to data/debug_uploads/ for dev inspection."
+                except Exception as de:
+                    import traceback
+                    traceback.print_exc()
+                    debug_info = f" debug failed: {de}"
                 return _json_error(
-                    f"validation failed: 0 schedule rows. Check 排产结果表.xlsx has LINE_CODE, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, PLAN_DATE, PLAN_VALUE and SKU exists in master.",
+                    f"validation failed: 0 schedule rows. Check 排产结果表.xlsx has LINE_CODE, PLAN_ITEM (INPUT/OUTPUT/CHECKIN/CHECKOUT), SKU, PLAN_DATE, PLAN_VALUE and SKU exists in master. {debug_info}",
                     400,
                 )
         except Exception as ve:
