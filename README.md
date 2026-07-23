@@ -1,6 +1,14 @@
-# Production Plan Review
+# Production Plan Review + V2V Comparison
 
 Upload production plan data → Configure Cut Day → Auto-generate comparison report (ExF / Ungated / Gated / CTB)
+
+**NEW: V2V (Version to Version) Module** - Compare two APS snapshot versions (BOM, FCST, I_O, Supply, Switch, Item, Line, Calendar, Plan Config, Plan Output, Balance) with drill-down Week→Day→Shift, free dimension grouping, and chart visualization.
+
+- **V2V Docs**: 
+  - `docs/V2V_REQUIREMENTS_AND_PLAN.md` - Full requirements + 12 table structures
+  - `docs/V2V_CONFIRMED_SPEC.md` - Confirmed spec after 8 Q&A
+  - `docs/V2V_PHASE3_REFINED_SPEC.md` - Phase3 refined design (query-driven, not big Excel)
+  - `docs/V2V_REQUIREMENTS_AND_PLAN.md` - Original + answers inline
 
 ## Requirements
 
@@ -47,116 +55,6 @@ python run.py
 ```
 
 启动后访问 **http://localhost:8502**（端口可通过 `PORT` 环境变量配置，默认 8502）
-
-### 离线静态打包（无服务器 / 无数据库 / 多版本 / 全功能）【推荐分发】
-
-参考 `campus-planning-system/export_static.py` 模式，`export_static.py` 把前后端打包成纯静态 `dist/`，**所有功能在浏览器内完成，无需 Python/服务器/数据库**。
-
-#### 为什么需要
-
-- 公司无合适部署位置、无数据库
-- 需要给计划、销售、老板直接发文件即用
-- 需要一版/多版对比，且要保留上传、配置、筛选、聚合、下载 Excel 全功能
-
-#### 原理
-
-- `static/modules/plan_merge/engine.js` 是 `engine.py` 的浏览器移植版（聚合、ETD offset、CTB 取周最后、GB 求和等完全一致）
-- `export_static.py`：
-  1. 拷贝 `static/` → `dist/static/`，把 `/static/` 绝对路径改为 `./static/` 相对路径，适配 `file://` 双击
-  2. 本地化 `xlsx.full.min.js` 到 `dist/static/xlsx.full.min.js`，真离线
-  3. 可选：把输入的多个 `.xlsx` 用 Python 引擎预处理成 `window.STATIC_DB = {versions:[...], meta, schema}` 写入 `dist/data.js`
-  4. 注入 `<script src="./data.js">` 到 `dist/index.html`
-- 前端检测：`if (window.STATIC_DB) 进入离线版本切换模式，否则走在线/客户端引擎`
-
-#### 如何打包
-
-```bash
-# 安装依赖（只需一次）
-pip install -r requirements.txt
-
-# 1. 单版本演示（默认 templates/input_demo.xlsx）
-python export_static.py
-
-# 2. 多版本对比（最常用 - 预烘焙多版进离线包）
-python export_static.py --inputs "data/W25_v1.xlsx" "data/W25_v2.xlsx" "data/W26_final.xlsx" --note "W25 3版对比+W26定版"
-
-# 3. 通配符批量
-python export_static.py --inputs "data/*.xlsx" -o dist
-
-# 4. 指定输出目录
-python export_static.py --inputs "data/*.xlsx" --output ./release/PPR_offline
-
-# 5. 自定义 ETD 等配置（打包时固定）
-python export_static.py --inputs "data/*.xlsx" --config-etd-cut Saturday --config-output-cut Wednesday --config-offset 2
-```
-
-产出：
-
-```
-dist/
-├── index.html               # 入口，双击即用
-├── data.js                  # 预烘焙数据 window.STATIC_DB = {versions, meta, schema}
-├── static/
-│   ├── xlsx.full.min.js     # 本地化，真离线
-│   ├── global/...
-│   └── modules/plan_merge/
-│       ├── engine.js        # 浏览器版计算引擎（全功能关键）
-│       └── app.js
-├── input_template.xlsx
-├── input_demo.xlsx
-└── README_OFFLINE.txt
-```
-
-> `data.js` 大小：1版约 1MB，3版约 3MB，属于正常，浏览器可承载。
-
-#### 如何使用打包的内容
-
-**分发：**
-
-```bash
-zip -r PPR_offline_v1.zip dist
-# 发邮件/Teams/SharePoint/飞书、企业微信均可
-```
-
-**接收方使用（无需任何安装）：**
-
-1. 解压 `dist.zip` 到任意目录
-2. 双击 `dist/index.html`（Chrome / Edge 推荐）
-3. 看到顶部蓝色 Banner：`📦 Offline Static Mode - Full 功能已就绪`
-
-**功能说明（离线也全部可用）：**
-
-- **预烘焙版本切换：** Banner 下拉选择打包时嵌入的版本，`Compare multi` 勾选可合并多版，自动加 `PlanVersion` 列
-- **Show Upload：** 点击 `📁 Show Upload` 可展开上传区，**离线上传新文件**：
-  - 选择新的 6-sheet xlsx
-  - 修改 ETD / PKG / GB Cut Day 和 `ETD vs Packout Offset`
-  - 点击 `▶ Generate`，走 `engine.js` 浏览器内计算，效果与 Python 后端一致
-- **筛选/列显/聚合：** PN / Usage / Style / Color / Type / Detail 多选、搜索、✕ Clear；Aggregate by Usage/Style/Color 展开折叠
-- **下载 Excel：** `📥 Download Excel` 走客户端 `XLSX.writeFile`，FG/GB 分 sheet
-- **Schema：** 点击 `📋 sheet_name` 查看字段说明，离线时读 `static/schema.json`
-
-**I/O Report 离线（已全功能化）：**
-- 切换到 `I/O Report` 页，顶部会显示 `📦 Offline Mode - I/O Report 可用 (客户端引擎)`
-- 上传方式与在线一致：
-  - 方式1：分别选 `Item Master / Schedule / Balance` 3 个 xlsx
-  - 方式2：选 1 个 `combined` 文件（包含 3 个 sheet：Item Master / Schedule Result / BOH Balance）
-  - 支持一键多选 3 文件自动分拣
-- 点击 `▶ Upload & Analyze`，走 `static/modules/io_report/engine.js` 浏览器内计算，無需服务器
-- 之后 `Row Dimensions` 拖拽（Line / PN / Style）、`Column` 切 Shift/Day/Week/Month、Filters、Merge Group、Download Excel 全部可用，与在线版一致
-
-**常见问题：**
-
-- **Q: 双击白屏？** A: 用 Chrome/Edge 打开，勿用 IE。`file://` 下部分浏览器禁 `fetch` 本地文件，但本包已改为相对路径+本地 xlsx 库，无需联网。
-- **Q: 第一次联网？** A: 已内置 `xlsx.full.min.js`，完全无需联网。旧版 CDN 版需联网一次，当前版已解决。
-- **Q: 包太大？** A: 每版约 1MB，若嵌入 10版则 10MB，可改 `--inputs` 只放关键版本，或发不带 `data.js` 的空壳版（对方离线上传）。
-- **Q: I/O Report 和 Gated 页面为啥打包后一样？** A: 已修复。旧版离线包 I/O 页显示“仅 Gated 可用”提示；新版已内置 `io_report/engine.js`，离线 I/O 页面与原始一致，支持上传 3 文件/Combined，9 张报表、拖拽维度、合并、下载全可用。若仍看到旧提示，请重新 `python export_static.py` 生成 dist。
-
-#### 与 run.sh 对比
-
-| 方式 | 依赖 | 部署 | 多版 | 接收方门槛 |
-|------|------|------|------|------------|
-| `run.sh` / `run.py` | Python 3.10+ | 无需 | 需手动多次上传 | 需会命令行 |
-| `dist/` 静态包 | 无（浏览器） | 无 | 预烘焙+现场上传均可 | 双击即用，推荐 |
 
 ## 启动脚本特性 (run.sh / run.bat)
 
@@ -255,34 +153,124 @@ gtk-result-table/
 ├── app/
 │   ├── __init__.py              # Flask factory
 │   ├── config.py                # PORT, UPLOAD_FOLDER = project_root/uploads
-│   └── modules/plan_merge/      # Plan merge blueprint
-│       ├── __init__.py
-│       ├── routes.py            # API endpoints
-│       ├── engine.py            # Data processing + Excel + ETD offset logic (Python)
-│       ├── utils.py             # XLSX parsing helpers
-│       ├── config.py            # Default cut-day + offset values
-│       └── templates/           # Download templates + demo
+│   ├── modules/
+│   │   ├── plan_merge/          # Plan merge blueprint (original)
+│   │   │   ├── __init__.py
+│   │   │   ├── routes.py
+│   │   │   ├── engine.py
+│   │   │   ├── utils.py
+│   │   │   └── config.py
+│   │   └── v2v/                 # V2V Comparison blueprint (NEW)
+│   │       ├── __init__.py
+│   │       ├── routes.py        # /v2v/api/compare, /diff/<table>, /chart/<table>, /download
+│   │       ├── config.py        # 12 table defs
+│   │       ├── utils.py         # Folder scan + fuzzy match
+│   │       ├── diff_engine.py   # Fast summary + detailed diff + aggregated diff
+│   │       └── parsers/         # 12 parsers
+│   │           ├── bom_parser.py
+│   │           ├── fcst_parser.py
+│   │           ├── actual_parser.py      # I_O actual + coverage check
+│   │           ├── supply_parser.py      # multi-field + weekly
+│   │           ├── switch_parser.py      # Unnamed column fix
+│   │           ├── calendar_parser.py    # UPH/Yield/Efficiency + curve
+│   │           ├── item_parser.py
+│   │           ├── line_parser.py
+│   │           ├── plan_output_parser.py # Phase3: group_by + drill-down
+│   │           └── balance_parser.py     # Phase3: last balance + negative flag
 ├── static/
 │   ├── global/                  # Global HTML/CSS/JS
-│   │   ├── index.html           # SPA
+│   │   ├── index.html           # SPA with module switching (plan-merge + v2v)
 │   │   ├── style.css
-│   │   └── app.js
-│   └── modules/plan_merge/
-│       ├── engine.js            # Browser port of engine.py (full offline)
-│       ├── app.js               # Main logic + static mode + client engine
-│       └── style.css
-├── uploads/                     # Temp upload dir (gitignored)
-├── dist/                        # Offline static build (gitignored, generated by export_static.py)
-│   ├── index.html               # Double-click to use
-│   ├── data.js                  # window.STATIC_DB = {versions, meta, schema}
-│   └── static/...
-├── requirements.txt            # flask, openpyxl, requests, waitress
-├── export_static.py            # Static offline builder (inspired by campus-planning-system)
-├── run.sh / run.bat             # 一键启动脚本（自动处理 python/pip 缺失）
-└── run.py                       # Entry point
+│   │   └── app.js               # Sidebar toggle + module router
+│   └── modules/
+│       ├── plan_merge/
+│       │   ├── app.js
+│       │   └── style.css
+│       └── v2v/                 # NEW
+│           ├── app.js           # Folder upload + summary cards + detail tabs + dimension builder + chart + download
+│           └── style.css
+├── docs/
+│   ├── V2V_REQUIREMENTS_AND_PLAN.md
+│   ├── V2V_CONFIRMED_SPEC.md
+│   └── V2V_PHASE3_REFINED_SPEC.md
+├── uploads/v2v/                 # V2V temp jobs (gitignored)
+├── v2v_data/                    # Optional: put version folders here for server-side selection
+├── Ivy-20260716-gated-v2/       # Sample data - 12 tables ~1M rows
+├── requirements.txt
+├── run.sh / run.bat
+└── run.py
 ```
 
-## Business Logic
+## V2V Module Usage (NEW)
+
+### Quick Start V2V
+
+1.  **Prepare two version folders** (same 12 files inside):
+    ```
+    Ivy-20260716-gated-v2/
+      ├── BOM快照.xlsx
+      ├── FCST主表.xlsx + FCST明细表.xlsx
+      ├── I_O实际值表.xlsx
+      ├── supply供应表.xlsx
+      ├── 切换矩阵快照表.xlsx
+      ├── 料号快照表.xlsx
+      ├── 线体快照表.xlsx
+      ├── 线体日历快照表.xlsx
+      ├── 计划设置表.xlsx
+      ├── 排产结果快照表_输出.xlsx
+      └── 结存表_输出.xlsx
+    ```
+
+2.  **Place folders** either:
+    - In project root (auto-scanned for `Ivy-*`)
+    - Or in `v2v_data/` folder
+    - Or upload via UI (folder picker `webkitdirectory`)
+
+3.  **Open http://localhost:8502 → Sidebar → 🔍 V2V Comparison**
+
+4.  **Compare**:
+    - Server mode: Select Version A/B from dropdown → Compare (0.7s fast summary)
+    - Upload mode: Choose two folders → Compare
+
+5.  **Explore**:
+    - **Summary Dashboard**: 12 cards show Added/Deleted/Modified per table
+    - **Detail Tabs**: Click tab to load detailed diff (on-demand, 5-15s for large tables)
+      - **BOM**: Parent+Child+Field diff
+      - **FCST**: SKU×Week diff
+      - **I_O**: Coverage + Inconsistent check (historical actual should not change)
+      - **Supply**: Multi-field (KITTING_VALUE/QTY_REM/QTY_REM2/TOTAL_LOSS_QTY) + Week/Day toggle + Cumulative chart
+      - **Switch**: LINE + BEFORE/AFTER PN + SWITCH_DURATION
+      - **Calendar**: LINE + PLAN_TYPE (UPH/工时/良率/效率/CHECKOUT) + UPH curve chart
+      - **Plan Output** (Phase3): Free Group by LINE_CODE/SKU/PLAN_ITEM + Granularity Week/Day/Shift + Only Diff + Threshold + Drill-down breadcrumbs + Chart
+      - **Balance** (Phase3): Group by ITEM_CODE + Last balance per week + Negative flag
+    - **Chart**: Click 📈 button in row to load dual-version curve (Chart.js)
+    - **Download**: 📥 Download Current View -> Excel of current aggregated view (not 200k rows)
+
+### V2V Business Logic
+
+| Table | Key | Compare Fields | Special |
+|-------|-----|----------------|---------|
+| BOM | PARENT_PN_CODE + ITEM_NO | UNIT_NUM, LOSS_RATE, PROCESS_LT | - |
+| FCST | PN_CODE + ACTUALFIRSTDAYOFWEEK (Saturday) | ACTUALWEEKVALUE | JOIN main(ID=MAIN_ID) |
+| I_O | LINE_CODE+SKU+PLAN_DATE+SHIFT+PLAN_ITEM | PLAN_VALUE | Coverage check + Inconsistent detection |
+| Supply | PN_CODE+KITTING_DATE | KITTING_VALUE, QTY_REM, QTY_REM2, TOTAL_LOSS_QTY | Week aggregation + cum curve |
+| Switch | LINE_CODE+BEFORE_PN+AFTER_PN | SWITCH_DURATION | Handles Unnamed column for BEFORE_PN |
+| Item | ITEM_NO | PRODUCT_STYLE, COLOR, TYPE | - |
+| Line | LINE_CODE | LINE_LEVEL, LINE_TYPE | - |
+| Calendar | LINE_CODE+PLAN_TYPE+PLAN_DATE+SHIFT+PLAN_ITEM | PLAN_VALUE | 5 types: UPH/工时/良率/效率/CHECKOUT |
+| Plan Config | ID | All 50 fields | Single row |
+| Plan Output | LINE_CODE+SKU+PLAN_DATE+SHIFT+PLAN_ITEM | PLAN_VALUE | Phase3: group_by free + Week->Day->Shift drill-down |
+| Balance | ITEM_CODE+PLAN_DATE+SHIFT | BALANCE_QTY, SHIFT_OUT_QTY, PRE_INPUT_QTY | Last per week + negative flag |
+
+### Phase3 Refined Design (Output Tables)
+
+- **Not big Excel**: Backend aggregates first (203k → 1847 groups for LINE×Week → only_diff filter → 13 rows)
+- **Query-driven**: `group_by=LINE_CODE,SKU&granularity=week&only_diff=true&threshold_abs=100`
+- **Progressive disclosure**: Breadcrumb `All Weeks > LINE=AL6-Frame Week=2026/07/12 > Day=2026/07/08`
+- **Free combination**: Dimension builder with checkboxes + quick buttons (按线体周汇总 / 按SKU周汇总)
+- **Download current view only**
+
+## Business Logic (Plan Merge - Original)
 
 | Module | Source | Algorithm |
 |--------|--------|-----------|
@@ -308,20 +296,17 @@ A: `./run.sh --reset` 重建虚拟环境。
 **Q: 如何指定端口？**
 A: `./run.sh --port=8503` 或 `PORT=8503 ./run.sh`
 
-**Q: 无数据库、无部署，怎么给别人用？**
-A: 用静态离线打包：
-```bash
-python export_static.py --inputs "data/W25*.xlsx" --note "W25多版对比"
-zip -r PPR_offline.zip dist
-```
-把 `dist.zip` 发给对方，对方解压双击 `index.html` 即可，上传/配置/筛选/聚合/下载 全可用，真离线。详见上面“离线静态打包”章节。
-
-**Q: 离线包双击白屏？**
-A: 用 Chrome/Edge 打开，勿用 IE。当前包已内置 `xlsx.full.min.js`，无需联网。
-
-**Q: 离线包能否上传新文件？**
-A: 可以。顶部点 `📁 Show Upload`，选择新 xlsx，改 Cut Day / Offset，`▶ Generate` 走 `engine.js` 浏览器内计算，与 Python 后端一致。
-
 ## License
 
 Internal use.
+
+## I/O Report Module (from feat/io-report)
+
+Single Version I/O Report with Line+Style merging, per-Type TTL split, distinct colors, persistent state, and offline static build.
+
+- **Module**: `app/modules/io_report/`
+- **Frontend**: `static/modules/io_report/` with `engine.js` for full offline support
+- **Offline Build**: `export_static.py` generates `dist/` for double-click usage
+- **Features**: Hierarchical Type colors, LINE+STYLE shows 1 not 10, max call stack fix, persistent loaded badge
+
+See `feat/io-report` branch for full I/O Report history.
