@@ -104,13 +104,13 @@ function handleProcessedData(data, fileName, isClient){
   // Single status: Ready – near generate button
   const pmBadge = document.getElementById('pmStatusBadge');
   if (pmBadge){
-    pmBadge.textContent=`Ready: ${allRows.length} rows – Generated at ${timeStr}`;
+    pmBadge.textContent=`Report: Ready - ${allRows.length} rows – Generated at ${timeStr}`;
     pmBadge.style.background='#dcfce7'; pmBadge.style.color='#065f46'; pmBadge.style.borderColor='#86efac';
   }
   const pmMsg = document.getElementById('pmPersistentMsg');
   if (pmMsg){ pmMsg.textContent=`✅ Report ready – ${allRows.length} rows`; }
   const statusEl = document.getElementById('upload-status');
-  if (statusEl) statusEl.textContent = `✅ Success: ${allRows.length} rows loaded – see table below`;
+  if (statusEl) statusEl.textContent = `✅ Report: Success - ${allRows.length} rows loaded – see table below`;
   const spinner = document.getElementById('pmInlineSpinner');
   if (spinner) spinner.style.display='none';
   const fnMain = document.getElementById('file-name-main');
@@ -460,7 +460,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateGenerateBtn(){
     const btn = document.getElementById('btn-generate');
-    const badge = document.getElementById('pmStatusBadge');
+    // File readiness badge (in upload section) and Report readiness badge (in config section) are now separate
+    const fileBadge = document.getElementById('pmFileReadyBadge');
+    const fileDetails = document.getElementById('pmFileDetails');
+    const reportBadge = document.getElementById('pmStatusBadge');
     if(!btn) return;
     const gatedSel = document.getElementById('select-gated-folder');
     const ungatedSel = document.getElementById('select-ungated-folder');
@@ -480,20 +483,40 @@ document.addEventListener('DOMContentLoaded', () => {
     const allReady = gatedReady && ungatedReady && ctbReady;
     btn.disabled = !allReady;
 
-    if(badge){
+    // File readiness: shows whether data files exist in selected folders
+    if(fileBadge){
       if(!gatedFolder || !ungatedFolder || !ctbFolder){
-        badge.textContent = 'Select 3 folders';
-        badge.style.background='#f1f5f9'; badge.style.color='#64748b'; badge.style.borderColor='#e2e8f0';
+        fileBadge.textContent = 'Files: Select 3 folders';
+        fileBadge.style.background='#f1f5f9'; fileBadge.style.color='#64748b'; fileBadge.style.borderColor='#e2e8f0';
+        if(fileDetails) fileDetails.textContent = 'Please select Gated (5 files), Ungated (1 file), CTB (1 file) folders from data/';
       }else if(!allReady){
         const miss = [];
-        if(!gatedReady) miss.push(`Gated missing: ${(gatedInfo?gatedInfo.gated_missing:[]).join(', ')}`);
-        if(!ungatedReady) miss.push(`Ungated missing: ${(ungatedInfo?ungatedInfo.ungated_missing:[]).join(', ')}`);
-        if(!ctbReady) miss.push(`CTB missing: ${(ctbInfo?ctbInfo.ctb_missing:[]).join(', ')}`);
-        badge.textContent = 'Not Ready - ' + miss.join(' | ').slice(0,100);
-        badge.style.background='#fef2f2'; badge.style.color='#991b1b'; badge.style.borderColor='#fecaca';
+        if(!gatedReady) miss.push(`Gated: ${(gatedInfo?gatedInfo.gated_missing:[]).join(', ')}`);
+        if(!ungatedReady) miss.push(`Ungated: ${(ungatedInfo?ungatedInfo.ungated_missing:[]).join(', ')}`);
+        if(!ctbReady) miss.push(`CTB: ${(ctbInfo?ctbInfo.ctb_missing:[]).join(', ')}`);
+        fileBadge.textContent = 'Files: Not Ready';
+        fileBadge.style.background='#fef2f2'; fileBadge.style.color='#991b1b'; fileBadge.style.borderColor='#fecaca';
+        if(fileDetails) fileDetails.textContent = miss.join(' | ');
       }else{
-        badge.textContent = `Ready: Gated(${gatedFolder}) + Ungated(${ungatedFolder}) + CTB(${ctbFolder})`;
-        badge.style.background='#dcfce7'; badge.style.color='#065f46'; badge.style.borderColor='#86efac';
+        fileBadge.textContent = `Files: Ready - Gated(5) + Ungated(1) + CTB(1)`;
+        fileBadge.style.background='#dcfce7'; fileBadge.style.color='#065f46'; fileBadge.style.borderColor='#86efac';
+        if(fileDetails) fileDetails.textContent = `Gated:${gatedFolder}(5) + Ungated:${ungatedFolder}(1) + CTB:${ctbFolder}(1) - Ready to generate report`;
+      }
+    }
+
+    // Report readiness badge stays as "Not Ready" until report is generated (handled in Generate click)
+    if(reportBadge && !reportBadge.textContent.includes('Report Ready') && !reportBadge.textContent.includes('Processing')){
+      // Keep report badge as Not Ready if not yet generated, don't overwrite file readiness
+      if(!allReady){
+        // If files not ready, report cannot be ready
+        if(reportBadge) {
+          // Only update if not already showing Report Ready
+          const isReportReady = reportBadge.textContent.includes('Report Ready');
+          if(!isReportReady){
+            reportBadge.textContent = 'Report: Not Ready - Select files first';
+            reportBadge.style.background='#f1f5f9'; reportBadge.style.color='#64748b'; reportBadge.style.borderColor='#e2e8f0';
+          }
+        }
       }
     }
 
@@ -650,14 +673,14 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
   console.log(`[Generate] Gated=${gatedFolder}, Ungated=${ungatedFolder}, CTB=${ctbFolder}`);
   if (pmBadge){
-    pmBadge.textContent=`Processing – Gated:${gatedFolder} + Ungated:${ungatedFolder} + CTB:${ctbFolder}`;
+    pmBadge.textContent=`Report: Processing – Gated:${gatedFolder} + Ungated:${ungatedFolder} + CTB:${ctbFolder}`;
     pmBadge.style.background='#fef3c7'; pmBadge.style.color='#92400e'; pmBadge.style.borderColor='#fde68a';
   }
   if (spinner){
     spinner.style.display='inline-flex';
-    if (spinnerText) spinnerText.textContent=`Loading: Gated=${gatedFolder}, Ungated=${ungatedFolder}, CTB=${ctbFolder}`;
+    if (spinnerText) spinnerText.textContent=`Report Loading: Gated=${gatedFolder}, Ungated=${ungatedFolder}, CTB=${ctbFolder}`;
   }
-  if (status) status.textContent=`Processing 3 folders – please wait...`;
+  if (status) status.textContent=`Report: Processing 3 folders – please wait...`;
 
   try{
     const payload = {
