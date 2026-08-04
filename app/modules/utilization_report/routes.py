@@ -993,6 +993,180 @@ def api_clear():
         traceback.print_exc()
         return _json_error(f"Clear failed: {e}")
 
+# ---------- data folder selection (NEW) ----------
+def _find_file_util(data_dir: str, exact_name: str, keywords):
+    """Find file in dir using fuzzy keywords, similar to io_report"""
+    import os
+    exact = os.path.join(data_dir, exact_name)
+    if os.path.exists(exact):
+        return exact
+    if not os.path.isdir(data_dir):
+        return None
+    for f in os.listdir(data_dir):
+        if exact_name in f:
+            return os.path.join(data_dir, f)
+    for f in os.listdir(data_dir):
+        lf = f.lower()
+        for kw in keywords:
+            if kw.lower() in lf or kw in f:
+                return os.path.join(data_dir, f)
+    return None
+
+def _scan_util_folder(folder_path: str):
+    """Check if folder contains calendar and schedule for utilization"""
+    result = {
+        "has_calendar": False,
+        "has_schedule": False,
+        "files": {},
+        "missing": []
+    }
+    try:
+        cal = _find_file_util(folder_path, "工作日历快照.xlsx", ["工作日历", "calendar", "日历"])
+        sched = _find_file_util(folder_path, "排产结果表.xlsx", ["排产结果", "排产", "schedule"])
+    except Exception:
+        cal = sched = None
+
+    if cal and os.path.exists(cal):
+        result["has_calendar"] = True
+        result["files"]["calendar"] = os.path.basename(cal)
+    else:
+        result["missing"].append("calendar (Working Calendar: 工作日历快照.xlsx)")
+
+    if sched and os.path.exists(sched):
+        result["has_schedule"] = True
+        result["files"]["schedule"] = os.path.basename(sched)
+    else:
+        result["missing"].append("schedule (Schedule Result: 排产结果表.xlsx)")
+
+    result["ready"] = result["has_calendar"] and result["has_schedule"]
+    return result
+
+@util_bp.route("/api/utilization/data_folders", methods=["GET"])
+def api_util_data_folders():
+    """List available data folders under data/ with calendar/schedule existence for utilization"""
+    try:
+        import pathlib
+        base = pathlib.Path(DEFAULT_DATA_DIR)
+        folders = []
+        if not base.exists():
+            return jsonify({"folders": [], "message": f"data dir not found: {DEFAULT_DATA_DIR}"})
+
+        for entry in base.iterdir():
+            if entry.is_dir():
+                if entry.name.startswith(".") or entry.name.startswith("__"):
+                    continue
+                # Skip utilization itself to avoid recursion? Keep but it has subfolders gated/ungated, so skip top utilization folder
+                if entry.name == "utilization":
+                    # For utilization top folder, we check its subfolders gated/ungated as separate? No, list subfolders instead
+                    # Instead, scan utilization/gated and utilization/ungated as not data folders, but we will list data/ top-level folders only
+                    # So skip utilization folder itself
+                    continue
+                fp = str(entry)
+                info = _scan_util_folder(fp)
+                folders.append({
+                    "folder": entry.name,
+                    "path": f"data/{entry.name}",
+                    "has_calendar": info["has_calendar"],
+                    "has_schedule": info["has_schedule"],
+                    "files": info["files"],
+                    "missing": info["missing"],
+                    "ready": info["ready"]
+                })
+
+        # Also check some nested folders that are known to contain utilization-like data? e.g., data/20260723 has calendar and schedule for utilization? Actually 20260723 has 工作日历快照 and gated排产
+        # To support that, also scan one level deeper for folders that have calendar/schedule but were missed? For simplicity, scan data/20260723, data/IVY20260721Gated etc already covered as top-level
+
+        # Sort ready first
+        folders.sort(key=lambda x: (not x["ready"], x["folder"]))
+
+        return jsonify({
+            "folders": folders,
+            "count": len(folders)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Failed to list utilization data folders: {e}", 500)
+
+@util_bp.route("/api/utilization/load_from_folder", methods=["POST"])
+def api_util_load_from_folder():
+    """Load utilization data from a selected data folder into gated or ungated version"""
+    try:
+        data = request.get_json(silent=True) or {}
+        folder = data.get("folder") or request.args.get("folder") or request.form.get("folder")
+        version = (data.get("version") or request.args.get("version") or request.form.get("version") or "").strip().lower()
+
+        if not folder:
+            return _json_error("Missing 'folder' parameter. Provide folder name like '20260723'", 400)
+        if version not in ("gated", "ungated"):
+            return _json_error("Missing or invalid 'version' param, must be gated or ungated", 400)
+
+        if ".." in folder or folder.startswith("/") or "\\" in folder:
+            return _json_error("Invalid folder name", 400)
+
+        clean = folder[5:] if folder.startswith("data/") else folder
+        folder_path = os.path.join(DEFAULT_DATA_DIR, clean)
+
+        if not os.path.isdir(folder_path):
+            return _json_error(f"Folder not found: {folder_path}", 404)
+
+        info = _scan_util_folder(folder_path)
+        if not info["ready"]:
+            return jsonify({
+                "ok": False,
+                "folder": clean,
+                "path": folder_path,
+                "files": info["files"],
+                "missing": info["missing"],
+                "ready": False,
+                "message": f"Missing files in {clean}: {', '.join(info['missing'])}"
+            }), 400
+
+        # Find actual files
+        cal_path = _find_file_util(folder_path, "工作日历快照.xlsx", ["工作日历", "calendar", "日历"])
+        sched_path = _find_file_util(folder_path, "排产结果表.xlsx", ["排产结果", "排产", "schedule"])
+
+        if not cal_path or not sched_path:
+            return _json_error(f"Could not locate calendar/schedule in {clean}", 400)
+
+        # Copy to utilization/version folder
+        persist_dir = pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / version
+        persist_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_cal = persist_dir / "工作日历快照.xlsx"
+        dest_sched = persist_dir / "排产结果表.xlsx"
+
+        shutil.copyfile(cal_path, str(dest_cal))
+        shutil.copyfile(sched_path, str(dest_sched))
+
+        # Reload caches
+        from app.modules.utilization_report.engine import reload_all, get_all_caches
+        reload_all(DEFAULT_DATA_DIR)
+        caches = get_all_caches(DEFAULT_DATA_DIR)
+        cache = caches.get(version)
+
+        if not cache:
+            return _json_error(f"Failed to load cache after copying files for {version}", 500)
+
+        return jsonify({
+            "ok": True,
+            "folder": clean,
+            "path": folder_path,
+            "version": version,
+            "files": info["files"],
+            "ready": True,
+            "lines": len(cache.lines),
+            "dates": len(cache.dates),
+            "records_shift": len(cache.records_shift),
+            "records_day": len(cache.records_day),
+            "message": f"Loaded {version} from {clean}: {len(cache.lines)} lines, {len(cache.dates)} dates"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Load from folder failed: {e}", 500)
+
 # Templates - detailed schema and downloadable files
 @util_bp.route("/api/utilization/templates/schema", methods=["GET"])
 def api_schema():

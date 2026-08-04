@@ -11,6 +11,8 @@
   const API_UPLOAD = '/api/utilization/upload';
   const API_DEMO = '/api/utilization/demo/load';
   const API_CLEAR = '/api/utilization/clear';
+  const API_DATA_FOLDERS = '/api/utilization/data_folders';
+  const API_LOAD_FROM_FOLDER = '/api/utilization/load_from_folder';
 
   let meta = null;
   let currentMode = 'day';
@@ -171,49 +173,55 @@
     return `
       <div class="section">
         <div class="section-header">
-          <span class="section-title">⚙️ Line Utilization — Upload</span>
+          <span class="section-title">⚙️ Line Utilization — Data Folder Selection</span>
           <span id="util-status-badge">${statusBadgeHTML(status)}</span>
         </div>
-        <div style="padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#475569;margin-bottom:10px">
-          <span>Formula: <code>Util% = Load / Capacity</code> (Capacity = UPH × Efficiency × Hours) — Gated/Ungated independent</span>
-          <span style="float:right">
-            <a href="/api/utilization/templates/template" class="btn btn-sm btn-outline" style="padding:2px 6px">📦 Template</a>
-            <a href="/api/utilization/templates/demo" class="btn btn-sm btn-outline" style="padding:2px 6px">📦 Demo</a>
+        <div style="padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#475569;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <span>Select <code>data/</code> folders for Gated and Ungated — each needs <code>Working Calendar</code> + <code>Schedule Result</code>. Only ready folders can be displayed.</span>
+          <span>
             <button id="btn-view-schema" class="btn btn-sm btn-outline" style="padding:2px 6px">📋 Schema</button>
           </span>
         </div>
         <div id="schema-detail" style="display:none;margin-bottom:10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap"></div>
 
-        <div class="util-upload-grid">
-          <div class="util-upload-card" id="card-gated" style="border:2px dashed #f59e0b;background:#fffbeb">
-            <div class="util-upload-label">🟡 Gated – Upload & Generate</div>
-            <input type="file" id="input-gated" accept=".xlsx,.zip" multiple style="margin:8px 0;width:100%">
-            <div id="fname-gated" style="font-size:11px;color:#92400e;min-height:16px;word-break:break-all">No file selected</div>
-            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
-              <button class="util-btn" id="btn-upload-gated" disabled style="background:#0f172a;border-color:#0f172a">▶ Generate Gated</button>
-              <span id="util-inline-spinner-gated" style="display:none;align-items:center;gap:6px;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:10px"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span>Loading...</span>
-              <span id="status-gated-files" style="font-size:11px;padding:4px 8px;border-radius:6px;text-align:center;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">
-                ${isGatedReady? '✅ Ready: Gated' : '❌ Not Ready: Gated'}
-              </span>
+        <div class="util-upload-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+          <div class="util-upload-card" id="card-gated" style="border:1px solid #f59e0b;background:#fffbeb;padding:12px;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+              <span style="font-weight:700;font-size:12px">🟡 Gated Folder</span>
+              <span id="status-gated-files" style="font-size:11px;padding:2px 8px;border-radius:10px;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">${isGatedReady? '✅ Ready: Gated' : '❌ Not Ready: Gated'}</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="select-gated-folder" class="filter-input" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #f59e0b;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
+              <button id="btn-refresh-gated" class="btn btn-sm btn-outline" title="Refresh folder list">🔄</button>
+              <button id="btn-load-gated" class="btn btn-sm" disabled style="background:#0f172a;color:#fff">▶ Load Gated</button>
+            </div>
+            <div id="details-gated" style="margin-top:8px;font-size:11px;color:#92400e;display:none"></div>
+            <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span id="util-inline-spinner-gated" style="display:none;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:8px">Loading...</span>
+              <span id="msg-gated" style="font-size:11px;color:#065f46"></span>
             </div>
           </div>
 
-          <div class="util-upload-card" id="card-ungated" style="border:2px dashed #10b981;background:#ecfdf5">
-            <div class="util-upload-label">🟢 Ungated – Upload & Generate</div>
-            <input type="file" id="input-ungated" accept=".xlsx,.zip" multiple style="margin:8px 0;width:100%">
-            <div id="fname-ungated" style="font-size:11px;color:#065f46;min-height:16px;word-break:break-all">No file selected</div>
-            <div style="margin-top:8px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
-              <button class="util-btn" id="btn-upload-ungated" disabled style="background:#0f172a;border-color:#0f172a">▶ Generate Ungated</button>
-              <span id="util-inline-spinner-ungated" style="display:none;align-items:center;gap:6px;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:10px"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span>Loading...</span>
-              <span id="status-ungated-files" style="font-size:11px;padding:4px 8px;border-radius:6px;text-align:center;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">
-                ${isUngatedReady? '✅ Ready: Ungated' : '❌ Not Ready: Ungated'}
-              </span>
+          <div class="util-upload-card" id="card-ungated" style="border:1px solid #10b981;background:#ecfdf5;padding:12px;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+              <span style="font-weight:700;font-size:12px">🟢 Ungated Folder</span>
+              <span id="status-ungated-files" style="font-size:11px;padding:2px 8px;border-radius:10px;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">${isUngatedReady? '✅ Ready: Ungated' : '❌ Not Ready: Ungated'}</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="select-ungated-folder" class="filter-input" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #10b981;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
+              <button id="btn-refresh-ungated" class="btn btn-sm btn-outline" title="Refresh folder list">🔄</button>
+              <button id="btn-load-ungated" class="btn btn-sm" disabled style="background:#0f172a;color:#fff">▶ Load Ungated</button>
+            </div>
+            <div id="details-ungated" style="margin-top:8px;font-size:11px;color:#065f46;display:none"></div>
+            <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span id="util-inline-spinner-ungated" style="display:none;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:8px">Loading...</span>
+              <span id="msg-ungated" style="font-size:11px;color:#065f46"></span>
             </div>
           </div>
         </div>
-        <div style="text-align:center;margin-top:12px">
-          <button class="util-btn util-btn-outline" id="btn-clear-util" style="border-color:#ef4444;color:#ef4444">Clear</button>
-          <span id="msg-clear-util" style="font-size:11px;color:#64748b;margin-left:8px"></span>
+        <div style="text-align:center;margin-top:12px;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-sm btn-outline" id="btn-clear-util" style="border-color:#ef4444;color:#ef4444">🗑️ Clear All</button>
+          <span id="msg-clear-util" style="font-size:11px;color:#64748b"></span>
         </div>
       </div>
     `;
@@ -678,68 +686,133 @@
     setupVersionTypeDropdown();
     setupLineDropdown(lines);
 
-    // Simplified: single status per card — Loading / Ready / Not Ready only
-    const bindIndependentUpload = (ver) => {
-      const input = document.getElementById(`input-${ver}`);
-      const btn = document.getElementById(`btn-upload-${ver}`);
-      const fnameEl = document.getElementById(`fname-${ver}`);
-      const statusEl = document.getElementById(`status-${ver}-files`);
-      let selectedFiles = [];
-      if (!input || !btn) return;
+    // ===== NEW: Data Folder Selection Mode for Gated/Ungated =====
+    let utilFolderData = [];
 
-      input.addEventListener('change', () => {
-        selectedFiles = Array.from(input.files || []);
-        if (selectedFiles.length === 0) {
-          if (fnameEl) fnameEl.textContent = 'No file selected';
-          btn.disabled = true;
-          return;
-        }
-        const names = selectedFiles.map(f=>f.name).join(', ');
-        if (fnameEl) fnameEl.textContent = names.slice(0,200);
-        btn.disabled = false;
-        // Keep status as Not Ready until upload completes
-        if (statusEl && statusEl.textContent.includes('Not Ready')===false && statusEl.textContent.includes('Ready')===false){
-          // do not overwrite if already Ready
-        }
-      });
-
-      btn.addEventListener('click', async () => {
-        if (selectedFiles.length === 0) return;
-        const fileListShort = selectedFiles.map(f=>f.name).join(', ').slice(0,80);
-        const spinnerEl = document.getElementById(`util-inline-spinner-${ver}`);
-        if (spinnerEl){ spinnerEl.style.display='inline-flex'; spinnerEl.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span> Loading: ${fileListShort}`; }
-        if (statusEl){
-          statusEl.style.background='#fef3c7'; statusEl.style.border='1px solid #fde68a'; statusEl.style.color='#92400e';
-          statusEl.textContent = `⏳ Processing ${selectedFiles.length} file(s)...`;
-        }
-        const badge = document.getElementById('util-status-badge');
-        btn.disabled = true;
-        try {
-          const fd = new FormData();
-          selectedFiles.forEach(f => fd.append('file', f));
-          const controller = new AbortController();
-          const timeoutId = setTimeout(()=> controller.abort(), 120000);
-          let r;
-          try{ r = await fetch(`${API_UPLOAD}?version=${ver}`, { method: 'POST', body: fd, signal: controller.signal }); }
-          finally{ clearTimeout(timeoutId); }
-          const text = await r.text();
-          let j; try{ j = JSON.parse(text); }catch(e){ throw new Error(`Server error ${r.status}: ${text.slice(0,300)}`); }
-          if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-          // Success -> Ready – status near generate button
-          const spinnerEl2 = document.getElementById(`util-inline-spinner-${ver}`);
-          if (spinnerEl2) spinnerEl2.style.display='none';
-          if (statusEl){
-            statusEl.style.background='#dcfce7'; statusEl.style.border='1px solid #86efac'; statusEl.style.color='#065f46';
-            statusEl.textContent = `✅ Ready: ${ver} – Generated`;
+    async function fetchUtilFolders(){
+      try{
+        const resp = await fetchJSON(API_DATA_FOLDERS);
+        utilFolderData = resp.folders || [];
+        // Populate both selects
+        ['gated','ungated'].forEach(ver=>{
+          const sel = document.getElementById(`select-${ver}-folder`);
+          const detailsEl = document.getElementById(`details-${ver}`);
+          if(!sel) return;
+          if(utilFolderData.length===0){
+            sel.innerHTML = '<option value="">No folders found in data/</option>';
+          }else{
+            sel.innerHTML = '<option value="">-- Select folder --</option>' + utilFolderData.map(f=>{
+              const icon = f.ready ? '✅' : '⚠️';
+              const miss = f.missing && f.missing.length>0 ? ` [Missing: ${f.missing.join(', ')}]` : '';
+              return `<option value="${f.folder}" data-ready="${f.ready}">${icon} ${f.folder}${f.ready?' [Ready]':''}${miss}</option>`;
+            }).join('');
           }
-          try{ localStorage.setItem(UTIL_LS_KEY, JSON.stringify({time:new Date().toISOString(), [ver]:{files:selectedFiles.map(f=>f.name)}})); }catch{}
-          setTimeout(async () => {
-            try{
+          const loadBtn = document.getElementById(`btn-load-${ver}`);
+          if(loadBtn) loadBtn.disabled = true;
+          if(detailsEl) { detailsEl.style.display='none'; detailsEl.innerHTML=''; }
+        });
+      }catch(e){
+        console.error('fetchUtilFolders failed', e);
+        ['gated','ungated'].forEach(ver=>{
+          const sel = document.getElementById(`select-${ver}-folder`);
+          if(sel) sel.innerHTML = `<option>Failed: ${e.message}</option>`;
+        });
+      }
+    }
+
+    function renderUtilFolderDetails(ver, info){
+      const detailsEl = document.getElementById(`details-${ver}`);
+      const loadBtn = document.getElementById(`btn-load-${ver}`);
+      const statusEl = document.getElementById(`status-${ver}-files`);
+      if(!detailsEl) return;
+      if(!info){
+        detailsEl.style.display='none';
+        detailsEl.innerHTML='';
+        if(loadBtn) loadBtn.disabled=true;
+        return;
+      }
+      const isReady = info.ready;
+      if(loadBtn) loadBtn.disabled = !isReady;
+      if(isReady){
+        detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready: ${info.files.calendar||'calendar'}, ${info.files.schedule||'schedule'}</span>`;
+        detailsEl.style.display='block';
+        if(statusEl){
+          statusEl.style.background='#dcfce7'; statusEl.style.border='1px solid #86efac'; statusEl.style.color='#065f46';
+          statusEl.textContent = `✅ Ready: ${ver}`;
+        }
+      }else{
+        detailsEl.innerHTML = `<span style="color:#991b1b">❌ Missing: ${info.missing.join(', ')}</span>`;
+        detailsEl.style.display='block';
+        if(statusEl){
+          statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
+          statusEl.textContent = `❌ Not Ready: ${ver} - Missing ${info.missing.join(', ')}`;
+        }
+      }
+    }
+
+    // Bind folder selectors
+    ['gated','ungated'].forEach(ver=>{
+      const sel = document.getElementById(`select-${ver}-folder`);
+      const refreshBtn = document.getElementById(`btn-refresh-${ver}`);
+      const loadBtn = document.getElementById(`btn-load-${ver}`);
+
+      if(sel){
+        sel.addEventListener('change', ()=>{
+          const val = sel.value;
+          if(!val){
+            renderUtilFolderDetails(ver, null);
+            return;
+          }
+          const info = utilFolderData.find(f=>f.folder===val);
+          renderUtilFolderDetails(ver, info||null);
+        });
+      }
+      if(refreshBtn){
+        refreshBtn.addEventListener('click', (e)=>{
+          e.preventDefault();
+          fetchUtilFolders();
+        });
+      }
+      if(loadBtn){
+        loadBtn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          const sel2 = document.getElementById(`select-${ver}-folder`);
+          const folder = sel2 ? sel2.value : null;
+          if(!folder){
+            alert('Please select a folder for '+ver);
+            return;
+          }
+          const info = utilFolderData.find(f=>f.folder===folder);
+          if(info && !info.ready){
+            if(!confirm(`Folder ${folder} is missing files: ${info.missing.join(', ')}. Continue?`)) return;
+          }
+          const statusEl = document.getElementById(`status-${ver}-files`);
+          const spinnerEl = document.getElementById(`util-inline-spinner-${ver}`);
+          const msgEl = document.getElementById(`msg-${ver}`);
+          loadBtn.disabled=true; loadBtn.textContent='⏳ Loading...';
+          if(spinnerEl) spinnerEl.style.display='inline-flex';
+          if(statusEl){
+            statusEl.style.background='#fef3c7'; statusEl.style.border='1px solid #fde68a'; statusEl.style.color='#92400e';
+            statusEl.textContent = `⏳ Loading ${ver} from ${folder}...`;
+          }
+          try{
+            const resp = await fetch(`${API_LOAD_FROM_FOLDER}?version=${ver}&folder=${encodeURIComponent(folder)}`, {method:'POST'});
+            const text = await resp.text();
+            let j; try{ j=JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON ${resp.status}: ${text.slice(0,300)}`); }
+            if(!resp.ok || !j.ok) throw new Error(j.message||j.error||'Load failed');
+            if(spinnerEl) spinnerEl.style.display='none';
+            if(statusEl){
+              statusEl.style.background='#dcfce7'; statusEl.style.border='1px solid #86efac'; statusEl.style.color='#065f46';
+              statusEl.textContent = `✅ Ready: ${ver} from ${folder} - ${j.lines} lines`;
+            }
+            if(msgEl) msgEl.textContent = `Loaded ${j.lines} lines, ${j.dates} dates`;
+            // Refresh overall status and matrix
+            setTimeout(async ()=>{
               const st = await checkStatus();
               const badgeEl = document.getElementById('util-status-badge');
-              if (badgeEl) badgeEl.innerHTML = statusBadgeHTML(st);
+              if(badgeEl) badgeEl.innerHTML = statusBadgeHTML(st);
               updateCardStatuses(st);
-              if (st.loaded){
+              if(st.loaded){
                 await loadMeta();
                 const newLines = (meta && meta.lines) ? meta.lines : [];
                 setupLineDropdown(newLines);
@@ -749,48 +822,29 @@
                 }
                 applyPivot();
               }
-            }catch(e){ console.warn(e); }
-            btn.disabled = false;
-          }, 600);
-        } catch (e) {
-          const spinnerEl3 = document.getElementById(`util-inline-spinner-${ver}`);
-          if (spinnerEl3) spinnerEl3.style.display='none';
-          if (statusEl){
-            statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
-            statusEl.textContent = `❌ Not Ready: ${ver} – ${e.message.slice(0,60)}`;
+            }, 600);
+          }catch(err){
+            console.error(`Load ${ver} failed`, err);
+            if(spinnerEl) spinnerEl.style.display='none';
+            if(statusEl){
+              statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
+              statusEl.textContent = `❌ ${err.message}`;
+            }
+            alert(`Failed to load ${ver} from ${folder}: ${err.message}`);
+          }finally{
+            loadBtn.disabled=false; loadBtn.textContent=`▶ Load ${ver.charAt(0).toUpperCase()+ver.slice(1)}`;
           }
-          if (badge){
-            // keep overall badge as Not Ready
-          }
-          btn.disabled = false;
-        }
-      });
-    };
-
-    bindIndependentUpload('gated');
-    bindIndependentUpload('ungated');
-
-    // ===== Clear functionality — set module to Not Ready, support re-upload with localStorage clear =====
-    const resetUploadInput = (ver) => {
-      const input = document.getElementById(`input-${ver}`);
-      const fname = document.getElementById(`fname-${ver}`);
-      const uploadBtn = document.getElementById(`btn-upload-${ver}`);
-      const statusEl = document.getElementById(`status-${ver}-files`);
-      const spinnerEl = document.getElementById(`util-inline-spinner-${ver}`);
-      if(spinnerEl) spinnerEl.style.display='none';
-      if(input) input.value = '';
-      if(fname) fname.textContent = 'No file selected';
-      if(uploadBtn) uploadBtn.disabled = true;
-      if(statusEl){
-        statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
-        statusEl.textContent = `Not Ready: ${ver}`;
+        });
       }
-    };
+    });
 
+    // Initial fetch folders
+    fetchUtilFolders();
+
+    // Clear button - folder mode
     document.getElementById('btn-clear-util')?.addEventListener('click', async ()=>{
-      if(!confirm('Clear Utilization? Both will become Not Ready.')) return;
+      if(!confirm('Clear Utilization? Both Gated and Ungated will become Not Ready.')) return;
       const msgEl = document.getElementById('msg-clear-util');
-      // Immediate Not Ready - loading is loading, clear is immediately Not Ready
       if(msgEl) msgEl.textContent='Clearing... → Not Ready';
       const badge = document.getElementById('util-status-badge');
       if(badge) badge.innerHTML = `<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready</span>`;
@@ -798,9 +852,22 @@
       if(wrapper) wrapper.innerHTML = `<div style="text-align:center;padding:30px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px">Clearing... → Not Ready</div>`;
       const mbadge = document.getElementById('util-matrix-badge');
       if(mbadge) mbadge.textContent = 'Not Ready';
-      resetUploadInput('gated');
-      resetUploadInput('ungated');
-      try{ localStorage.removeItem(UTIL_LS_KEY); }catch{}
+      ['gated','ungated'].forEach(v=>{
+        const sel = document.getElementById(`select-${v}-folder`);
+        const details = document.getElementById(`details-${v}`);
+        const statusEl = document.getElementById(`status-${v}-files`);
+        const spinner = document.getElementById(`util-inline-spinner-${v}`);
+        const msg = document.getElementById(`msg-${v}`);
+        if(spinner) spinner.style.display='none';
+        if(details) { details.style.display='none'; details.innerHTML=''; }
+        if(statusEl){
+          statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
+          statusEl.textContent = `Not Ready: ${v}`;
+        }
+        if(msg) msg.textContent='';
+        const loadBtn = document.getElementById(`btn-load-${v}`);
+        if(loadBtn) loadBtn.disabled=true;
+      });
       updateCardStatuses({loaded:false, versions:[], details:{}});
       try{
         const r = await fetch(`${API_CLEAR}?version=all`, {method:'POST'});
@@ -815,6 +882,7 @@
           await loadMeta().catch(()=>{});
           setupLineDropdown([]);
           setupVersionTypeDropdown();
+          fetchUtilFolders();
         }, 300);
       }catch(e){
         if(msgEl) msgEl.textContent='Cleared locally — Not Ready (server error: '+e.message+')';
