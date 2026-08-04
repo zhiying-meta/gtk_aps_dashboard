@@ -423,9 +423,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const isReady = type==='gated' ? info.gated_ready : type==='ungated' ? info.ungated_ready : info.ctb_ready;
     const missing = type==='gated' ? info.gated_missing : type==='ungated' ? info.ungated_missing : info.ctb_missing;
 
+    // For display, only show relevant files per type: gated=5, ungated=1, ctb=1
+    let relevantFiles = [];
+    if(info.files){
+      if(type==='gated'){
+        const keys = ['item','bom','gated','fcst_main','fcst_detail'];
+        relevantFiles = keys.map(k=>info.files[k]).filter(Boolean);
+      }else if(type==='ungated'){
+        relevantFiles = [info.files['ungated']].filter(Boolean);
+        // Fallback: if ungated file not found but generic schedule exists, show that
+        if(relevantFiles.length===0 && info.files['gated']){
+          relevantFiles = [info.files['gated']];
+        }
+      }else if(type==='ctb'){
+        relevantFiles = [info.files['ctb']].filter(Boolean);
+      }
+    }
+
     if(isReady){
-      const files = info.files ? Object.values(info.files).join(', ') : 'ready';
-      detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready: ${esc(files)}</span>`;
+      detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready (${relevantFiles.length} ${type==='gated'?'files':'file'}): ${esc(relevantFiles.join(', '))}</span>`;
       detailsEl.style.display='block';
       if(statusEl){
         statusEl.textContent='Ready';
@@ -439,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
       }
     }
-    if(msgEl) msgEl.textContent = isReady ? `Ready: ${info.files ? Object.values(info.files).slice(0,3).join(', ') : ''}` : `Missing: ${missing.join(', ')}`;
+    if(msgEl) msgEl.textContent = isReady ? `Ready: ${relevantFiles.slice(0,3).join(', ')}${relevantFiles.length>3?` +${relevantFiles.length-3} more`:''}` : `Missing: ${missing.join(', ')}`;
   }
 
   function updateGenerateBtn(){
