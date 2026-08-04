@@ -441,21 +441,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if(isReady){
-      detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready (${relevantFiles.length} ${type==='gated'?'files':'file'}): ${esc(relevantFiles.join(', '))}</span>`;
+      detailsEl.innerHTML = `<span style="color:#065f46">✅ Files: Ready (${relevantFiles.length} ${type==='gated'?'files':'file'}): ${esc(relevantFiles.join(', '))}</span>`;
       detailsEl.style.display='block';
       if(statusEl){
-        statusEl.textContent='Ready';
+        statusEl.textContent=`Files: Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
         statusEl.style.background='#dcfce7'; statusEl.style.color='#065f46'; statusEl.style.borderColor='#86efac';
       }
     }else{
-      detailsEl.innerHTML = `<span style="color:#991b1b">❌ Missing: ${esc(missing.join(', '))}</span>`;
+      detailsEl.innerHTML = `<span style="color:#991b1b">❌ Files: Missing - ${esc(missing.join(', '))}</span>`;
       detailsEl.style.display='block';
       if(statusEl){
-        statusEl.textContent='Not Ready';
+        statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
         statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
       }
     }
-    if(msgEl) msgEl.textContent = isReady ? `Ready: ${relevantFiles.slice(0,3).join(', ')}${relevantFiles.length>3?` +${relevantFiles.length-3} more`:''}` : `Missing: ${missing.join(', ')}`;
+    if(msgEl) msgEl.textContent = isReady ? `Files: Ready: ${relevantFiles.slice(0,3).join(', ')}${relevantFiles.length>3?` +${relevantFiles.length-3} more`:''}` : `Files: Missing: ${missing.join(', ')}`;
   }
 
   function updateGenerateBtn(){
@@ -564,7 +564,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if(sel) sel.value = '';
       if(details){ details.style.display='none'; details.innerHTML=''; }
       if(statusEl){
-        statusEl.textContent='Not Ready';
+        statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
         statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
       }
       if(msg) msg.textContent='';

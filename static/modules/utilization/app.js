@@ -188,7 +188,7 @@
           <div class="util-upload-card" id="card-gated" style="border:1px solid #f59e0b;background:#fffbeb;padding:12px;border-radius:8px">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
               <span style="font-weight:700;font-size:12px">🟡 Gated Folder</span>
-              <span id="status-gated-files" style="font-size:11px;padding:2px 8px;border-radius:10px;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">${isGatedReady? '✅ Ready: Gated' : '❌ Not Ready: Gated'}</span>
+              <span id="status-gated-files" style="font-size:11px;padding:2px 8px;border-radius:10px;${isGatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">${isGatedReady? '✅ Report: Ready - Gated' : '❌ Report: Not Ready - Gated'}</span>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <select id="select-gated-folder" class="filter-input" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #f59e0b;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
@@ -205,7 +205,7 @@
           <div class="util-upload-card" id="card-ungated" style="border:1px solid #10b981;background:#ecfdf5;padding:12px;border-radius:8px">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
               <span style="font-weight:700;font-size:12px">🟢 Ungated Folder</span>
-              <span id="status-ungated-files" style="font-size:11px;padding:2px 8px;border-radius:10px;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">${isUngatedReady? '✅ Ready: Ungated' : '❌ Not Ready: Ungated'}</span>
+              <span id="status-ungated-files" style="font-size:11px;padding:2px 8px;border-radius:10px;${isUngatedReady? 'background:#dcfce7;color:#065f46;border:1px solid #86efac' : 'background:#fef2f2;color:#991b1b;border:1px solid #fecaca'}">${isUngatedReady? '✅ Report: Ready - Ungated' : '❌ Report: Not Ready - Ungated'}</span>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <select id="select-ungated-folder" class="filter-input" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid #10b981;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
