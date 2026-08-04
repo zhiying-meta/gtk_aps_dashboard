@@ -409,13 +409,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderDetails(type, info){
     const detailsEl = document.getElementById(`details-${type}-folder`);
     const statusEl = document.getElementById(`status-${type}-folder`);
-    const msgEl = document.getElementById(`msg-${type}-folder`);
     if(!detailsEl) return;
     if(!info){
       detailsEl.style.display='none';
       detailsEl.innerHTML='';
       if(statusEl){
-        statusEl.textContent='Not Ready';
+        statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
         statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
       }
       return;
@@ -423,7 +422,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const isReady = type==='gated' ? info.gated_ready : type==='ungated' ? info.ungated_ready : info.ctb_ready;
     const missing = type==='gated' ? info.gated_missing : type==='ungated' ? info.ungated_missing : info.ctb_missing;
 
-    // For display, only show relevant files per type: gated=5, ungated=1, ctb=1
     let relevantFiles = [];
     if(info.files){
       if(type==='gated'){
@@ -431,7 +429,6 @@ document.addEventListener('DOMContentLoaded', () => {
         relevantFiles = keys.map(k=>info.files[k]).filter(Boolean);
       }else if(type==='ungated'){
         relevantFiles = [info.files['ungated']].filter(Boolean);
-        // Fallback: if ungated file not found but generic schedule exists, show that
         if(relevantFiles.length===0 && info.files['gated']){
           relevantFiles = [info.files['gated']];
         }
@@ -441,28 +438,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if(isReady){
-      detailsEl.innerHTML = `<span style="color:#065f46">✅ Files: Ready (${relevantFiles.length} ${type==='gated'?'files':'file'}): ${esc(relevantFiles.join(', '))}</span>`;
+      detailsEl.innerHTML = `<span style="color:#065f46">Files: Ready (${relevantFiles.length}) - ${esc(relevantFiles.join(', '))}</span>`;
       detailsEl.style.display='block';
       if(statusEl){
-        statusEl.textContent=`Files: Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
+        statusEl.textContent=`Files: Ready - ${type.charAt(0).toUpperCase()+type.slice(1)} (${relevantFiles.length})`;
         statusEl.style.background='#dcfce7'; statusEl.style.color='#065f46'; statusEl.style.borderColor='#86efac';
       }
     }else{
-      detailsEl.innerHTML = `<span style="color:#991b1b">❌ Files: Missing - ${esc(missing.join(', '))}</span>`;
+      detailsEl.innerHTML = `<span style="color:#991b1b">Files: Missing - ${esc(missing.join(', '))}</span>`;
       detailsEl.style.display='block';
       if(statusEl){
         statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
         statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
       }
     }
-    if(msgEl) msgEl.textContent = isReady ? `Files: Ready: ${relevantFiles.slice(0,3).join(', ')}${relevantFiles.length>3?` +${relevantFiles.length-3} more`:''}` : `Files: Missing: ${missing.join(', ')}`;
   }
 
   function updateGenerateBtn(){
     const btn = document.getElementById('btn-generate');
-    // File readiness badge (in upload section) and Report readiness badge (in config section) are now separate
     const fileBadge = document.getElementById('pmFileReadyBadge');
-    const fileDetails = document.getElementById('pmFileDetails');
     const reportBadge = document.getElementById('pmStatusBadge');
     if(!btn) return;
     const gatedSel = document.getElementById('select-gated-folder');
@@ -483,39 +477,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const allReady = gatedReady && ungatedReady && ctbReady;
     btn.disabled = !allReady;
 
-    // File readiness: shows whether data files exist in selected folders
     if(fileBadge){
       if(!gatedFolder || !ungatedFolder || !ctbFolder){
-        fileBadge.textContent = 'Files: Select 3 folders';
+        fileBadge.textContent = 'Files: Select 3 folders (Gated 5 + Ungated 1 + CTB 1)';
         fileBadge.style.background='#f1f5f9'; fileBadge.style.color='#64748b'; fileBadge.style.borderColor='#e2e8f0';
-        if(fileDetails) fileDetails.textContent = 'Please select Gated (5 files), Ungated (1 file), CTB (1 file) folders from data/';
       }else if(!allReady){
-        const miss = [];
-        if(!gatedReady) miss.push(`Gated: ${(gatedInfo?gatedInfo.gated_missing:[]).join(', ')}`);
-        if(!ungatedReady) miss.push(`Ungated: ${(ungatedInfo?ungatedInfo.ungated_missing:[]).join(', ')}`);
-        if(!ctbReady) miss.push(`CTB: ${(ctbInfo?ctbInfo.ctb_missing:[]).join(', ')}`);
         fileBadge.textContent = 'Files: Not Ready';
         fileBadge.style.background='#fef2f2'; fileBadge.style.color='#991b1b'; fileBadge.style.borderColor='#fecaca';
-        if(fileDetails) fileDetails.textContent = miss.join(' | ');
       }else{
-        fileBadge.textContent = `Files: Ready - Gated(5) + Ungated(1) + CTB(1)`;
+        fileBadge.textContent = `Files: Ready - Gated:${gatedFolder}(5) Ungated:${ungatedFolder}(1) CTB:${ctbFolder}(1)`;
         fileBadge.style.background='#dcfce7'; fileBadge.style.color='#065f46'; fileBadge.style.borderColor='#86efac';
-        if(fileDetails) fileDetails.textContent = `Gated:${gatedFolder}(5) + Ungated:${ungatedFolder}(1) + CTB:${ctbFolder}(1) - Ready to generate report`;
       }
     }
 
-    // Report readiness badge stays as "Not Ready" until report is generated (handled in Generate click)
-    if(reportBadge && !reportBadge.textContent.includes('Report Ready') && !reportBadge.textContent.includes('Processing')){
-      // Keep report badge as Not Ready if not yet generated, don't overwrite file readiness
+    if(reportBadge && !reportBadge.textContent.includes('Report: Ready') && !reportBadge.textContent.includes('Report: Processing')){
       if(!allReady){
-        // If files not ready, report cannot be ready
-        if(reportBadge) {
-          // Only update if not already showing Report Ready
-          const isReportReady = reportBadge.textContent.includes('Report Ready');
-          if(!isReportReady){
-            reportBadge.textContent = 'Report: Not Ready - Select files first';
-            reportBadge.style.background='#f1f5f9'; reportBadge.style.color='#64748b'; reportBadge.style.borderColor='#e2e8f0';
-          }
+        const isReportReady = reportBadge.textContent.includes('Report: Ready');
+        if(!isReportReady){
+          reportBadge.textContent = 'Report: Not Ready - Select files first';
+          reportBadge.style.background='#f1f5f9'; reportBadge.style.color='#64748b'; reportBadge.style.borderColor='#e2e8f0';
         }
       }
     }
@@ -529,7 +509,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(()=>{
     ['gated','ungated','ctb'].forEach(type=>{
       const sel = document.getElementById(`select-${type}-folder`);
-      const refreshBtn = document.getElementById(`btn-refresh-${type}-folder`);
       if(sel){
         sel.addEventListener('change', ()=>{
           const val = sel.value;
@@ -538,13 +517,16 @@ document.addEventListener('DOMContentLoaded', () => {
           updateGenerateBtn();
         });
       }
-      if(refreshBtn){
-        refreshBtn.addEventListener('click', (e)=>{
-          e.preventDefault();
-          fetchFolders();
-        });
-      }
     });
+
+    // Global refresh button
+    const globalRefresh = document.getElementById('btn-refresh-packout-folders');
+    if(globalRefresh){
+      globalRefresh.addEventListener('click', (e)=>{
+        e.preventDefault();
+        fetchFolders();
+      });
+    }
 
     fetchFolders();
   }, 200);

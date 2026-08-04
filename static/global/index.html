@@ -92,51 +92,38 @@
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
-        <div class="upload-card" id="card-gated-folder" style="border:1px solid #f59e0b;background:#fffbeb;padding:12px;border-radius:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <span style="font-weight:700;font-size:12px">🟡 Gated Folder (5 files)</span>
+        <div class="upload-card" id="card-gated-folder" style="border:1px solid #f59e0b;background:#fffbeb;padding:10px;border-radius:8px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span style="font-weight:700;font-size:12px">🟡 Gated (5 files)</span>
             <span id="status-gated-folder" style="font-size:10px;padding:2px 6px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca">Files: Not Ready - Gated</span>
           </div>
-          <select id="select-gated-folder" class="filter-input" style="width:100%;padding:6px 8px;border:1px solid #f59e0b;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
-          <div id="details-gated-folder" style="margin-top:8px;font-size:11px;display:none"></div>
-          <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
-            <button id="btn-refresh-gated-folder" class="btn btn-sm btn-outline">🔄 Refresh</button>
-            <span id="msg-gated-folder" style="font-size:11px;color:#92400e"></span>
-          </div>
+          <select id="select-gated-folder" class="filter-input" style="width:100%;padding:5px 8px;border:1px solid #f59e0b;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
+          <div id="details-gated-folder" style="margin-top:6px;font-size:11px;display:none"></div>
         </div>
 
-        <div class="upload-card" id="card-ungated-folder" style="border:1px solid #10b981;background:#ecfdf5;padding:12px;border-radius:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <span style="font-weight:700;font-size:12px">🟢 Ungated Folder (1 file)</span>
+        <div class="upload-card" id="card-ungated-folder" style="border:1px solid #10b981;background:#ecfdf5;padding:10px;border-radius:8px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span style="font-weight:700;font-size:12px">🟢 Ungated (1 file)</span>
             <span id="status-ungated-folder" style="font-size:10px;padding:2px 6px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca">Files: Not Ready - Ungated</span>
           </div>
-          <select id="select-ungated-folder" class="filter-input" style="width:100%;padding:6px 8px;border:1px solid #10b981;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
-          <div id="details-ungated-folder" style="margin-top:8px;font-size:11px;display:none"></div>
-          <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
-            <button id="btn-refresh-ungated-folder" class="btn btn-sm btn-outline">🔄 Refresh</button>
-            <span id="msg-ungated-folder" style="font-size:11px;color:#065f46"></span>
-          </div>
+          <select id="select-ungated-folder" class="filter-input" style="width:100%;padding:5px 8px;border:1px solid #10b981;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
+          <div id="details-ungated-folder" style="margin-top:6px;font-size:11px;display:none"></div>
         </div>
 
-        <div class="upload-card" id="card-ctb-folder" style="border:1px solid #3b82f6;background:#eff6ff;padding:12px;border-radius:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <span style="font-weight:700;font-size:12px">🔵 CTB Folder (1 file)</span>
+        <div class="upload-card" id="card-ctb-folder" style="border:1px solid #3b82f6;background:#eff6ff;padding:10px;border-radius:8px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span style="font-weight:700;font-size:12px">🔵 CTB (1 file)</span>
             <span id="status-ctb-folder" style="font-size:10px;padding:2px 6px;border-radius:8px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca">Files: Not Ready - CTB</span>
           </div>
           <select id="select-ctb-folder" class="filter-input" style="width:100%;padding:6px 8px;border:1px solid #3b82f6;border-radius:5px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
-          <div id="details-ctb-folder" style="margin-top:8px;font-size:11px;display:none"></div>
-          <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
-            <button id="btn-refresh-ctb-folder" class="btn btn-sm btn-outline">🔄 Refresh</button>
-            <span id="msg-ctb-folder" style="font-size:11px;color:#1e40af"></span>
-          </div>
+          <div id="details-ctb-folder" style="margin-top:6px;font-size:11px;display:none"></div>
         </div>
       </div>
 
-      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
-        <span style="font-weight:600;font-size:11px;color:#065f46">📁 Files Ready Status:</span>
-        <span id="pmFileReadyBadge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">Files: Select 3 folders</span>
-        <span id="pmFileDetails" style="font-size:11px;color:#475569"></span>
-        <button id="btn-clear-packout" class="btn btn-sm btn-outline" style="margin-left:auto;border-color:#ef4444;color:#ef4444">🗑️ Clear Selection</button>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+        <span id="pmFileReadyBadge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">Files: Select 3 folders (Gated 5 + Ungated 1 + CTB 1)</span>
+        <button id="btn-refresh-packout-folders" class="btn btn-sm btn-outline">🔄 Refresh Folders</button>
+        <button id="btn-clear-packout" class="btn btn-sm btn-outline" style="margin-left:auto;border-color:#ef4444;color:#ef4444">🗑️ Clear</button>
       </div>
       <div id="upload-warnings" class="warnings" style="display:none;margin-top:8px"></div>
     </div>
@@ -515,10 +502,10 @@
   <script src="/static/modules/io_report/engine.js?v=20260804_1_en"></script>
   <script src="/static/modules/inventory_dashboard/renderer.js?v=20260725_2_fusion"></script>
   <script src="/static/global/app.js?v=20260725_2_fusion"></script>
-  <script src="/static/modules/plan_merge/app.js?v=20260804_9_distinct_ready"></script>
+  <script src="/static/modules/plan_merge/app.js?v=20260804_10_concise"></script>
   <script src="/static/modules/inventory_dashboard/renderer.js?v=20260804_1_en"></script>
-  <script src="/static/modules/io_report/app.js?v=20260804_6_concise_status"></script>
-  <script src="/static/modules/utilization/app.js?v=20260804_6_folder_mode"></script>
+  <script src="/static/modules/io_report/app.js?v=20260804_7_concise"></script>
+  <script src="/static/modules/utilization/app.js?v=20260804_7_concise"></script>
   <script src="/static/modules/v2v/app.js?v=20260723_8_v2v_integrated"></script>
 </body>
 </html>
