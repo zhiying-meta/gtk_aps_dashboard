@@ -1612,7 +1612,7 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
     const resultDiv=document.getElementById('conv-result');
 
     if(!convFiles.item){
-      if(status) status.textContent='❌ Need 料号表 (Item Snapshot) for GB mapping';
+      if(status) status.textContent='❌ Need Item Master (Item Snapshot) for GB mapping';
       return;
     }
     if(!convFiles.gb && !convFiles.sku){
@@ -1664,7 +1664,7 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
             </div>
             <div style="font-size:11px;color:#065f46">
               • Contains 2 sheets: <code>ctb_sku_cum</code> (SKU PN x dates) and <code>ctb_gb_cum</code> (GB PN x dates)<br>
-              • GB mapped via 料号表 Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>
+              • GB mapped via Item Master Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>
               • SKU has explicit SKU PN<br>
               • 👉 Next: Use this file in main Packout flow as <b>CTB.xlsx</b> (drag to CTB upload slot)
             </div>

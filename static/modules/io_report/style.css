@@ -1,4 +1,4 @@
-/* ===== I/O Report - Aligned with Plan Merge style, English ===== */
+/* ===== IO and BOH - Aligned with Plan Merge style, English ===== */
 #io-report-section { padding: 0; background: transparent; }
 #io-report-section .section { background: #fff; margin: 12px 24px; border-radius: 8px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 #io-report-section .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -183,3 +183,38 @@
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Fusion: Inventory Dashboard inside IO and BOH (per user request) ===== */
+#io-report-section #io-view-tabs .dim-tab.active { color:#059669; border-bottom-color:#059669; }
+#io-report-section #io-view-inventory .inv-dash-header { display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:10px }
+#io-report-section #io-view-inventory .inv-table-wrap,
+#io-report-section #io-view-inventory .table-wrap { margin:0;overflow:auto;background:#fff;border-radius:8px;border:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,0.06);max-height:calc(100vh - 300px) }
+#io-report-section #io-view-inventory .inv-table-wrap::-webkit-scrollbar,
+#io-report-section #io-view-inventory .table-wrap::-webkit-scrollbar { height:8px;width:8px }
+#io-report-section #io-view-inventory .inv-table-wrap::-webkit-scrollbar-track,
+#io-report-section #io-view-inventory .table-wrap::-webkit-scrollbar-track { background:#f1f5f9 }
+#io-report-section #io-view-inventory .inv-table-wrap::-webkit-scrollbar-thumb,
+#io-report-section #io-view-inventory .table-wrap::-webkit-scrollbar-thumb { background:#cbd5e1;border-radius:4px }
+#io-report-section .inv-search-input,
+#io-report-section .filter-input { padding:5px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;min-width:180px }
+#io-report-section .inv-search-input:focus,
+#io-report-section .filter-input:focus { outline:none;border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.15) }
+#io-report-section .inv-sku-select { min-width:240px;max-width:320px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;background:#fff }
+#io-report-section .inv-expand-btn { display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;font-size:10px;color:#64748b;margin-right:6px }
+#io-report-section .inv-expand-btn:hover { background:#eff6ff;border-color:#3b82f6;color:#3b82f6 }
+#io-report-section .inv-expand-btn.leaf { visibility:hidden }
+#io-report-section .inv-neg-cell { background:#fef2f2 !important;color:#dc2626 !important;font-weight:700 !important }
+#io-report-section #io-view-inventory .inv-compact-table,
+#io-report-section #io-view-inventory .compact-table { width:max-content;min-width:100%;border-collapse:collapse;font-size:12px }
+#io-report-section #io-view-inventory .inv-compact-table th,
+#io-report-section #io-view-inventory .compact-table th { padding:4px 6px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;font-size:11px;font-weight:600;color:#475569;white-space:nowrap;position:sticky;z-index:1;text-align:center }
+#io-report-section #io-view-inventory .inv-compact-table th:first-child,
+#io-report-section #io-view-inventory .compact-table th:first-child { text-align:left;position:sticky;left:0;z-index:3;background:#f1f5f9;min-width:220px }
+#io-report-section #io-view-inventory .inv-year-row th,
+#io-report-section #io-view-inventory .year-row th { background:#e2e8f0 !important;font-size:12px;color:#334155;padding:4px 6px;border-bottom:2px solid #cbd5e1;top:0 }
+#io-report-section #io-view-inventory .inv-date-row th,
+#io-report-section #io-view-inventory .date-row th { top:26px }
+#io-report-section #io-view-inventory .inv-compact-table td,
+#io-report-section #io-view-inventory .compact-table td { padding:3px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;white-space:nowrap }
+#io-report-section #io-view-inventory .inv-compact-table td:first-child,
+#io-report-section #io-view-inventory .compact-table td:first-child { text-align:left;position:sticky;left:0;z-index:1;background:#fff;font-family:monospace;font-size:11px }

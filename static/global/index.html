@@ -31,7 +31,7 @@
       <div class="nav-subcategory">Single</div>
       <a href="#" class="nav-item active" data-module="io-report">
         <span class="nav-icon">📈</span>
-        <span class="nav-text">I/O Report</span>
+        <span class="nav-text">IO and BOH</span>
       </a>
       <a href="#" class="nav-item" data-module="idle">
         <span class="nav-icon">⏸️</span>
@@ -141,29 +141,29 @@
       </div>
       <div id="ctb-converter-body" style="display:none;padding:12px">
         <div style="background:#fff;border:1px solid #bbf7d0;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#065f46">
-          <div style="font-weight:600;margin-bottom:4px">📌 上传 1. 料号表 2. MPM的CTB 2张表格，生成标准CTB格式</div>
-          <div>• <b>料号表</b>：`料号快照.xlsx` (含 GB-XXX 映射 Style/Color → GB PN)</div>
-          <div>• <b>GB CTB</b>：`Modelo GB CTB Publish 0722.xlsx` - 自动提取 MP FrameModule (下一个模块 MP Lens 之前的物料)，按 Style/Color 映射 GB</div>
-          <div>• <b>SKU CTB</b>：`Modelo SKU CTB Publish 0722.xlsx` - 有明确 SKU 料号</div>
-          <div>• 输出：`CTB.xlsx` (2 sheets: ctb_sku_cum / ctb_gb_cum) - 日期为列，PN为行，值为累计CTB</div>
-          <div style="margin-top:4px;color:#047857">💡 不需要在主流程支持MPM格式，通过此转换器生成标准CTB后再用于主流程。支持多文件/文件夹批量上传，自动分类。</div>
+          <div style="font-weight:600;margin-bottom:4px">📌 Upload 1. Item Master 2. MPM CTB (2 tables) to generate Standard CTB format</div>
+          <div>• <b>Item Master</b>: `Item_Snapshot.xlsx` (contains GB-XXX mapping Style/Color → GB PN)</div>
+          <div>• <b>GB CTB</b>: `Modelo GB CTB Publish 0722.xlsx` - Auto extracts MP FrameModule (materials before next module MP Lens), maps Style/Color to GB</div>
+          <div>• <b>SKU CTB</b>: `Modelo SKU CTB Publish 0722.xlsx` - Contains explicit SKU part numbers</div>
+          <div>• Output: `CTB.xlsx` (2 sheets: ctb_sku_cum / ctb_gb_cum) - Dates as columns, PN as rows, values are cumulative CTB</div>
+          <div style="margin-top:4px;color:#047857">💡 No need to support MPM format in main flow; use this converter to generate standard CTB first, then use in main flow. Supports multi-file/folder batch upload with auto classification.</div>
         </div>
         <!-- Quick Upload for Converter: multi-file + folder -->
         <div class="upload-card" id="card_conv_combined" style="border:2px dashed #10b981;background:#f0fdf4;margin-bottom:10px">
           <div class="upload-label">⚡ Quick Upload Converter <span style="font-size:10px;background:#065f46;color:#fff;padding:1px 6px;border-radius:8px">Recommended · Auto-classify</span></div>
-          <div class="upload-hint">Select 3 files at once, or pick folder containing them - auto-distributes to 料号表/GB CTB/SKU CTB</div>
+          <div class="upload-hint">Select 3 files at once, or pick folder containing them - auto-distributes to Item Master/GB CTB/SKU CTB</div>
           <input type="file" class="file-input" id="input_conv_combined" accept=".xlsx" multiple style="display:none">
           <input type="file" class="file-input" id="input_conv_combined_folder" accept=".xlsx" multiple webkitdirectory style="display:none">
           <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
             <button class="btn btn-sm" id="btn-conv-select-files" style="background:#065f46;border-color:#065f46">📂 Select Files</button>
             <button class="btn btn-sm btn-outline" id="btn-conv-select-folder">📁 Select Folder</button>
-            <span style="font-size:11px;color:#065f46;display:flex;align-items:center">Supports: multi-file, folder, auto-classify by keywords (料号, GB, SKU, CTB, Modelo)</span>
+            <span style="font-size:11px;color:#065f46;display:flex;align-items:center">Supports: multi-file, folder, auto-classify by keywords (Item, GB, SKU, CTB, Modelo)</span>
           </div>
           <div class="fname" id="fname_conv_combined" style="font-size:11px;color:#065f46;margin-top:6px;min-height:16px"></div>
         </div>
         <div style="font-size:11px;color:#94a3b8;margin:6px 0;text-align:center">— or upload individually —</div>
         <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-          <div class="upload-card" id="card_conv_item" style="border-color:#f59e0b"><div class="upload-label">📁 料号表 <span class="req">*</span></div><div class="upload-hint">料号快照.xlsx - 用于 Style/Color→GB 映射</div><input type="file" class="file-input" id="input_conv_item" accept=".xlsx"><div class="fname" id="fname_conv_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+          <div class="upload-card" id="card_conv_item" style="border-color:#f59e0b"><div class="upload-label">📁 Item Master <span class="req">*</span></div><div class="upload-hint">Item_Snapshot.xlsx - For Style/Color → GB mapping</div><input type="file" class="file-input" id="input_conv_item" accept=".xlsx"><div class="fname" id="fname_conv_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_conv_gb" style="border-color:#10b981"><div class="upload-label">📁 GB CTB (MPM Modelo) <span style="font-size:9px;background:#dcfce7;color:#065f46;padding:1px 4px;border-radius:4px">MP FrameModule</span></div><div class="upload-hint">Modelo GB CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_gb" accept=".xlsx"><div class="fname" id="fname_conv_gb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_conv_sku" style="border-color:#3b82f6"><div class="upload-label">📁 SKU CTB (MPM Modelo)</div><div class="upload-hint">Modelo SKU CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_sku" accept=".xlsx"><div class="fname" id="fname_conv_sku" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
         </div>
@@ -312,9 +312,9 @@
       </div>
     </div>
 
-    <!-- ===== I/O Report Section ===== -->
+    <!-- ===== IO and BOH Section ===== -->
     <div id="io-report-section" style="display:none">
-      <div style="text-align:center;padding:40px;color:#94a3b8">Loading I/O Report...</div>
+      <div style="text-align:center;padding:40px;color:#94a3b8">Loading IO and BOH...</div>
     </div>
 
     <!-- ===== Utilization ===== -->
@@ -498,10 +498,12 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/modules/plan_merge/engine.js?v=20260724_6_no_fr"></script>
-  <script src="/static/modules/io_report/engine.js?v=20260723_3"></script>
-  <script src="/static/global/app.js?v=20260724_9_fix_ctb_only_packout"></script>
+  <script src="/static/modules/io_report/engine.js?v=20260804_1_en"></script>
+  <script src="/static/modules/inventory_dashboard/renderer.js?v=20260725_2_fusion"></script>
+  <script src="/static/global/app.js?v=20260725_2_fusion"></script>
   <script src="/static/modules/plan_merge/app.js?v=20260724_6_download_hint"></script>
-  <script src="/static/modules/io_report/app.js?v=20260724_5_fix_html_error"></script>
+  <script src="/static/modules/inventory_dashboard/renderer.js?v=20260804_1_en"></script>
+  <script src="/static/modules/io_report/app.js?v=20260804_4_folder_only"></script>
   <script src="/static/modules/utilization/app.js?v=20260723_7"></script>
   <script src="/static/modules/v2v/app.js?v=20260723_8_v2v_integrated"></script>
 </body>

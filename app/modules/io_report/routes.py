@@ -19,6 +19,14 @@ DEFAULT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 def _ensure_cache():
     # Lazy check: don't auto-load large files on import (data/ may have 17M files, causes slow startup)
     # Only check if files exist, not load them
+    # Also support in-memory cache from upload (per user request: not persisting to disk)
+    try:
+        # First check in-memory cache from upload
+        import app.modules.io_report.engine as eng
+        if getattr(eng, '_global_cache', None) is not None:
+            return True
+    except Exception:
+        pass
     try:
         import pathlib
         base = pathlib.Path(DEFAULT_DATA_DIR)
@@ -548,6 +556,216 @@ def api_clear():
         return _json_error(f"Clear failed: {e}")
 
 
+# ---------- data folder selection (NEW) ----------
+# Current selected folder tracking (in-memory)
+_current_io_folder = None
+
+def _scan_folder_files(folder_path: str):
+    """Check if folder contains required IO files using fuzzy matching"""
+    from app.modules.io_report.engine import _find_file as _engine_find_file
+    result = {
+        "has_master": False,
+        "has_schedule": False,
+        "has_balance": False,
+        "has_bom": False,
+        "files": {},
+        "missing": []
+    }
+    try:
+        master = _engine_find_file(folder_path, "料号主表.xlsx", ["料号主表", "料号", "master", "item_master"])
+        schedule = _engine_find_file(folder_path, "排产结果表.xlsx", ["排产结果表", "排产", "schedule"])
+        balance = _engine_find_file(folder_path, "结存表.xlsx", ["结存表", "结存", "balance", "boh"])
+        bom = _engine_find_file(folder_path, "BOM快照.xlsx", ["BOM快照", "BOM", "bom"])
+    except Exception:
+        master = schedule = balance = bom = None
+
+    if master and os.path.exists(master):
+        result["has_master"] = True
+        result["files"]["master"] = os.path.basename(master)
+    else:
+        result["missing"].append("master (Item Master: 料号主表.xlsx)")
+
+    if schedule and os.path.exists(schedule):
+        result["has_schedule"] = True
+        result["files"]["schedule"] = os.path.basename(schedule)
+    else:
+        result["missing"].append("schedule (Schedule: 排产结果表.xlsx)")
+
+    if balance and os.path.exists(balance):
+        result["has_balance"] = True
+        result["files"]["balance"] = os.path.basename(balance)
+    else:
+        result["missing"].append("balance (BOH Balance: 结存表.xlsx)")
+
+    if bom and os.path.exists(bom):
+        result["has_bom"] = True
+        result["files"]["bom"] = os.path.basename(bom)
+
+    return result
+
+@io_bp.route("/api/io/data_folders", methods=["GET"])
+def api_data_folders():
+    """List available data folders under data/ with file existence info"""
+    try:
+        import pathlib
+        base = pathlib.Path(DEFAULT_DATA_DIR)
+        folders = []
+        if not base.exists():
+            return jsonify({"folders": [], "message": f"data dir not found: {DEFAULT_DATA_DIR}"})
+
+        # Scan immediate subdirectories
+        for entry in base.iterdir():
+            if entry.is_dir():
+                # Skip hidden and __pycache__
+                if entry.name.startswith(".") or entry.name.startswith("__"):
+                    continue
+                # Skip some known non-data folders? Keep all but check
+                fp = str(entry)
+                info = _scan_folder_files(fp)
+                folders.append({
+                    "folder": entry.name,
+                    "path": f"data/{entry.name}",
+                    "has_master": info["has_master"],
+                    "has_schedule": info["has_schedule"],
+                    "has_balance": info["has_balance"],
+                    "has_bom": info["has_bom"],
+                    "files": info["files"],
+                    "missing": info["missing"],
+                    "ready": info["has_master"] and info["has_schedule"] and info["has_balance"]
+                })
+
+        # Also check data/ itself if it contains files directly
+        root_info = _scan_folder_files(str(base))
+        if root_info["has_master"] or root_info["has_schedule"] or root_info["has_balance"]:
+            folders.insert(0, {
+                "folder": ".",
+                "path": "data/",
+                "has_master": root_info["has_master"],
+                "has_schedule": root_info["has_schedule"],
+                "has_balance": root_info["has_balance"],
+                "has_bom": root_info["has_bom"],
+                "files": root_info["files"],
+                "missing": root_info["missing"],
+                "ready": root_info["has_master"] and root_info["has_schedule"] and root_info["has_balance"]
+            })
+
+        # Sort: ready first, then by name
+        folders.sort(key=lambda x: (not x["ready"], x["folder"]))
+
+        global _current_io_folder
+        return jsonify({
+            "folders": folders,
+            "current": _current_io_folder,
+            "count": len(folders)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Failed to list data folders: {e}", 500)
+
+@io_bp.route("/api/io/load_from_folder", methods=["POST"])
+def api_load_from_folder():
+    """Load IO data from a selected data folder under data/"""
+    global _current_io_folder
+    try:
+        data = request.get_json(silent=True) or {}
+        folder = data.get("folder") or request.args.get("folder") or request.form.get("folder")
+        if not folder:
+            return _json_error("Missing 'folder' parameter. Provide folder name like 'io-sample' or '20260723'", 400)
+
+        # Security: prevent path traversal
+        if ".." in folder or folder.startswith("/") or "\\" in folder:
+            return _json_error("Invalid folder name", 400)
+
+        # Handle "." as root data/
+        if folder == "." or folder == "data" or folder == "data/":
+            folder_path = DEFAULT_DATA_DIR
+            folder_name = "."
+        else:
+            # Remove data/ prefix if provided
+            clean = folder
+            if clean.startswith("data/"):
+                clean = clean[5:]
+            folder_path = os.path.join(DEFAULT_DATA_DIR, clean)
+            folder_name = clean
+
+        if not os.path.isdir(folder_path):
+            return _json_error(f"Folder not found: {folder_path} (requested {folder})", 404)
+
+        # Check files
+        info = _scan_folder_files(folder_path)
+        if not info["has_master"] or not info["has_schedule"] or not info["has_balance"]:
+            return jsonify({
+                "ok": False,
+                "folder": folder_name,
+                "path": folder_path,
+                "files": info["files"],
+                "missing": info["missing"],
+                "has_master": info["has_master"],
+                "has_schedule": info["has_schedule"],
+                "has_balance": info["has_balance"],
+                "has_bom": info["has_bom"],
+                "ready": False,
+                "message": f"Missing files in {folder_name}: {', '.join(info['missing'])}"
+            }), 400
+
+        # Load data using engine
+        from app.modules.io_report.engine import load_data, _global_cache, _global_data_dir
+        import app.modules.io_report.engine as eng
+
+        try:
+            cache = load_data(folder_path)
+        except Exception as ve:
+            import traceback
+            traceback.print_exc()
+            return _json_error(f"Failed to load data from {folder_name}: {ve}", 400)
+
+        # Set global cache - keep _global_data_dir as DEFAULT_DATA_DIR so status/meta/reports keep using in-memory cache
+        # We track actual source folder separately in _current_io_folder
+        eng._global_cache = cache
+        try:
+            from app.modules.io_report.engine import _resolve_data_dir as _resolve
+            eng._global_data_dir = _resolve(DEFAULT_DATA_DIR)
+        except Exception:
+            eng._global_data_dir = DEFAULT_DATA_DIR
+
+        _current_io_folder = folder_name
+        # Also store actual folder path for inventory BOM lookup
+        eng._global_data_dir_actual = folder_path  # extra attr for inventory
+
+        return jsonify({
+            "ok": True,
+            "folder": folder_name,
+            "path": folder_path,
+            "files": info["files"],
+            "missing": [],
+            "has_master": info["has_master"],
+            "has_schedule": info["has_schedule"],
+            "has_balance": info["has_balance"],
+            "has_bom": info["has_bom"],
+            "ready": True,
+            "fg": len(cache.fg_items),
+            "gb": len(cache.gb_items),
+            "fg_sched": len(cache.sched_fg),
+            "gb_sched": len(cache.sched_gb),
+            "cats": cache.cats,
+            "message": f"Loaded from {folder_name}: {len(cache.fg_items)} FG, {len(cache.gb_items)} GB, BOM {'found' if info['has_bom'] else 'not found (flat inventory)'}"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Load from folder failed: {e}", 500)
+
+@io_bp.route("/api/io/current_folder", methods=["GET"])
+def api_current_folder():
+    """Get current selected IO folder"""
+    global _current_io_folder
+    return jsonify({
+        "current": _current_io_folder,
+        "has_selection": _current_io_folder is not None
+    })
+
 # ---------- templates ----------
 IO_SCHEMA = {
     "item_master": {
@@ -696,7 +914,7 @@ def api_io_export_static():
 
         html_content = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>I/O Report - Static BI - {now_str}</title>
+<title>IO and BOH - Static BI - {now_str}</title>
 <style>
 body{{font-family:Arial,sans-serif;margin:16px;background:#f8fafc}}
 h1{{font-size:18px;color:#1e293b}}
@@ -717,7 +935,7 @@ th{{background:#1e293b;color:#fff;padding:6px 8px;position:sticky;top:0;z-index:
 td{{padding:4px 6px;border-bottom:1px solid #e2e8f0;border-right:1px solid #f1f5f9;text-align:right}}
 td.frozen{{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:500}}
 </style></head><body>
-<h1>📈 I/O Report — Static BI Report (Full Format & Filtering Preserved)</h1>
+<h1>📈 IO and BOH — Static BI Report (Full Format & Filtering Preserved)</h1>
 <div class="sub">Generated: {now_str} | Export via /api/io/export/static (calls export_static logic) | All groups (FG/GB/FR/LT/RT) and flexible dims embedded</div>
 <div class="status" id="static-status"></div>
 <div class="tabs" id="groupTabs"><button class="tab active" data-group="FG">FG</button><button class="tab" data-group="GB">GB</button><button class="tab" data-group="FR">FR</button><button class="tab" data-group="LT">LT</button><button class="tab" data-group="RT">RT</button></div>
@@ -731,7 +949,7 @@ td.frozen{{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font
   <div class="filter-group"><label>&nbsp;</label><div><button class="btn" id="f-apply">Apply</button> <button class="btn btn-outline" id="f-clear">Clear</button> <span id="f-count" style="font-size:11px;color:#64748b"></span></div></div>
 </div>
 <div id="static-all-content"></div>
-<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static BI report from I/O dashboard via export_static. All tabs (FG/GB/FR/LT/RT) and flexible dims (Line/PN/Style, Column Shift/Day/Week/Month) preserved with embedded numbers. Exported via /api/io/export/static.</div>
+<div style="margin-top:12px;font-size:10px;color:#94a3b8">Static BI report from IO and BOH dashboard via export_static. All tabs (FG/GB/FR/LT/RT) and flexible dims (Line/PN/Style, Column Shift/Day/Week/Month) preserved with embedded numbers. Exported via /api/io/export/static.</div>
 <script>
 const STATIC_DATA = {static_json};
 let curGroup = 'FG';
