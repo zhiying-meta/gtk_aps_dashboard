@@ -655,14 +655,13 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
   console.log(`[Generate] Gated=${gatedFolder}, Ungated=${ungatedFolder}, CTB=${ctbFolder}`);
   if (pmBadge){
-    pmBadge.textContent=`Report: Processing – Gated:${gatedFolder} + Ungated:${ungatedFolder} + CTB:${ctbFolder}`;
+    pmBadge.textContent=`Report: Processing - ${gatedFolder} + ${ungatedFolder} + ${ctbFolder}`;
     pmBadge.style.background='#fef3c7'; pmBadge.style.color='#92400e'; pmBadge.style.borderColor='#fde68a';
   }
   if (spinner){
     spinner.style.display='inline-flex';
-    if (spinnerText) spinnerText.textContent=`Report Loading: Gated=${gatedFolder}, Ungated=${ungatedFolder}, CTB=${ctbFolder}`;
+    if (spinnerText) spinnerText.textContent=`Loading...`;
   }
-  if (status) status.textContent=`Report: Processing 3 folders – please wait...`;
 
   try{
     const payload = {
