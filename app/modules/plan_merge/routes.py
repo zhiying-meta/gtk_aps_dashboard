@@ -805,6 +805,251 @@ renderTable();
         return jsonify({"error": f"Export static failed: {e}"}), 500
 
 
+# ---------- Data Folder Selection Mode (NEW) ----------
+def _find_snapshot_file(data_dir: str, key: str):
+    """Find file for a given snapshot key in data_dir using fuzzy matching"""
+    target = SNAPSHOT_TARGET_MAP.get(key)
+    if not target:
+        return None
+    # exact match
+    exact = os.path.join(data_dir, target)
+    if os.path.exists(exact):
+        return exact
+    # fuzzy: try _classify_snapshot_upload logic via scanning directory
+    try:
+        for f in os.listdir(data_dir):
+            if not f.lower().endswith(".xlsx"):
+                continue
+            # Use classify to see if it matches key
+            classified = _classify_to_key(f, f)
+            if classified == key:
+                return os.path.join(data_dir, f)
+            # Also check if target substring in f
+            if target in f or key in f.lower():
+                return os.path.join(data_dir, f)
+    except Exception:
+        pass
+    return None
+
+def _scan_packout_folder(folder_path: str):
+    """Scan folder for packout snapshot files, return dict with existence info"""
+    result = {
+        "has_item": False,
+        "has_bom": False,
+        "has_gated": False,
+        "has_ungated": False,
+        "has_fcst_main": False,
+        "has_fcst_detail": False,
+        "has_ctb": False,
+        "files": {},
+        "missing": []
+    }
+    try:
+        for key in SNAPSHOT_TARGET_MAP.keys():
+            fp = _find_snapshot_file(folder_path, key)
+            if fp and os.path.exists(fp):
+                result[f"has_{key}"] = True
+                result["files"][key] = os.path.basename(fp)
+            else:
+                result["missing"].append(f"{key} ({SNAPSHOT_TARGET_MAP[key]})")
+    except Exception as e:
+        result["missing"].append(f"scan error: {e}")
+
+    # For new requirement: gated folder needs 5 files, ungated 1, ctb 1
+    gated_keys = ["item", "bom", "gated", "fcst_main", "fcst_detail"]
+    result["gated_ready"] = all(result.get(f"has_{k}", False) for k in gated_keys)
+    result["gated_missing"] = [f"{k} ({SNAPSHOT_TARGET_MAP[k]})" for k in gated_keys if not result.get(f"has_{k}", False)]
+
+    ungated_keys = ["ungated"]
+    result["ungated_ready"] = all(result.get(f"has_{k}", False) for k in ungated_keys)
+    result["ungated_missing"] = [f"{k} ({SNAPSHOT_TARGET_MAP[k]})" for k in ungated_keys if not result.get(f"has_{k}", False)]
+
+    ctb_keys = ["ctb"]
+    result["ctb_ready"] = all(result.get(f"has_{k}", False) for k in ctb_keys)
+    result["ctb_missing"] = [f"{k} ({SNAPSHOT_TARGET_MAP[k]})" for k in ctb_keys if not result.get(f"has_{k}", False)]
+
+    result["ready_all"] = result["gated_ready"] and result["ungated_ready"] and result["ctb_ready"]
+    return result
+
+@plan_merge_bp.route("/api/plan_merge/data_folders", methods=["GET"])
+def api_data_folders():
+    """List data folders under data/ with packout file existence for gated(5)/ungated(1)/ctb(1)"""
+    try:
+        import pathlib
+        base = pathlib.Path(DEFAULT_DATA_DIR)
+        folders = []
+        if not base.exists():
+            return jsonify({"folders": [], "message": f"data dir not found: {DEFAULT_DATA_DIR}"})
+
+        for entry in base.iterdir():
+            if entry.is_dir():
+                if entry.name.startswith(".") or entry.name.startswith("__"):
+                    continue
+                # Skip utilization folder itself (has gated/ungated subfolders but not packout)
+                # But we still scan it - if it has no packout files, it will be not ready
+                fp = str(entry)
+                info = _scan_packout_folder(fp)
+                folders.append({
+                    "folder": entry.name,
+                    "path": f"data/{entry.name}",
+                    "has_item": info["has_item"],
+                    "has_bom": info["has_bom"],
+                    "has_gated": info["has_gated"],
+                    "has_ungated": info["has_ungated"],
+                    "has_fcst_main": info["has_fcst_main"],
+                    "has_fcst_detail": info["has_fcst_detail"],
+                    "has_ctb": info["has_ctb"],
+                    "files": info["files"],
+                    "missing": info["missing"],
+                    "gated_ready": info["gated_ready"],
+                    "gated_missing": info["gated_missing"],
+                    "ungated_ready": info["ungated_ready"],
+                    "ungated_missing": info["ungated_missing"],
+                    "ctb_ready": info["ctb_ready"],
+                    "ctb_missing": info["ctb_missing"],
+                    "ready": info["ready_all"],
+                    "ready_all": info["ready_all"]
+                })
+
+        # Sort ready first
+        folders.sort(key=lambda x: (not x["ready"], x["folder"]))
+
+        return jsonify({
+            "folders": folders,
+            "count": len(folders)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Failed to list packout data folders: {e}", 500)
+
+@plan_merge_bp.route("/api/plan_merge/load_from_folders", methods=["POST"])
+def api_load_from_folders():
+    """Load packout data from 3 selected folders: gated(5 files), ungated(1), ctb(1)"""
+    try:
+        data = request.get_json(silent=True) or {}
+        gated_folder = data.get("gated_folder") or data.get("gated") or request.args.get("gated_folder") or request.form.get("gated_folder")
+        ungated_folder = data.get("ungated_folder") or data.get("ungated") or request.args.get("ungated_folder") or request.form.get("ungated_folder")
+        ctb_folder = data.get("ctb_folder") or data.get("ctb") or request.args.get("ctb_folder") or request.form.get("ctb_folder")
+
+        # Allow also single folder param for backward compat (if all 7 files in one folder)
+        single_folder = data.get("folder") or request.args.get("folder")
+
+        if single_folder and not (gated_folder or ungated_folder or ctb_folder):
+            # If single folder provided, use it for all 3
+            gated_folder = ungated_folder = ctb_folder = single_folder
+
+        if not gated_folder:
+            return _json_error("Missing gated_folder parameter. Provide folder name under data/ that contains 5 files: item, bom, gated, fcst_main, fcst_detail", 400)
+        if not ungated_folder:
+            return _json_error("Missing ungated_folder parameter. Provide folder with ungated file", 400)
+        if not ctb_folder:
+            return _json_error("Missing ctb_folder parameter. Provide folder with CTB file", 400)
+
+        # Security check
+        for f in [gated_folder, ungated_folder, ctb_folder]:
+            if ".." in f or f.startswith("/") or "\\" in f:
+                return _json_error(f"Invalid folder name: {f}", 400)
+
+        def resolve_folder(name):
+            clean = name[5:] if name.startswith("data/") else name
+            if clean == ".":
+                return DEFAULT_DATA_DIR, "."
+            return os.path.join(DEFAULT_DATA_DIR, clean), clean
+
+        gated_path, gated_name = resolve_folder(gated_folder)
+        ungated_path, ungated_name = resolve_folder(ungated_folder)
+        ctb_path, ctb_name = resolve_folder(ctb_folder)
+
+        for p, n in [(gated_path, gated_name), (ungated_path, ungated_name), (ctb_path, ctb_name)]:
+            if not os.path.isdir(p):
+                return _json_error(f"Folder not found: {p} (requested {n})", 404)
+
+        # Scan each folder
+        gated_info = _scan_packout_folder(gated_path)
+        ungated_info = _scan_packout_folder(ungated_path)
+        ctb_info = _scan_packout_folder(ctb_path)
+
+        # Validate gated has 5 files
+        if not gated_info["gated_ready"]:
+            return jsonify({
+                "ok": False,
+                "gated_folder": gated_name,
+                "gated_missing": gated_info["gated_missing"],
+                "message": f"Gated folder {gated_name} missing: {', '.join(gated_info['gated_missing'])}"
+            }), 400
+
+        if not ungated_info["ungated_ready"]:
+            return jsonify({
+                "ok": False,
+                "ungated_folder": ungated_name,
+                "ungated_missing": ungated_info["ungated_missing"],
+                "message": f"Ungated folder {ungated_name} missing: {', '.join(ungated_info['ungated_missing'])}"
+            }), 400
+
+        if not ctb_info["ctb_ready"]:
+            return jsonify({
+                "ok": False,
+                "ctb_folder": ctb_name,
+                "ctb_missing": ctb_info["ctb_missing"],
+                "message": f"CTB folder {ctb_name} missing: {', '.join(ctb_info['ctb_missing'])}"
+            }), 400
+
+        # Collect files: 5 from gated, 1 from ungated, 1 from ctb
+        file_map = {}
+
+        # From gated folder: item, bom, gated, fcst_main, fcst_detail
+        for key in ["item", "bom", "gated", "fcst_main", "fcst_detail"]:
+            fp = _find_snapshot_file(gated_path, key)
+            if fp:
+                file_map[key] = fp
+
+        # From ungated folder: ungated
+        fp = _find_snapshot_file(ungated_path, "ungated")
+        if fp:
+            file_map["ungated"] = fp
+
+        # From ctb folder: ctb
+        fp = _find_snapshot_file(ctb_path, "ctb")
+        if fp:
+            file_map["ctb"] = fp
+
+        # Validate all 7 present
+        missing = [k for k in SNAPSHOT_TARGET_MAP.keys() if k not in file_map]
+        if missing:
+            return _json_error(f"Failed to collect all 7 files after scanning. Missing keys: {missing}. Gated:{gated_info['files']}, Ungated:{ungated_info['files']}, CTB:{ctb_info['files']}", 400)
+
+        # Process via snapshot engine
+        cfg = {}
+        for cfg_key in ["exf_cut", "etd_cut", "output_cut", "gb_cut", "etd_packout_offset"]:
+            val = request.form.get(cfg_key) or (data.get(cfg_key) if isinstance(data, dict) else None) or request.args.get(cfg_key)
+            if val:
+                cfg[cfg_key] = val
+
+        try:
+            result = process_snapshot_data(file_map, cfg)
+            warnings = result.get("warnings", [])
+            warnings.insert(0, f"✅ Loaded from folders: gated={gated_name} (5 files), ungated={ungated_name} (1 file), ctb={ctb_name} (1 file) -> {len(file_map)} files total")
+            result["warnings"] = warnings
+            result["mode"] = "snapshot-folder"
+            result["folders"] = {
+                "gated": gated_name,
+                "ungated": ungated_name,
+                "ctb": ctb_name
+            }
+            result["files"] = {k: f"{os.path.basename(v)} ({os.path.getsize(v)} bytes)" for k, v in file_map.items()}
+            return jsonify(result)
+        except Exception as e:
+            import traceback
+            tb_str = traceback.format_exc()
+            print(f"[PlanMerge] Folder load processing failed: {e}\n{tb_str}")
+            return _json_error(f"Processing failed: {e}\nTrace: {tb_str[:2000]}", 500)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Load from folders failed: {e}", 500)
+
 # ---------- Extended status for snapshot (optional) ----------
 @plan_merge_bp.route("/api/plan_merge/status", methods=["GET"])
 def api_status():
