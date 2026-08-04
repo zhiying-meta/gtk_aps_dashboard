@@ -132,8 +132,8 @@
     const gatedReady = versions.includes('gated');
     const ungatedReady = versions.includes('ungated');
     const badge = (label, ready) => {
-      if(ready) return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">Ready: ${label}</span>`;
-      else return `<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Not Ready: ${label}</span>`;
+      if(ready) return `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">Report: Ready - ${label}</span>`;
+      else return `<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:2px 8px;border-radius:12px;font-size:11px">Report: Not Ready - ${label}</span>`;
     };
     return `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">${badge('Gated', gatedReady)} ${badge('Ungated', ungatedReady)}</span>`;
   }
@@ -149,19 +149,19 @@
     if(gatedEl){
       if(isGatedReady){
         gatedEl.style.background='#dcfce7'; gatedEl.style.border='1px solid #86efac'; gatedEl.style.color='#065f46';
-        gatedEl.innerHTML=`<span>Ready: Gated</span>`;
+        gatedEl.innerHTML=`<span>Report: Ready - Gated</span>`;
       }else{
         gatedEl.style.background='#fef2f2'; gatedEl.style.border='1px solid #fecaca'; gatedEl.style.color='#991b1b';
-        gatedEl.innerHTML=`<span>Not Ready: Gated</span>`;
+        gatedEl.innerHTML=`<span>Report: Not Ready - Gated</span>`;
       }
     }
     if(ungatedEl){
       if(isUngatedReady){
         ungatedEl.style.background='#dcfce7'; ungatedEl.style.border='1px solid #86efac'; ungatedEl.style.color='#065f46';
-        ungatedEl.innerHTML=`<span>Ready: Ungated</span>`;
+        ungatedEl.innerHTML=`<span>Report: Ready - Ungated</span>`;
       }else{
         ungatedEl.style.background='#fef2f2'; ungatedEl.style.border='1px solid #fecaca'; ungatedEl.style.color='#991b1b';
-        ungatedEl.innerHTML=`<span>Not Ready: Ungated</span>`;
+        ungatedEl.innerHTML=`<span>Report: Not Ready - Ungated</span>`;
       }
     }
   }
@@ -723,7 +723,8 @@
     function renderUtilFolderDetails(ver, info){
       const detailsEl = document.getElementById(`details-${ver}`);
       const loadBtn = document.getElementById(`btn-load-${ver}`);
-      const statusEl = document.getElementById(`status-${ver}-files`);
+      // Note: statusEl here is Report status, not Files status - we keep Report status separate (updated by updateCardStatuses)
+      // So this function only updates File status in detailsEl and Load button
       if(!detailsEl) return;
       if(!info){
         detailsEl.style.display='none';
@@ -733,20 +734,13 @@
       }
       const isReady = info.ready;
       if(loadBtn) loadBtn.disabled = !isReady;
+
       if(isReady){
-        detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready: ${info.files.calendar||'calendar'}, ${info.files.schedule||'schedule'}</span>`;
+        detailsEl.innerHTML = `<span style="color:#065f46"><b>Files:</b> Ready - ${info.files.calendar||'calendar'}, ${info.files.schedule||'schedule'}</span>`;
         detailsEl.style.display='block';
-        if(statusEl){
-          statusEl.style.background='#dcfce7'; statusEl.style.border='1px solid #86efac'; statusEl.style.color='#065f46';
-          statusEl.textContent = `✅ Ready: ${ver}`;
-        }
       }else{
-        detailsEl.innerHTML = `<span style="color:#991b1b">❌ Missing: ${info.missing.join(', ')}</span>`;
+        detailsEl.innerHTML = `<span style="color:#991b1b"><b>Files:</b> Missing - ${info.missing.join(', ')}</span>`;
         detailsEl.style.display='block';
-        if(statusEl){
-          statusEl.style.background='#fef2f2'; statusEl.style.border='1px solid #fecaca'; statusEl.style.color='#991b1b';
-          statusEl.textContent = `❌ Not Ready: ${ver} - Missing ${info.missing.join(', ')}`;
-        }
       }
     }
 

@@ -148,35 +148,34 @@ async function render(){
 }
 
 function buildUploadSectionHTML(isCompact){
-  const statusBadge = getStatusBadgeHTML();
+  const reportBadge = getStatusBadgeHTML();
   return `<div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}" style="padding:12px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-weight:700;font-size:13px;color:#0f172a">📂 Data Folder</span>
         <select id="ioFolderSelect_${isCompact?'compact':'full'}" class="filter-input" style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;min-width:220px;font-size:12px;background:#fff"><option>Loading...</option></select>
-        <button id="ioFolderRefresh_${isCompact?'compact':'full'}" class="btn btn-sm btn-outline" title="Refresh folder list">🔄</button>
+        <button id="ioFolderRefresh_${isCompact?'compact':'full'}" class="btn btn-sm btn-outline" title="Refresh">🔄</button>
         <button id="ioFolderLoad_${isCompact?'compact':'full'}" class="btn btn-sm" disabled style="background:#0f172a;color:#fff;padding:5px 14px">▶ Load</button>
-        <span id="ioFolderStatus_${isCompact?'compact':'full'}" style="font-size:11px;color:#475569"></span>
-        <span id="ioStatusBadge_${isCompact?'compact':'full'}">${statusBadge}</span>
-        <span id="ioInlineSpinner_${isCompact?'compact':'full'}" style="display:none;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 8px;border-radius:12px"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span> Loading...</span>
-        <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:11px;color:#065f46"></span>
         ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar" style="margin-left:auto">▼</button>' : '<a href="/api/io/templates/schema" target="_blank" class="btn btn-sm btn-outline" style="margin-left:auto">📋 Schema</a>'}
       </div>
-      <div id="ioFolderDetails_${isCompact?'compact':'full'}" style="margin-top:8px;font-size:11px;color:#475569;display:none"></div>
+      <div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;font-size:11px">
+        <span style="display:inline-flex;gap:6px;align-items:center"><b>Files:</b> <span id="ioFileStatus_${isCompact?'compact':'full'}" style="padding:2px 8px;border-radius:10px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0">Select folder</span></span>
+        <span style="display:inline-flex;gap:6px;align-items:center"><b>Report:</b> <span id="ioReportStatus_${isCompact?'compact':'full'}">${reportBadge}</span> <span id="ioInlineSpinner_${isCompact?'compact':'full'}" style="display:none;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 6px;border-radius:8px">Loading...</span></span>
+      </div>
     </div>`;
 }
 function attachUploadLogic(isCompact){
   const suffix = isCompact ? 'compact' : 'full';
-  // --- NEW: Server Folder Selection Logic ---
-  let currentFolderData = []; // holds folder list
-  let selectedFolderInfo = null;
+  let currentFolderData = [];
 
   async function fetchDataFolders(){
     const sel = document.getElementById(`ioFolderSelect_${suffix}`);
-    const statusEl = document.getElementById(`ioFolderStatus_${suffix}`);
-    const detailsEl = document.getElementById(`ioFolderDetails_${suffix}`);
+    const fileStatus = document.getElementById(`ioFileStatus_${suffix}`);
     const loadBtn = document.getElementById(`ioFolderLoad_${suffix}`);
     if(sel) sel.innerHTML = '<option>Loading...</option>';
-    if(statusEl) statusEl.textContent = '⏳ Scanning data/ ...';
+    if(fileStatus){
+      fileStatus.textContent = 'Files: Scanning...';
+      fileStatus.style.background='#f1f5f9'; fileStatus.style.color='#64748b'; fileStatus.style.borderColor='#e2e8f0';
+    }
     try{
       const resp = await fetch('/api/io/data_folders');
       const j = await resp.json();
@@ -184,56 +183,69 @@ function attachUploadLogic(isCompact){
       currentFolderData = j.folders || [];
       if(sel){
         if(currentFolderData.length===0){
-          sel.innerHTML = '<option value="">No data folders found in data/</option>';
+          sel.innerHTML = '<option value="">No folders in data/</option>';
         }else{
           sel.innerHTML = currentFolderData.map(f=>{
             const icon = f.ready ? '✅' : '⚠️';
-            const miss = f.missing && f.missing.length>0 ? ` [Missing: ${f.missing.join(', ')}]` : '';
-            return `<option value="${f.folder}" data-ready="${f.ready}">${icon} ${f.folder}${f.ready?' [Ready]':''}${miss}</option>`;
+            return `<option value="${f.folder}">${icon} ${f.folder}${f.ready?' [Files Ready]':' [Files Missing]'}</option>`;
           }).join('');
-          // Preselect current if any
-          if(j.current){
-            sel.value = j.current;
-          }
+          if(j.current) sel.value = j.current;
         }
       }
-      if(statusEl) statusEl.textContent = `Found ${currentFolderData.length} folders, ${currentFolderData.filter(f=>f.ready).length} ready`;
-      // Trigger change to show details
+      const readyCount = currentFolderData.filter(f=>f.ready).length;
+      if(fileStatus){
+        fileStatus.textContent = `Files: Found ${currentFolderData.length} folders, ${readyCount} with all files ready`;
+        fileStatus.style.background= readyCount>0 ? '#dcfce7' : '#fef2f2';
+        fileStatus.style.color= readyCount>0 ? '#065f46' : '#991b1b';
+        fileStatus.style.borderColor= readyCount>0 ? '#86efac' : '#fecaca';
+      }
       if(sel) sel.dispatchEvent(new Event('change'));
     }catch(e){
       console.error('fetchDataFolders failed', e);
       if(sel) sel.innerHTML = `<option>Failed: ${e.message}</option>`;
-      if(statusEl) statusEl.textContent = `❌ ${e.message}`;
+      if(fileStatus){
+        fileStatus.textContent = `Files: Error - ${e.message}`;
+        fileStatus.style.background='#fef2f2'; fileStatus.style.color='#991b1b'; fileStatus.style.borderColor='#fecaca';
+      }
     }
   }
 
-  function renderFolderDetails(info){
-    const detailsEl = document.getElementById(`ioFolderDetails_${suffix}`);
+  function updateFileStatus(info){
+    const fileStatus = document.getElementById(`ioFileStatus_${suffix}`);
     const loadBtn = document.getElementById(`ioFolderLoad_${suffix}`);
-    const statusEl = document.getElementById(`ioFolderStatus_${suffix}`);
-    if(!detailsEl) return;
+    if(!fileStatus) return;
     if(!info){
-      detailsEl.style.display='none';
-      detailsEl.innerHTML='';
+      fileStatus.textContent = 'Files: Select folder';
+      fileStatus.style.background='#f1f5f9'; fileStatus.style.color='#64748b'; fileStatus.style.borderColor='#e2e8f0';
       if(loadBtn) loadBtn.disabled=true;
       return;
     }
-    selectedFolderInfo = info;
     const isReady = info.ready;
     if(loadBtn) loadBtn.disabled = !isReady;
-
     if(isReady){
-      detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready: ${info.files.master||'master'}, ${info.files.schedule||'schedule'}, ${info.files.balance||'balance'}${info.has_bom ? ` + BOM:${info.files.bom}` : ' (BOM optional)'}</span>`;
-      detailsEl.style.display='block';
-      if(statusEl) statusEl.textContent = '';
+      fileStatus.textContent = `Files: Ready - ${info.files.master||'master'}, ${info.files.schedule||'schedule'}, ${info.files.balance||'balance'}`;
+      fileStatus.style.background='#dcfce7'; fileStatus.style.color='#065f46'; fileStatus.style.borderColor='#86efac';
     }else{
-      detailsEl.innerHTML = `<span style="color:#991b1b">❌ Missing: ${info.missing.join(', ')}</span>`;
-      detailsEl.style.display='block';
-      if(statusEl) statusEl.textContent = `Missing: ${info.missing.join(', ')}`;
+      fileStatus.textContent = `Files: Missing - ${info.missing.join(', ')}`;
+      fileStatus.style.background='#fef2f2'; fileStatus.style.color='#991b1b'; fileStatus.style.borderColor='#fecaca';
     }
   }
 
-  // Bind folder UI events - will be called after DOM exists
+  function updateReportStatus(text, type){
+    const reportStatus = document.getElementById(`ioReportStatus_${suffix}`);
+    if(!reportStatus) return;
+    reportStatus.textContent = text;
+    if(type==='ready'){
+      reportStatus.style.background='#dcfce7'; reportStatus.style.color='#065f46'; reportStatus.style.borderColor='#86efac';
+    }else if(type==='loading'){
+      reportStatus.style.background='#fef3c7'; reportStatus.style.color='#92400e'; reportStatus.style.borderColor='#fde68a';
+    }else if(type==='error'){
+      reportStatus.style.background='#fef2f2'; reportStatus.style.color='#991b1b'; reportStatus.style.borderColor='#fecaca';
+    }else{
+      reportStatus.style.background='#f1f5f9'; reportStatus.style.color='#64748b'; reportStatus.style.borderColor='#e2e8f0';
+    }
+  }
+
   setTimeout(()=>{
     const sel = document.getElementById(`ioFolderSelect_${suffix}`);
     const refreshBtn = document.getElementById(`ioFolderRefresh_${suffix}`);
@@ -243,100 +255,55 @@ function attachUploadLogic(isCompact){
       sel.addEventListener('change', ()=>{
         const val = sel.value;
         if(!val){
-          renderFolderDetails(null);
+          updateFileStatus(null);
           return;
         }
         const info = currentFolderData.find(f=>f.folder===val);
-        renderFolderDetails(info||null);
+        updateFileStatus(info||null);
       });
     }
     if(refreshBtn){
-      refreshBtn.addEventListener('click', (e)=>{
-        e.preventDefault();
-        fetchDataFolders();
-      });
+      refreshBtn.addEventListener('click', (e)=>{ e.preventDefault(); fetchDataFolders(); });
     }
     if(loadBtn){
       loadBtn.addEventListener('click', async (e)=>{
         e.preventDefault();
         const sel2 = document.getElementById(`ioFolderSelect_${suffix}`);
         const folder = sel2 ? sel2.value : null;
-        if(!folder){
-          alert('Please select a folder');
-          return;
-        }
+        if(!folder){ alert('Please select a folder'); return; }
         const info = currentFolderData.find(f=>f.folder===folder);
         if(info && !info.ready){
-          if(!confirm(`Folder ${folder} is missing files: ${info.missing.join(', ')}. Continue anyway? It will fail.`)) return;
+          if(!confirm(`Folder ${folder} missing files: ${info.missing.join(', ')}. Continue?`)) return;
         }
-        const statusEl = document.getElementById(`ioFolderStatus_${suffix}`);
-        const detailsEl = document.getElementById(`ioFolderDetails_${suffix}`);
-        loadBtn.disabled=true;
-        loadBtn.textContent='⏳ Loading...';
-        if(statusEl) statusEl.textContent=`⏳ Loading from ${folder} ...`;
+        loadBtn.disabled=true; loadBtn.textContent='⏳ Loading...';
+        updateReportStatus(`Report: Loading from ${folder}...`, 'loading');
+        const spinner = document.getElementById(`ioInlineSpinner_${suffix}`);
+        if(spinner) spinner.style.display='inline-flex';
         try{
-          const resp = await fetch('/api/io/load_from_folder', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({folder})
-          });
+          const resp = await fetch('/api/io/load_from_folder', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({folder}) });
           const text = await resp.text();
-          let j;
-          try{ j=JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON ${resp.status}: ${text.slice(0,300)}`); }
-          if(!resp.ok || !j.ok){
-            throw new Error(j.message||j.error||`Load failed: ${text.slice(0,200)}`);
-          }
-          // Success - show badge and render reports
-          if(statusEl) statusEl.innerHTML = `<span style="color:#065f46">✅ Loaded: ${j.fg} FG / ${j.gb} GB from ${folder} — ${j.has_bom?'BOM found':'BOM not found (flat inventory)'}</span>`;
-
-          // Update main status badge
-          const pmBadge = document.getElementById(`ioStatusBadge_${suffix}`);
-          if(pmBadge) pmBadge.innerHTML = `<span style="background:#dcfce7;color:#065f46;border:1px solid #86efac;padding:2px 8px;border-radius:12px;font-size:11px">✅ Ready from folder: ${folder} – ${j.fg} FG / ${j.gb} GB</span>`;
-
-          const prog = document.getElementById(`uploadProgress_${suffix}`);
-          if(prog) prog.textContent = `✅ Loaded from ${folder}: ${j.fg} FG / ${j.gb} GB — rendering...`;
-
-          // Auto-render IO reports
-          setTimeout(()=>{
-            renderReportsPage();
-            // Auto-build inventory from same folder (one-button)
-            setTimeout(()=>{ try{ buildIOInventoryFromCache(true); }catch(e){ console.warn('auto inventory after folder load failed', e); } }, 800);
-          }, 600);
-
+          let j; try{ j=JSON.parse(text); }catch{ throw new Error(`Non-JSON ${resp.status}: ${text.slice(0,200)}`); }
+          if(!resp.ok || !j.ok) throw new Error(j.message||j.error||'Load failed');
+          updateReportStatus(`Report: Ready - ${j.fg} FG / ${j.gb} GB from ${folder} (BOM ${j.has_bom?'found':'not found'})`, 'ready');
+          setTimeout(()=>{ renderReportsPage(); setTimeout(()=>{ try{ buildIOInventoryFromCache(true); }catch(e){} }, 800); }, 600);
         }catch(err){
-          console.error('Load from folder failed', err);
-          if(statusEl) statusEl.innerHTML = `<span style="color:#991b1b">❌ ${err.message}</span>`;
-          alert(`Failed to load from folder ${folder}: ${err.message}`);
+          console.error('Load failed', err);
+          updateReportStatus(`Report: Error - ${err.message}`, 'error');
+          alert(`Failed to load ${folder}: ${err.message}`);
         }finally{
-          loadBtn.disabled=false;
-          loadBtn.textContent='▶ Load from Folder';
+          loadBtn.disabled=false; loadBtn.textContent='▶ Load';
+          const spinner2 = document.getElementById(`ioInlineSpinner_${suffix}`);
+          if(spinner2) spinner2.style.display='none';
         }
       });
     }
-
-    // Initial fetch
     fetchDataFolders();
-  }, 200);
-
-  // Recheck status and toggle for compact mode
-  document.getElementById(`btnRetryLoad_${suffix}`)?.addEventListener('click', async ()=>{
-    const ok=await checkStatus();
-    if(ok) renderReportsPage();
-    else alert('No valid data - please select a folder from data/ and load');
-  });
-
-  if(isCompact){
-    document.getElementById('toggleUploadBar')?.addEventListener('click', ()=>{
-      const bar = document.getElementById('io-upload-bar');
-      const content = document.getElementById('io-folder-section-compact');
-      // Simple toggle for compact header
-      const isHidden = bar && bar.querySelector('#io-folder-section-compact')?.style.display==='none';
-      const sec = document.getElementById('io-folder-section-compact');
-      if(sec) sec.style.display = isHidden ? 'block' : (sec.style.display==='none' ? 'block' : 'none');
-      const btn = document.getElementById('toggleUploadBar');
-      if(btn) btn.textContent = (sec && sec.style.display==='none') ? '▶ Expand' : '▼ Collapse';
+    // Initial report status from cache
+    checkStatus().then(ok=>{
+      if(ok) updateReportStatus('Report: Ready - cached data available', 'ready');
+      else updateReportStatus('Report: Not Ready - select folder and load', 'notready');
     });
-  }
+  }, 200);
 }
 function renderUploadPage(){ ioRoot.innerHTML=buildUploadSectionHTML(false); attachUploadLogic(false); }
 
