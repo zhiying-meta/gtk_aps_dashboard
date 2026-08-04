@@ -1,7 +1,7 @@
-// ===== Global: Sidebar Toggle & Nav Switching — V4 Integrated 5 Modules (io-report, idle, packout, utilization, v2v) =====
+// ===== Global: Sidebar Toggle & Nav Switching — V5 Integrated 5 Modules (io-and-boh, idle, packout, utilization, v2v) + Inventory fused into IO and BOH =====
 // IA:
 // Current Week
-//   Single: I/O, Idle (standalone, one version)
+//   Single: IO and BOH (includes Inventory Dashboard tab), Idle (standalone, one version)
 //   Compare: Packout, Utilization (Gated vs Ungated, fallback to single if only one uploaded)
 // Cross Week
 //   V2V Comparison: W29 Gated vs W30 Gated (true multi-version, from feat/io-report + feat/v2v)
@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const toggleAlt = document.getElementById('sidebar-toggle-alt');
   if (toggleAlt) toggleAlt.addEventListener('click', toggleSidebar);
 
-  // Section registry - 5 modules integrated
+  // Section registry - 5 modules integrated (Inventory Dashboard fused into IO and BOH, standalone removed per user request)
   // ctbConverter is part of Packout only (ExF vs ETD vs Packout vs CTB)
   const S = {
     upload: document.getElementById('upload-section'),
@@ -68,11 +68,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Module -> visibility map (5 modules)
+  // Module -> visibility map (5 modules, Inventory Dashboard now fused into IO and BOH)
   function switchModule(mod) {
-    // Normalize legacy
+    // Normalize legacy: inventory-dashboard now redirects to io-report (fused)
     if (mod === 'plan-merge') mod = 'packout';
-    if (mod === 'version-compare') mod = 'v2v'; // alias to v2v
+    if (mod === 'version-compare') mod = 'v2v';
+    if (mod === 'inventory-dashboard') mod = 'io-report'; // legacy standalone -> fused into IO and BOH
 
     hideAll();
     if (mod === 'packout') {
@@ -197,5 +198,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   updateHeaderTitle();
   window.switchModule = switchModule;
-  console.log('✅ Global app.js V4 loaded: 5 modules (io-report, idle, packout, utilization, v2v) integrated');
+  console.log('✅ Global app.js V5 loaded: 5 modules (io-and-boh, idle, packout, utilization, v2v) + Inventory fused into IO and BOH');
 });

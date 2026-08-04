@@ -26,6 +26,15 @@ def _register_blueprints(app):
     except Exception as e:
         print(f"[app] utilization_report not loaded: {e}")
 
+    try:
+        from app.modules.inventory_dashboard import inventory_bp
+        app.register_blueprint(inventory_bp)
+        print("✅ Inventory dashboard module registered")
+    except Exception as e:
+        print(f"[app] inventory_dashboard not loaded: {e}")
+        import traceback
+        traceback.print_exc()
+
 
 def create_app():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

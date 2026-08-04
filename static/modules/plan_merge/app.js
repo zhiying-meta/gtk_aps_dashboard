@@ -104,13 +104,13 @@ function handleProcessedData(data, fileName, isClient){
   // Single status: Ready – near generate button
   const pmBadge = document.getElementById('pmStatusBadge');
   if (pmBadge){
-    pmBadge.textContent=`Ready: ${allRows.length} rows – Generated at ${timeStr}`;
+    pmBadge.textContent=`Report: Ready - ${allRows.length} rows – Generated at ${timeStr}`;
     pmBadge.style.background='#dcfce7'; pmBadge.style.color='#065f46'; pmBadge.style.borderColor='#86efac';
   }
   const pmMsg = document.getElementById('pmPersistentMsg');
   if (pmMsg){ pmMsg.textContent=`✅ Report ready – ${allRows.length} rows`; }
   const statusEl = document.getElementById('upload-status');
-  if (statusEl) statusEl.textContent = `✅ Success: ${allRows.length} rows loaded – see table below`;
+  if (statusEl) statusEl.textContent = `✅ Report: Success - ${allRows.length} rows loaded – see table below`;
   const spinner = document.getElementById('pmInlineSpinner');
   if (spinner) spinner.style.display='none';
   const fnMain = document.getElementById('file-name-main');
@@ -345,205 +345,214 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(restoreLoadStatusUI, 300);
 });
 
-// ===== Upload: Snapshot Only =====
+// ===== Folder Mode: Gated(5) + Ungated(1) + CTB(1) =====
 (function(){
-  // Snapshot keys, matching backend SNAPSHOT_TARGET_MAP - main flow only old CTB (7 files)
-  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
-  const files = { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
+  let folderData = []; // all folders
+  let selected = { gated: null, ungated: null, ctb: null };
 
-  function escAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
-  function markHasFile(cardId, has){
-    const el = document.getElementById(cardId);
-    if(el) el.classList.toggle('has-file', !!has);
-  }
-  function classifyByName(name){
-    const low = (name||'').toLowerCase();
-    // Important: check ungated before gated
-    if (low.includes('料号') || (low.includes('item') || low.includes('料号快照'))) {
-      if (low.includes('料号快照') || low.includes('item') ) return 'item';
-    }
-    if (low.includes('bom')) return 'bom';
-    if (low.includes('ungated')) return 'ungated';
-    if (low.includes('gated排产') || low.includes('gated')) {
-      if (!low.includes('ungated')) return 'gated';
-    }
-    if (low.includes('fcst')) {
-      if (low.includes('主表') || low.includes('main')) return 'fcst_main';
-      if (low.includes('明细') || low.includes('detail')) return 'fcst_detail';
-    }
-    if (low.includes('主表')) return 'fcst_main';
-    if (low.includes('明细')) return 'fcst_detail';
-    if (low.includes('ctb')) {
-      // Main flow only old CTB (2 sheets), Modelo handled in converter
-      return 'ctb';
-    }
-    // fallback English
-    if (low.includes('料号快照')) return 'item';
-    if (low.includes('bom快照')) return 'bom';
-    return null;
-  }
-  function setFileForKey(k, file){
-    files[k]=file;
-    const fnameEl=document.getElementById('fname_'+k);
-    if(fnameEl) fnameEl.textContent='✓ '+file.name+' ('+(file.size/1024).toFixed(1)+'KB)';
-    markHasFile('card_'+k,true);
-  }
-  function clearFileForKey(k){
-    files[k]=null;
-    const fnameEl=document.getElementById('fname_'+k);
-    if(fnameEl) fnameEl.textContent='';
-    markHasFile('card_'+k,false);
-    const inp=document.getElementById('input_'+k);
-    if(inp) inp.value='';
-  }
-  function updateCombinedDisplay(){
-    const comboEl=document.getElementById('fname_combined');
-    if(!comboEl) return;
-    if(files.combined && files.combined.length>0){
-      if(files.combined.length===1){
-        const f=files.combined[0];
-        const isZip=f.name.toLowerCase().endsWith('.zip');
-        const hint=isZip?'📦 Zip':'📄';
-        comboEl.textContent=`✓ ${hint}: ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
-      }else{
-        const names = files.combined.slice(0,3).map(f=>f.name).join(', ');
-        const more = files.combined.length>3 ? ` +${files.combined.length-3} more` : '';
-        comboEl.textContent=`✓ ${files.combined.length} files: ${names}${more}`;
-      }
-      markHasFile('card_combined',true);
-    }else{
-      const filled=SNAPSHOT_KEYS.filter(k=>!!files[k]);
-      if(filled.length>0){
-        comboEl.textContent=`📦 ${filled.length}/7: `+filled.join(', ');
-        markHasFile('card_combined',false);
-      }else{
-        comboEl.textContent='';
-        markHasFile('card_combined',false);
-      }
-    }
-  }
+  function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 
-  // Individual file inputs
-  SNAPSHOT_KEYS.forEach(k=>{
-    const input=document.getElementById('input_'+k);
-    if(!input) return;
-    input.addEventListener('change', ()=>{
-      if(input.files.length>0){
-        setFileForKey(k,input.files[0]);
-        // Clear combined if individual changed
-        if(files.combined.length>0){
-          files.combined=[];
-          const ce=document.getElementById('fname_combined');
-          if(ce) ce.textContent=`ℹ️ Individual ${k} set, cleared quick upload. You can still use quick upload to override.`;
-          setTimeout(updateCombinedDisplay, 1500);
-        }
-      }else{
-        clearFileForKey(k);
-      }
-      updateCombinedDisplay();
+  async function fetchFolders(){
+    const gatedSel = document.getElementById('select-gated-folder');
+    const ungatedSel = document.getElementById('select-ungated-folder');
+    const ctbSel = document.getElementById('select-ctb-folder');
+    [gatedSel, ungatedSel, ctbSel].forEach(sel=>{
+      if(sel) sel.innerHTML = '<option>Loading folders...</option>';
     });
-  });
+    try{
+      const resp = await fetch('/api/plan_merge/data_folders');
+      const j = await resp.json();
+      if(!resp.ok) throw new Error(j.error||'Failed to list folders');
+      folderData = j.folders || [];
 
-  // Quick Upload: Select Files button -> trigger hidden input
-  const btnSelectFiles=document.getElementById('btn-select-files');
-  const btnSelectFolder=document.getElementById('btn-select-folder');
-  const inputCombined=document.getElementById('input_combined');
-  const inputCombinedFolder=document.getElementById('input_combined_folder');
+      const buildOptions = (filterFn)=>{
+        let opts = '<option value="">-- Select folder --</option>';
+        folderData.forEach(f=>{
+          const ready = filterFn ? filterFn(f) : f.ready;
+          const icon = ready ? '✅' : '⚠️';
+          const miss = f.missing && f.missing.length>0 ? ` [Missing: ${f.missing.join(', ')}]` : '';
+          const label = `${icon} ${f.folder}${ready?' [Ready]':''}${!ready && miss ? miss : ''}`;
+          opts += `<option value="${f.folder}" data-ready="${ready}">${label}</option>`;
+        });
+        return opts;
+      };
 
-  if(btnSelectFiles && inputCombined){
-    btnSelectFiles.addEventListener('click', (e)=>{ e.preventDefault(); inputCombined.click(); });
-  }
-  if(btnSelectFolder && inputCombinedFolder){
-    btnSelectFolder.addEventListener('click', (e)=>{ e.preventDefault(); inputCombinedFolder.click(); });
-  }
-
-  function handleCombinedSelection(selectedFiles){
-    const selected = Array.from(selectedFiles||[]);
-    if(selected.length===0){ files.combined=[]; updateCombinedDisplay(); return; }
-
-    if(selected.length===1){
-      const f=selected[0];
-      const low=f.name.toLowerCase();
-      const isZip=low.endsWith('.zip');
-      // Single file: if it's zip or single snapshot, keep as combined and auto-distribute if possible
-      files.combined=[f];
-      const cls=classifyByName(f.name);
-      if(cls){
-        setFileForKey(cls,f);
-        // keep combined as well for server fallback
-      }else if(isZip){
-        // zip will be handled server side
-        updateCombinedDisplay();
-        return;
+      if(gatedSel){
+        gatedSel.innerHTML = buildOptions(f=>f.gated_ready);
+        // Try to auto-select first ready
+        const firstReady = folderData.find(f=>f.gated_ready);
+        if(firstReady) gatedSel.value = firstReady.folder;
+        gatedSel.dispatchEvent(new Event('change'));
       }
-      // Clear other individual if this single file is ambiguous and we want to use as combined
-      // For snapshot, if single file is not classified, treat as combined (maybe zip)
-      updateCombinedDisplay();
+      if(ungatedSel){
+        ungatedSel.innerHTML = buildOptions(f=>f.ungated_ready);
+        const firstReady = folderData.find(f=>f.ungated_ready);
+        if(firstReady) ungatedSel.value = firstReady.folder;
+        ungatedSel.dispatchEvent(new Event('change'));
+      }
+      if(ctbSel){
+        ctbSel.innerHTML = buildOptions(f=>f.ctb_ready);
+        const firstReady = folderData.find(f=>f.ctb_ready);
+        if(firstReady) ctbSel.value = firstReady.folder;
+        ctbSel.dispatchEvent(new Event('change'));
+      }
+
+      updateGenerateBtn();
+    }catch(e){
+      console.error('fetchFolders failed', e);
+      [gatedSel, ungatedSel, ctbSel].forEach(sel=>{
+        if(sel) sel.innerHTML = `<option>Failed: ${e.message}</option>`;
+      });
+    }
+  }
+
+  function renderDetails(type, info){
+    const detailsEl = document.getElementById(`details-${type}-folder`);
+    const statusEl = document.getElementById(`status-${type}-folder`);
+    if(!detailsEl) return;
+    if(!info){
+      detailsEl.style.display='none';
+      detailsEl.innerHTML='';
+      if(statusEl){
+        statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
+        statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
+      }
       return;
     }
+    const isReady = type==='gated' ? info.gated_ready : type==='ungated' ? info.ungated_ready : info.ctb_ready;
+    const missing = type==='gated' ? info.gated_missing : type==='ungated' ? info.ungated_missing : info.ctb_missing;
 
-    // Multiple files: auto-distribute
-    // Reset individual slots
-    SNAPSHOT_KEYS.forEach(k=> clearFileForKey(k));
-    files.combined=[];
-
-    const unclassified=[];
-    selected.forEach(f=>{
-      const cls=classifyByName(f.name);
-      if(cls && !files[cls]){
-        setFileForKey(cls,f);
-      }else{
-        unclassified.push(f);
+    let relevantFiles = [];
+    if(info.files){
+      if(type==='gated'){
+        const keys = ['item','bom','gated','fcst_main','fcst_detail'];
+        relevantFiles = keys.map(k=>info.files[k]).filter(Boolean);
+      }else if(type==='ungated'){
+        relevantFiles = [info.files['ungated']].filter(Boolean);
+        if(relevantFiles.length===0 && info.files['gated']){
+          relevantFiles = [info.files['gated']];
+        }
+      }else if(type==='ctb'){
+        relevantFiles = [info.files['ctb']].filter(Boolean);
       }
-    });
-    // Try to fill remaining empty slots with unclassified (order-based fallback)
-    for(const k of SNAPSHOT_KEYS){
-      if(!files[k] && unclassified.length>0){
-        // For fallback, assign if still no classification but we have file
-        // Use file extension check: if xlsx, assign
-        if(unclassified[0].name.toLowerCase().endsWith('.xlsx')){
-          setFileForKey(k, unclassified.shift());
+    }
+
+    if(isReady){
+      detailsEl.innerHTML = `<span style="color:#065f46">Files: Ready (${relevantFiles.length}) - ${esc(relevantFiles.join(', '))}</span>`;
+      detailsEl.style.display='block';
+      if(statusEl){
+        statusEl.textContent=`Files: Ready - ${type.charAt(0).toUpperCase()+type.slice(1)} (${relevantFiles.length})`;
+        statusEl.style.background='#dcfce7'; statusEl.style.color='#065f46'; statusEl.style.borderColor='#86efac';
+      }
+    }else{
+      detailsEl.innerHTML = `<span style="color:#991b1b">Files: Missing - ${esc(missing.join(', '))}</span>`;
+      detailsEl.style.display='block';
+      if(statusEl){
+        statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
+        statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
+      }
+    }
+  }
+
+  function updateGenerateBtn(){
+    const btn = document.getElementById('btn-generate');
+    const fileBadge = document.getElementById('pmFileReadyBadge');
+    const reportBadge = document.getElementById('pmStatusBadge');
+    if(!btn) return;
+    const gatedSel = document.getElementById('select-gated-folder');
+    const ungatedSel = document.getElementById('select-ungated-folder');
+    const ctbSel = document.getElementById('select-ctb-folder');
+    const gatedFolder = gatedSel ? gatedSel.value : null;
+    const ungatedFolder = ungatedSel ? ungatedSel.value : null;
+    const ctbFolder = ctbSel ? ctbSel.value : null;
+
+    const gatedInfo = folderData.find(f=>f.folder===gatedFolder);
+    const ungatedInfo = folderData.find(f=>f.folder===ungatedFolder);
+    const ctbInfo = folderData.find(f=>f.folder===ctbFolder);
+
+    const gatedReady = gatedInfo && gatedInfo.gated_ready;
+    const ungatedReady = ungatedInfo && ungatedInfo.ungated_ready;
+    const ctbReady = ctbInfo && ctbInfo.ctb_ready;
+
+    const allReady = gatedReady && ungatedReady && ctbReady;
+    btn.disabled = !allReady;
+
+    if(fileBadge){
+      if(!gatedFolder || !ungatedFolder || !ctbFolder){
+        fileBadge.textContent = 'Files: Select 3 folders (Gated 5 + Ungated 1 + CTB 1)';
+        fileBadge.style.background='#f1f5f9'; fileBadge.style.color='#64748b'; fileBadge.style.borderColor='#e2e8f0';
+      }else if(!allReady){
+        fileBadge.textContent = 'Files: Not Ready';
+        fileBadge.style.background='#fef2f2'; fileBadge.style.color='#991b1b'; fileBadge.style.borderColor='#fecaca';
+      }else{
+        fileBadge.textContent = `Files: Ready - Gated:${gatedFolder}(5) Ungated:${ungatedFolder}(1) CTB:${ctbFolder}(1)`;
+        fileBadge.style.background='#dcfce7'; fileBadge.style.color='#065f46'; fileBadge.style.borderColor='#86efac';
+      }
+    }
+
+    if(reportBadge && !reportBadge.textContent.includes('Report: Ready') && !reportBadge.textContent.includes('Report: Processing')){
+      if(!allReady){
+        const isReportReady = reportBadge.textContent.includes('Report: Ready');
+        if(!isReportReady){
+          reportBadge.textContent = 'Report: Not Ready - Select files first';
+          reportBadge.style.background='#f1f5f9'; reportBadge.style.color='#64748b'; reportBadge.style.borderColor='#e2e8f0';
         }
       }
     }
-    if(unclassified.length>0){
-      // leftover -> keep as combined for server auto-classify
-      files.combined=selected;
-    }else{
-      files.combined=selected; // keep for server as well
-    }
-    const filled=SNAPSHOT_KEYS.filter(k=>!!files[k]).length;
-    const ce=document.getElementById('fname_combined');
-    if(ce){
-      ce.textContent=`✓ ${selected.length} files → ${filled}/7`;
-    }
-    markHasFile('card_combined',true);
-    updateCombinedDisplay();
+
+    selected.gated = gatedFolder;
+    selected.ungated = ungatedFolder;
+    selected.ctb = ctbFolder;
   }
 
-  if(inputCombined){
-    inputCombined.addEventListener('change', ()=>{
-      handleCombinedSelection(inputCombined.files);
+  // Bind events
+  setTimeout(()=>{
+    ['gated','ungated','ctb'].forEach(type=>{
+      const sel = document.getElementById(`select-${type}-folder`);
+      if(sel){
+        sel.addEventListener('change', ()=>{
+          const val = sel.value;
+          const info = folderData.find(f=>f.folder===val);
+          renderDetails(type, info||null);
+          updateGenerateBtn();
+        });
+      }
     });
-  }
-  if(inputCombinedFolder){
-    inputCombinedFolder.addEventListener('change', ()=>{
-      handleCombinedSelection(inputCombinedFolder.files);
-    });
-  }
 
-  // Expose files object and helpers for Generate button
-  window._pmSnapshotFiles = files;
-  window._pmClassifyByName = classifyByName;
-  window._pmMarkHasFile = markHasFile;
-  window._pmUpdateCombinedDisplay = updateCombinedDisplay;
+    // Global refresh button
+    const globalRefresh = document.getElementById('btn-refresh-packout-folders');
+    if(globalRefresh){
+      globalRefresh.addEventListener('click', (e)=>{
+        e.preventDefault();
+        fetchFolders();
+      });
+    }
+
+    fetchFolders();
+  }, 200);
+
+  // Expose for Generate button
+  window._pmSelectedFolders = selected;
+  window._pmFolderData = folderData;
+  window._pmFetchFolders = fetchFolders;
+  window._pmUpdateGenerateBtn = updateGenerateBtn;
+
   window._pmClearAll = function(){
-    SNAPSHOT_KEYS.forEach(k=> clearFileForKey(k));
-    files.combined=[];
-    updateCombinedDisplay();
-    document.querySelectorAll('.file-input').forEach(inp=>{ inp.value=''; });
-    document.querySelectorAll('.upload-card').forEach(c=> c.classList.remove('has-file'));
-    document.querySelectorAll('.fname').forEach(el=> el.textContent='');
+    ['gated','ungated','ctb'].forEach(type=>{
+      const sel = document.getElementById(`select-${type}-folder`);
+      const details = document.getElementById(`details-${type}-folder`);
+      const statusEl = document.getElementById(`status-${type}-folder`);
+      const msg = document.getElementById(`msg-${type}-folder`);
+      if(sel) sel.value = '';
+      if(details){ details.style.display='none'; details.innerHTML=''; }
+      if(statusEl){
+        statusEl.textContent=`Files: Not Ready - ${type.charAt(0).toUpperCase()+type.slice(1)}`;
+        statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
+      }
+      if(msg) msg.textContent='';
+    });
+    selected.gated = selected.ungated = selected.ctb = null;
+    updateGenerateBtn();
   };
 })();
 
@@ -625,31 +634,16 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   if (status) status.textContent = '';
   if (pmMsg) pmMsg.textContent = '';
 
-  const snapFilesObj = window._pmSnapshotFiles || { item:null, bom:null, gated:null, ungated:null, fcst_main:null, fcst_detail:null, ctb:null, combined:[] };
-  const SNAPSHOT_KEYS = ['item','bom','gated','ungated','fcst_main','fcst_detail','ctb'];
+  const gatedFolder = document.getElementById('select-gated-folder')?.value;
+  const ungatedFolder = document.getElementById('select-ungated-folder')?.value;
+  const ctbFolder = document.getElementById('select-ctb-folder')?.value;
 
-  let allFiles = [];
-  SNAPSHOT_KEYS.forEach(k=>{
-    if(snapFilesObj[k]) allFiles.push(snapFilesObj[k]);
-  });
-  if(snapFilesObj.combined && snapFilesObj.combined.length>0){
-    const individualCount = SNAPSHOT_KEYS.filter(k=>!!snapFilesObj[k]).length;
-    if(individualCount===0){
-      allFiles = snapFilesObj.combined.slice();
-    }else if(individualCount < snapFilesObj.combined.length){
-      const names = new Set(allFiles.map(f=>f.name));
-      snapFilesObj.combined.forEach(f=>{
-        if(!names.has(f.name)) allFiles.push(f);
-      });
-    }
-  }
-
-  if(allFiles.length===0){
+  if(!gatedFolder || !ungatedFolder || !ctbFolder){
     if (pmBadge){
-      pmBadge.textContent='Not Ready – No files selected';
+      pmBadge.textContent='Not Ready – Select 3 folders';
       pmBadge.style.background='#fef2f2'; pmBadge.style.color='#991b1b'; pmBadge.style.borderColor='#fecaca';
     }
-    if (status) status.textContent='Please select files first – 4 required (Item, BOM, FCST Main, FCST Detail)';
+    if (status) status.textContent='Please select Gated(5 files), Ungated(1 file), CTB(1 file) folders';
     btn.disabled=false;
     if (spinner) spinner.style.display='none';
     return;
@@ -659,46 +653,44 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
   const warnEl=document.getElementById('upload-warnings');
   if(warnEl){ warnEl.style.display='none'; warnEl.innerHTML=''; }
 
-  const totalSize = allFiles.reduce((s,f)=>s+f.size,0);
-  const totalSizeKB = (totalSize/1024).toFixed(1);
-  const fileListShort = allFiles.map(f=>f.name).join(', ').slice(0,100);
-  console.log(`[Generate] ${allFiles.length} files, ${totalSizeKB}KB — ${fileListShort}`);
+  console.log(`[Generate] Gated=${gatedFolder}, Ungated=${ungatedFolder}, CTB=${ctbFolder}`);
   if (pmBadge){
-    pmBadge.textContent=`Processing – ${allFiles.length} files`;
+    pmBadge.textContent=`Report: Processing - ${gatedFolder} + ${ungatedFolder} + ${ctbFolder}`;
     pmBadge.style.background='#fef3c7'; pmBadge.style.color='#92400e'; pmBadge.style.borderColor='#fde68a';
   }
   if (spinner){
     spinner.style.display='inline-flex';
-    if (spinnerText) spinnerText.textContent=`Loading: ${allFiles.length} files (${totalSizeKB}KB) – ${fileListShort}${allFiles.length>2?'...':''}`;
+    if (spinnerText) spinnerText.textContent=`Loading...`;
   }
-  if (status) status.textContent=`Processing ${allFiles.length} files – please wait...`;
 
   try{
-    const form = new FormData();
-    allFiles.forEach(f=>{
-      const name = f.webkitRelativePath || f.name;
-      form.append('files', f, name);
-    });
-    form.append('exf_cut', document.getElementById('cfg-exf').value);
-    form.append('etd_cut', document.getElementById('cfg-etd').value);
-    form.append('output_cut', document.getElementById('cfg-output').value);
-    form.append('gb_cut', document.getElementById('cfg-gb').value);
-    const offsetEl=document.getElementById('cfg-etd-packout-offset');
-    if(offsetEl) form.append('etd_packout_offset', offsetEl.value);
+    const payload = {
+      gated_folder: gatedFolder,
+      ungated_folder: ungatedFolder,
+      ctb_folder: ctbFolder,
+      exf_cut: document.getElementById('cfg-exf')?.value || 'Saturday',
+      etd_cut: document.getElementById('cfg-etd')?.value || 'Saturday',
+      output_cut: document.getElementById('cfg-output')?.value || 'Wednesday',
+      gb_cut: document.getElementById('cfg-gb')?.value || 'Tuesday',
+      etd_packout_offset: document.getElementById('cfg-etd-packout-offset')?.value || 2
+    };
 
-    const resp=await fetch('/api/process', {method:'POST', body:form});
+    const resp=await fetch('/api/plan_merge/load_from_folders', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
     const text=await resp.text();
     let data;
-    try{ data=JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON: ${text.slice(0,300)}`); }
-    if(!resp.ok || data.error) throw new Error(data.error||`HTTP ${resp.status}`);
+    try{ data=JSON.parse(text); }catch{ throw new Error(`Server returned non-JSON: ${text.slice(0,500)}`); }
+    if(!resp.ok || data.error) throw new Error(data.error||data.message||`HTTP ${resp.status}: ${text.slice(0,300)}`);
 
-    const names=allFiles.map(f=>f.name).join(', ');
-    handleProcessedData(data, `Snapshot(${allFiles.length} files: ${names.slice(0,120)}...)`, false);
+    handleProcessedData(data, `Folders: Gated=${gatedFolder} (5), Ungated=${ungatedFolder} (1), CTB=${ctbFolder} (1)`, false);
     document.getElementById('loading').style.display='none';
     if (spinner) spinner.style.display='none';
     btn.disabled=false;
   }catch(e){
-    console.error('Snapshot generate failed', e);
+    console.error('Folder generate failed', e);
     if (pmBadge){
       pmBadge.textContent='Failed – Not Ready';
       pmBadge.style.background='#fef2f2'; pmBadge.style.color='#991b1b'; pmBadge.style.borderColor='#fecaca';
@@ -711,18 +703,26 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
 
 // ===== Clear — snapshot only =====
 function clearPackout(clearMsg) {
-  if(!confirm(clearMsg || 'Clear Packout data? It will become Not Ready, you can re-upload snapshot files.')) return;
+  if(!confirm(clearMsg || 'Clear Packout data? It will become Not Ready, you can select folders again.')) return;
   fetch('/api/plan_merge/clear', {method:'POST'}).catch(()=>{});
   try{
-    // Use snapshot clear helper if available
+    // Reset folder selectors
     if(window._pmClearAll) window._pmClearAll();
-    document.querySelectorAll('.file-input').forEach(inp=>{
-      inp.value='';
-      const card = inp.closest('.upload-card');
-      if(card) card.classList.remove('has-file');
+    ['gated','ungated','ctb'].forEach(type=>{
+      const sel = document.getElementById(`select-${type}-folder`);
+      const details = document.getElementById(`details-${type}-folder`);
+      const statusEl = document.getElementById(`status-${type}-folder`);
+      const msg = document.getElementById(`msg-${type}-folder`);
+      if(sel) sel.value = '';
+      if(details){ details.style.display='none'; details.innerHTML=''; }
+      if(statusEl){
+        statusEl.textContent='Not Ready';
+        statusEl.style.background='#fef2f2'; statusEl.style.color='#991b1b'; statusEl.style.borderColor='#fecaca';
+      }
+      if(msg) msg.textContent='';
     });
-    document.querySelectorAll('.fname').forEach(el=>{ el.textContent=''; });
-    document.querySelectorAll('.file-name').forEach(el=>{ el.textContent=''; el.className='file-name'; });
+    const btnGen = document.getElementById('btn-generate');
+    if(btnGen) btnGen.disabled = true;
     // Clear data
     allRows=[]; allWeeks=[]; weekLabels={}; filteredRows=[]; activeDim='FG'; pivotFields=[];
     // Hide report
@@ -762,7 +762,7 @@ function clearPackout(clearMsg) {
     });
     // Clear table
     const th=document.getElementById('table-head'), tb=document.getElementById('table-body');
-    if(th) th.innerHTML=''; if(tb) tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">Cleared — Not Ready. Upload new file to display.</td></tr>';
+    if(th) th.innerHTML=''; if(tb) tb.innerHTML='<tr><td colspan="999" style="text-align:center;padding:40px;color:#94a3b8">Cleared — Not Ready. Select folders to display.</td></tr>';
     document.getElementById('row-count').textContent='';
   }catch(e){ console.error('clear packout failed', e); }
 }
@@ -1612,7 +1612,7 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
     const resultDiv=document.getElementById('conv-result');
 
     if(!convFiles.item){
-      if(status) status.textContent='❌ Need 料号表 (Item Snapshot) for GB mapping';
+      if(status) status.textContent='❌ Need Item Master (Item Snapshot) for GB mapping';
       return;
     }
     if(!convFiles.gb && !convFiles.sku){
@@ -1664,7 +1664,7 @@ document.getElementById('btn-dl-excel').addEventListener('click',async()=>{
             </div>
             <div style="font-size:11px;color:#065f46">
               • Contains 2 sheets: <code>ctb_sku_cum</code> (SKU PN x dates) and <code>ctb_gb_cum</code> (GB PN x dates)<br>
-              • GB mapped via 料号表 Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>
+              • GB mapped via Item Master Style/Color→GB PN (e.g., Rectangle M/BLACK → GB-Rec M-BLACK)<br>
               • SKU has explicit SKU PN<br>
               • 👉 Next: Use this file in main Packout flow as <b>CTB.xlsx</b> (drag to CTB upload slot)
             </div>

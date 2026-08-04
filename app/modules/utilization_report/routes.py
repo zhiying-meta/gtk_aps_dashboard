@@ -118,6 +118,7 @@ def api_status():
             try:
                 from app.modules.utilization_report.engine import reload_all, get_all_caches
                 reload_all(str(base_path))
+                _PIVOT_CACHE.clear()
                 # Rebuild cached_versions from _CACHES after reload
                 cached_versions = {}
                 for k in list(_CACHES.keys()):
@@ -241,6 +242,13 @@ def api_reports():
         traceback.print_exc()
         return _json_error(str(e))
 
+# Simple in-memory cache for pivot to speed up repeated requests
+_PIVOT_CACHE = {}
+_PIVOT_CACHE_MAX = 20
+
+def _pivot_cache_key(mode, version_param, version_filter, line_filter, date_from, date_to, include_detail):
+    return (mode, version_param, version_filter, line_filter, date_from, date_to, include_detail)
+
 @util_bp.route("/api/utilization/pivot", methods=["GET"])
 def api_pivot():
     """
@@ -250,6 +258,7 @@ def api_pivot():
     mode=day -> columns = date
     Returns rows with line_code + version_type, plus columns for dates.
     Includes color coding, thick line separation by line_code.
+    Optimized: supports include_detail=0 to skip heavy detail dict (reduces 7MB->2MB), and simple cache.
     """
     try:
         caches = get_all_caches(DEFAULT_DATA_DIR)
@@ -276,6 +285,16 @@ def api_pivot():
         line_filter = request.args.get("line_code", "") or request.args.get("line", "")
         date_from = request.args.get("date_from", "")
         date_to = request.args.get("date_to", "")
+        # New: include_detail param to reduce payload (0 = skip detail, 1 = include)
+        include_detail_raw = request.args.get("include_detail", request.args.get("detail", "1"))
+        include_detail = str(include_detail_raw).lower() not in ("0", "false", "no", "off")
+
+        # Check cache first (only for full detail or no-detail separately)
+        cache_key = _pivot_cache_key(mode, version_param, version_filter, line_filter, date_from, date_to, include_detail)
+        if cache_key in _PIVOT_CACHE:
+            # Return cached copy (shallow)
+            cached_resp = _PIVOT_CACHE[cache_key]
+            return jsonify(cached_resp)
 
         from app.modules.utilization_report.engine import build_report
 
@@ -370,33 +389,35 @@ def api_pivot():
             truncated = True
 
         # Build matrix keyed by (line_code, version_type) -> col -> util
-        # Also keep detail
+        # Also keep detail only if requested (saves ~60% payload)
         from collections import defaultdict
         matrix = {}  # key = (line, version_type) -> dict col->util
-        detail = {}  # key = (line, version_type) -> col -> detail
+        detail = {} if include_detail else None
         lines_set = set()
         for r in all_recs:
             key = (r['line_code'], r['version_type'])
             lines_set.add(r['line_code'])
             if key not in matrix:
                 matrix[key] = {}
-                detail[key] = {}
+                if include_detail:
+                    detail[key] = {}
             col = f"{r['plan_date']}|{r['shift_name']}" if mode == "shift" else r['plan_date']
             if col not in cols:
                 continue
             util_pct = r.get('utilization_pct', 0)
             capped = min(100.0, util_pct) if util_pct is not None else 0
             matrix[key][col] = capped
-            detail[key][col] = {
-                'util_raw': util_pct,
-                'util_capped': capped,
-                'load': r['load'],
-                'capacity': r['capacity'],
-                'uph': r['uph'],
-                'efficiency': r['efficiency'],
-                'working_hours': r['working_hours'],
-                'is_overload': r.get('is_overload', False),
-            }
+            if include_detail:
+                detail[key][col] = {
+                    'util_raw': util_pct,
+                    'util_capped': capped,
+                    'load': r['load'],
+                    'capacity': r['capacity'],
+                    'uph': r['uph'],
+                    'efficiency': r['efficiency'],
+                    'working_hours': r['working_hours'],
+                    'is_overload': r.get('is_overload', False),
+                }
 
         # Sort keys by line_code, then version_type (Gated before Ungated for consistency)
         def sort_key(k):
@@ -420,13 +441,16 @@ def api_pivot():
                 row[col] = matrix[(line, vtype)].get(col, None)
             rows.append(row)
 
-        # Convert detail to string keys for JSON (line|version_type)
-        detail_json = {}
-        for (line, vtype), col_map in detail.items():
-            key_str = f"{line}||{vtype}"
-            detail_json[key_str] = col_map
+        # Convert detail to string keys for JSON (line|version_type) only if requested
+        if include_detail:
+            detail_json = {}
+            for (line, vtype), col_map in detail.items():
+                key_str = f"{line}||{vtype}"
+                detail_json[key_str] = col_map
+        else:
+            detail_json = {}
 
-        return jsonify({
+        resp_data = {
             "mode": mode,
             "versions": versions_to_include,
             "columns": cols,
@@ -437,7 +461,20 @@ def api_pivot():
             "total_cols": len(cols),
             "total_cols_before": total_cols_before,
             "truncated": truncated,
-        })
+            "include_detail": include_detail,
+        }
+
+        # Cache result (simple LRU eviction)
+        try:
+            _PIVOT_CACHE[cache_key] = resp_data
+            if len(_PIVOT_CACHE) > _PIVOT_CACHE_MAX:
+                # remove oldest
+                oldest = next(iter(_PIVOT_CACHE))
+                _PIVOT_CACHE.pop(oldest, None)
+        except Exception:
+            pass
+
+        return jsonify(resp_data)
 
     except Exception as e:
         import traceback
@@ -828,6 +865,7 @@ def api_upload():
             return _json_error("No valid calendar/schedule files classified. Please upload 工作日历快照.xlsx and 排产结果表.xlsx, or zip containing them.", 400)
 
         reload_all(DEFAULT_DATA_DIR)
+        _PIVOT_CACHE.clear()
 
         # Build overall detected message like IO: "✅ Snapshot mode: detected N files — ..." – now with per-version breakdown
         overall_files = []
@@ -897,6 +935,7 @@ def api_demo_load():
         shutil.copyfile(str(cal), str(persist_dir / "工作日历快照.xlsx"))
         shutil.copyfile(str(sched), str(persist_dir / "排产结果表.xlsx"))
         reload_all(DEFAULT_DATA_DIR)
+        _PIVOT_CACHE.clear()
         caches = get_all_caches(DEFAULT_DATA_DIR)
         cache = caches.get('gated')
         if not cache:
@@ -974,6 +1013,7 @@ def api_clear():
         # After clearing, reload remaining caches (if any)
         try:
             reload_all(DEFAULT_DATA_DIR)
+            _PIVOT_CACHE.clear()
         except Exception:
             pass
 
@@ -992,6 +1032,181 @@ def api_clear():
         import traceback
         traceback.print_exc()
         return _json_error(f"Clear failed: {e}")
+
+# ---------- data folder selection (NEW) ----------
+def _find_file_util(data_dir: str, exact_name: str, keywords):
+    """Find file in dir using fuzzy keywords, similar to io_report"""
+    import os
+    exact = os.path.join(data_dir, exact_name)
+    if os.path.exists(exact):
+        return exact
+    if not os.path.isdir(data_dir):
+        return None
+    for f in os.listdir(data_dir):
+        if exact_name in f:
+            return os.path.join(data_dir, f)
+    for f in os.listdir(data_dir):
+        lf = f.lower()
+        for kw in keywords:
+            if kw.lower() in lf or kw in f:
+                return os.path.join(data_dir, f)
+    return None
+
+def _scan_util_folder(folder_path: str):
+    """Check if folder contains calendar and schedule for utilization"""
+    result = {
+        "has_calendar": False,
+        "has_schedule": False,
+        "files": {},
+        "missing": []
+    }
+    try:
+        cal = _find_file_util(folder_path, "工作日历快照.xlsx", ["工作日历", "calendar", "日历"])
+        sched = _find_file_util(folder_path, "排产结果表.xlsx", ["排产结果", "排产", "schedule"])
+    except Exception:
+        cal = sched = None
+
+    if cal and os.path.exists(cal):
+        result["has_calendar"] = True
+        result["files"]["calendar"] = os.path.basename(cal)
+    else:
+        result["missing"].append("calendar (Working Calendar: 工作日历快照.xlsx)")
+
+    if sched and os.path.exists(sched):
+        result["has_schedule"] = True
+        result["files"]["schedule"] = os.path.basename(sched)
+    else:
+        result["missing"].append("schedule (Schedule Result: 排产结果表.xlsx)")
+
+    result["ready"] = result["has_calendar"] and result["has_schedule"]
+    return result
+
+@util_bp.route("/api/utilization/data_folders", methods=["GET"])
+def api_util_data_folders():
+    """List available data folders under data/ with calendar/schedule existence for utilization"""
+    try:
+        import pathlib
+        base = pathlib.Path(DEFAULT_DATA_DIR)
+        folders = []
+        if not base.exists():
+            return jsonify({"folders": [], "message": f"data dir not found: {DEFAULT_DATA_DIR}"})
+
+        for entry in base.iterdir():
+            if entry.is_dir():
+                if entry.name.startswith(".") or entry.name.startswith("__"):
+                    continue
+                # Skip utilization itself to avoid recursion? Keep but it has subfolders gated/ungated, so skip top utilization folder
+                if entry.name == "utilization":
+                    # For utilization top folder, we check its subfolders gated/ungated as separate? No, list subfolders instead
+                    # Instead, scan utilization/gated and utilization/ungated as not data folders, but we will list data/ top-level folders only
+                    # So skip utilization folder itself
+                    continue
+                fp = str(entry)
+                info = _scan_util_folder(fp)
+                folders.append({
+                    "folder": entry.name,
+                    "path": f"data/{entry.name}",
+                    "has_calendar": info["has_calendar"],
+                    "has_schedule": info["has_schedule"],
+                    "files": info["files"],
+                    "missing": info["missing"],
+                    "ready": info["ready"]
+                })
+
+        # Also check some nested folders that are known to contain utilization-like data? e.g., data/20260723 has calendar and schedule for utilization? Actually 20260723 has 工作日历快照 and gated排产
+        # To support that, also scan one level deeper for folders that have calendar/schedule but were missed? For simplicity, scan data/20260723, data/IVY20260721Gated etc already covered as top-level
+
+        # Sort ready first
+        folders.sort(key=lambda x: (not x["ready"], x["folder"]))
+
+        return jsonify({
+            "folders": folders,
+            "count": len(folders)
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Failed to list utilization data folders: {e}", 500)
+
+@util_bp.route("/api/utilization/load_from_folder", methods=["POST"])
+def api_util_load_from_folder():
+    """Load utilization data from a selected data folder into gated or ungated version"""
+    try:
+        data = request.get_json(silent=True) or {}
+        folder = data.get("folder") or request.args.get("folder") or request.form.get("folder")
+        version = (data.get("version") or request.args.get("version") or request.form.get("version") or "").strip().lower()
+
+        if not folder:
+            return _json_error("Missing 'folder' parameter. Provide folder name like '20260723'", 400)
+        if version not in ("gated", "ungated"):
+            return _json_error("Missing or invalid 'version' param, must be gated or ungated", 400)
+
+        if ".." in folder or folder.startswith("/") or "\\" in folder:
+            return _json_error("Invalid folder name", 400)
+
+        clean = folder[5:] if folder.startswith("data/") else folder
+        folder_path = os.path.join(DEFAULT_DATA_DIR, clean)
+
+        if not os.path.isdir(folder_path):
+            return _json_error(f"Folder not found: {folder_path}", 404)
+
+        info = _scan_util_folder(folder_path)
+        if not info["ready"]:
+            return jsonify({
+                "ok": False,
+                "folder": clean,
+                "path": folder_path,
+                "files": info["files"],
+                "missing": info["missing"],
+                "ready": False,
+                "message": f"Missing files in {clean}: {', '.join(info['missing'])}"
+            }), 400
+
+        # Find actual files
+        cal_path = _find_file_util(folder_path, "工作日历快照.xlsx", ["工作日历", "calendar", "日历"])
+        sched_path = _find_file_util(folder_path, "排产结果表.xlsx", ["排产结果", "排产", "schedule"])
+
+        if not cal_path or not sched_path:
+            return _json_error(f"Could not locate calendar/schedule in {clean}", 400)
+
+        # Copy to utilization/version folder
+        persist_dir = pathlib.Path(DEFAULT_DATA_DIR) / "utilization" / version
+        persist_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_cal = persist_dir / "工作日历快照.xlsx"
+        dest_sched = persist_dir / "排产结果表.xlsx"
+
+        shutil.copyfile(cal_path, str(dest_cal))
+        shutil.copyfile(sched_path, str(dest_sched))
+
+        # Reload caches
+        from app.modules.utilization_report.engine import reload_all, get_all_caches
+        reload_all(DEFAULT_DATA_DIR)
+        _PIVOT_CACHE.clear()
+        caches = get_all_caches(DEFAULT_DATA_DIR)
+        cache = caches.get(version)
+
+        if not cache:
+            return _json_error(f"Failed to load cache after copying files for {version}", 500)
+
+        return jsonify({
+            "ok": True,
+            "folder": clean,
+            "path": folder_path,
+            "version": version,
+            "files": info["files"],
+            "ready": True,
+            "lines": len(cache.lines),
+            "dates": len(cache.dates),
+            "records_shift": len(cache.records_shift),
+            "records_day": len(cache.records_day),
+            "message": f"Loaded {version} from {clean}: {len(cache.lines)} lines, {len(cache.dates)} dates"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return _json_error(f"Load from folder failed: {e}", 500)
 
 # Templates - detailed schema and downloadable files
 @util_bp.route("/api/utilization/templates/schema", methods=["GET"])

@@ -58,12 +58,16 @@ def _norm_date(s):
 
 def _load_calendar_df(path: str) -> pd.DataFrame:
     try:
-        df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
+        # Try to read only needed columns to speed up (21M xlsx with 14 cols)
+        needed = ["LINE_CODE", "PLAN_DATE", "SHIFT_NAME", "PLAN_TYPE", "PLAN_VALUE", "PLAN_ITEM"]
+        try:
+            df = pd.read_excel(path, sheet_name=0, engine='openpyxl', usecols=needed)
+        except Exception:
+            # Fallback: read all then filter (for files with different column names or extra spaces)
+            df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
     except EOFError as e:
-        # Truncated/corrupted file (as seen in user report)
         raise ValueError(f"Calendar file {path} is corrupted/truncated (EOFError). Please re-upload a valid xlsx. The file may have been incompletely uploaded (network interrupted) or is not a valid Excel. Original error: {e}")
     except Exception as e:
-        # Catch BadZipFile, openpyxl errors etc.
         err_str = str(e).lower()
         if "eof" in err_str or "truncated" in err_str or "not a zip file" in err_str or "badzipfile" in err_str or "file is not a zip file" in err_str:
             raise ValueError(f"Calendar file {path} is corrupted/invalid xlsx: {e}. Please re-upload. Ensure file is .xlsx (not .xls, not 0 bytes) and upload completed (check file size).")
@@ -73,7 +77,11 @@ def _load_calendar_df(path: str) -> pd.DataFrame:
 
 def _load_schedule_df(path: str) -> pd.DataFrame:
     try:
-        df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
+        needed = ["LINE_CODE", "PLAN_DATE", "SHIFT_NAME", "PLAN_ITEM", "PLAN_VALUE"]
+        try:
+            df = pd.read_excel(path, sheet_name=0, engine='openpyxl', usecols=needed)
+        except Exception:
+            df = pd.read_excel(path, sheet_name=0, engine='openpyxl')
     except EOFError as e:
         raise ValueError(f"Schedule file {path} is corrupted/truncated (EOFError). Please re-upload a valid xlsx. The file may have been incompletely uploaded. Original error: {e}")
     except Exception as e:
@@ -84,58 +92,97 @@ def _load_schedule_df(path: str) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
+def _norm_date_series(s: pd.Series) -> pd.Series:
+    """Vectorized date normalization to YYYY-MM-DD, fallback to stripped string"""
+    try:
+        dt = pd.to_datetime(s, errors='coerce')
+        normalized = dt.dt.strftime('%Y-%m-%d')
+        # fallback for NaT
+        mask = normalized.isna()
+        if mask.any():
+            # use original stripped string for those
+            fallback = s.astype(str).str.strip()
+            normalized = normalized.copy()
+            normalized.loc[mask] = fallback.loc[mask]
+        return normalized
+    except Exception:
+        # fallback slow path
+        return s.apply(_norm_date)
+
 def _build_calendar_map(calendar_df: pd.DataFrame) -> Dict[Tuple[str,str,str], Dict[str,float]]:
     """
     Returns dict key (line, date_str, shift) -> {UPH, 工时, 效率, 良率}
     Only PLAN_ITEM == INPUT
+    Optimized: vectorized date norm + groupby last (faster than iterrows)
     """
-    # Filter INPUT
     if 'PLAN_ITEM' in calendar_df.columns:
         df = calendar_df[calendar_df['PLAN_ITEM'] == 'INPUT']
     else:
         df = calendar_df
 
-    # Normalize dates
+    if df.empty:
+        return {}
+
     df = df.copy()
-    df['PLAN_DATE_NORM'] = df['PLAN_DATE'].apply(_norm_date)
-    # Group by line, date_norm, shift, PLAN_TYPE -> take last PLAN_VALUE (or max? Use last)
-    # Some duplicates may exist, take last
-    grouped = {}
-    for _, row in df.iterrows():
-        key = (str(row['LINE_CODE']).strip(), row['PLAN_DATE_NORM'], str(row['SHIFT_NAME']).strip())
-        ptype = str(row['PLAN_TYPE']).strip()
+    # Vectorized normalization
+    df['LINE_CODE'] = df['LINE_CODE'].astype(str).str.strip()
+    df['SHIFT_NAME'] = df['SHIFT_NAME'].astype(str).str.strip()
+    df['PLAN_TYPE'] = df['PLAN_TYPE'].astype(str).str.strip()
+    df['PLAN_DATE_NORM'] = _norm_date_series(df['PLAN_DATE'])
+    df['PLAN_VALUE'] = pd.to_numeric(df['PLAN_VALUE'], errors='coerce').fillna(0.0)
+
+    # Group by 4 keys, take last value
+    try:
+        grouped_series = df.groupby(['LINE_CODE', 'PLAN_DATE_NORM', 'SHIFT_NAME', 'PLAN_TYPE'], sort=False)['PLAN_VALUE'].last()
+    except Exception:
+        # fallback to first if last fails
+        grouped_series = df.groupby(['LINE_CODE', 'PLAN_DATE_NORM', 'SHIFT_NAME', 'PLAN_TYPE'])['PLAN_VALUE'].last()
+
+    # Build dict of dicts
+    from collections import defaultdict
+    cal_map = defaultdict(dict)
+    # grouped_series is Series with MultiIndex; iterate via items() is faster than iterrows
+    for (line, date_norm, shift, ptype), val in grouped_series.items():
         try:
-            val = float(row['PLAN_VALUE'])
+            fv = float(val)
         except:
-            val = 0.0
-        if key not in grouped:
-            grouped[key] = {}
-        # If duplicate, keep last (overwrite)
-        grouped[key][ptype] = val
-    return grouped
+            fv = 0.0
+        cal_map[(line, date_norm, shift)][ptype] = fv
+
+    return dict(cal_map)
 
 def _build_load_map(schedule_df: pd.DataFrame) -> Dict[Tuple[str,str,str], float]:
     """
-    schedule_df columns: LINE_CODE, PLAN_DATE, SHIFT_NAME, PLAN_ITEM, PLAN_VALUE
-    Sum where PLAN_ITEM == INPUT (or also OUTPUT? spec says input)
+    Schedule load map: sum PLAN_VALUE per (line, date, shift) where INPUT
+    Optimized via vectorized groupby sum
     """
-    # Filter INPUT
     if 'PLAN_ITEM' in schedule_df.columns:
-        # Some data uses INPUT only
         df = schedule_df[schedule_df['PLAN_ITEM'] == 'INPUT']
     else:
         df = schedule_df
 
+    if df.empty:
+        return {}
+
     df = df.copy()
-    df['PLAN_DATE_NORM'] = df['PLAN_DATE'].apply(_norm_date)
+    df['LINE_CODE'] = df['LINE_CODE'].astype(str).str.strip()
+    df['SHIFT_NAME'] = df['SHIFT_NAME'].astype(str).str.strip()
+    df['PLAN_DATE_NORM'] = _norm_date_series(df['PLAN_DATE'])
+    df['PLAN_VALUE'] = pd.to_numeric(df['PLAN_VALUE'], errors='coerce').fillna(0.0)
+
+    try:
+        load_series = df.groupby(['LINE_CODE', 'PLAN_DATE_NORM', 'SHIFT_NAME'], sort=False)['PLAN_VALUE'].sum()
+    except Exception:
+        load_series = df.groupby(['LINE_CODE', 'PLAN_DATE_NORM', 'SHIFT_NAME'])['PLAN_VALUE'].sum()
+
+    # Convert to dict with tuple keys
     load_map = {}
-    for _, row in df.iterrows():
-        key = (str(row['LINE_CODE']).strip(), row['PLAN_DATE_NORM'], str(row['SHIFT_NAME']).strip())
+    for (line, date_norm, shift), val in load_series.items():
         try:
-            val = float(row['PLAN_VALUE'])
+            fv = float(val)
         except:
-            val = 0.0
-        load_map[key] = load_map.get(key, 0.0) + val
+            fv = 0.0
+        load_map[(line, date_norm, shift)] = fv
     return load_map
 
 def _compute_records(version: str, calendar_path: str, schedule_path: str) -> UtilizationCache:

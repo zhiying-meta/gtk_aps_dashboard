@@ -103,7 +103,7 @@
       if (!stylesByCat[cat]) stylesByCat[cat]=new Set();
       if (style) stylesByCat[cat].add(style);
 
-      if (cat==='成品'){
+      if (cat==='成品' || cat==='FG' || cat.toUpperCase()==='FG' || cat.toUpperCase()==='SKU'){
         fgItems.push(item);
         if (style) styleFgSet.add(style);
       }else if (cat==='GB'){
@@ -141,7 +141,7 @@
     let fg=[], gb=[];
     let lineFg=new Set(), lineGb=new Set();
     let byCat={}, linesByCat={};
-    let fgSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='成品'));
+    let fgSet=new Set(Object.keys(itemToCat).filter(k=> { const v=itemToCat[k]; return v==='成品' || String(v).toUpperCase()==='FG' || String(v).toUpperCase()==='SKU'; }));
     let gbSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='GB'));
     let allItemsSet=new Set(Object.keys(itemToCat));
     for(let r=1;r<aoa.length;r++){
@@ -196,7 +196,7 @@
     let qtyIdx=getColIndex(headers,'BALANCE_QTY');
     let fg=[], gb=[];
     let byCat={};
-    let fgSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='成品'));
+    let fgSet=new Set(Object.keys(itemToCat).filter(k=> { const v=itemToCat[k]; return v==='成品' || String(v).toUpperCase()==='FG' || String(v).toUpperCase()==='SKU'; }));
     let gbSet=new Set(Object.keys(itemToCat).filter(k=> itemToCat[k]==='GB'));
     let allItemsSet=new Set(Object.keys(itemToCat));
     for(let r=1;r<aoa.length;r++){
@@ -289,8 +289,9 @@
     raw.sort((a,b)=>{
       if (a.SortDate - b.SortDate !==0) return a.SortDate - b.SortDate;
       let prio = (k)=>{
-        if (k==='白班') return 0;
-        if (k==='夜班') return 1;
+        const low = String(k||'').toLowerCase();
+        if (k==='白班' || low==='day' || low.includes('白班') || low==='day shift' || low==='d') return 0;
+        if (k==='夜班' || low==='night' || low.includes('夜班') || low==='night shift' || low==='n') return 1;
         return 2;
       };
       return prio(a.SortKey) - prio(b.SortKey) || (a.SortKey||'').localeCompare(b.SortKey||'');
@@ -504,15 +505,17 @@
   }
 
   function normalizeGroup(g){
-    if (!g) return '成品';
+    if (!g) return 'FG';
     let s=String(g).trim();
     let up=s.toUpperCase();
-    if (s==='成品' || up==='FG' || up==='FG (SKU)' || up==='SKU') return '成品';
+    // Support Chinese input 成品 (Finished Goods) for backward compatibility, but normalize to English FG
+    if (s==='成品' || up==='FG' || up==='FG (SKU)' || up==='SKU' || up==='FINISHED' || up==='FINISHED GOODS') return 'FG';
     if (up==='GB') return 'GB';
     if (up==='FR') return 'FR';
     if (up==='LT') return 'LT';
     if (up==='RT') return 'RT';
-    if (up==='RAW' || up==='BLANK' || up==='原材料' || s==='') return 'RAW';
+    // RAW includes Chinese 原材料 for backward compatibility
+    if (up==='RAW' || up==='BLANK' || up==='原材料' || s==='' || up==='RAW MATERIAL') return 'RAW';
     return s;
   }
 
@@ -530,13 +533,13 @@
       }
     }
     // fallback FG/GB
-    let isFg = (norm==='成品');
+    let isFg = (norm==='FG' || norm==='成品');
     let sched = isFg ? cache.schedFg : cache.schedGb;
     let bal = isFg ? cache.balFg : cache.balGb;
     if (!sched && cache.schedByCat){
       // try find by includes
-      sched = cache.schedByCat[norm]||cache.schedByCat['成品']||[];
-      bal = cache.balByCat[norm]||cache.balByCat['成品']||[];
+      sched = cache.schedByCat[norm]||cache.schedByCat['FG']||cache.schedByCat['成品']||[];
+      bal = cache.balByCat[norm]||cache.balByCat['FG']||cache.balByCat['成品']||[];
     }
     return [sched||[], bal||[], norm];
   }
@@ -544,7 +547,7 @@
   function getMeta(cache, group, colDim){
     let [sched, bal, norm] = getSchedBalForGroup(cache, group);
     let cols = getColDefs(sched, bal, colDim);
-    let isFg = (norm==='成品');
+    let isFg = (norm==='FG' || norm==='成品');
     // build extended
     let allMeta={};
     if (cache.cats){
@@ -626,12 +629,16 @@
     });
     let balByCat = balParsed.byCat || {};
     let cats = Object.keys(itemsByCat).sort();
-    // ensure FG alias 成品
-    if (masterParsed.fgItems && !itemsByCat['成品']){
-      itemsByCat['成品']=masterParsed.fgItems;
+    // ensure FG alias for backward compatibility (Chinese 成品 -> FG)
+    if (masterParsed.fgItems){
+      if (!itemsByCat['FG']) itemsByCat['FG']=masterParsed.fgItems;
+      if (!itemsByCat['成品']) itemsByCat['成品']=masterParsed.fgItems; // legacy support
+    }
+    if (!cats.includes('FG') && masterParsed.fgItems && masterParsed.fgItems.length>0){
+      cats.push('FG');
     }
     if (!cats.includes('成品') && masterParsed.fgItems && masterParsed.fgItems.length>0){
-      cats.push('成品');
+      cats.push('成品'); // legacy
     }
     // ensure RAW exists
     if (!itemsByCat['RAW']){
@@ -712,12 +719,12 @@
         return loadFromWorkbooks(masterWb, schedWb, balWb);
       }
     }
-    // Classify by filename
+    // Classify by filename - supports both English and Chinese filenames for backward compatibility
     function classifyByName(name){
       let low=name.toLowerCase();
-      if (low.includes('master') || low.includes('料号')) return 'master';
-      if (low.includes('sched') || low.includes('排产')) return 'schedule';
-      if (low.includes('bal') || low.includes('boh') || low.includes('结存')) return 'balance';
+      if (low.includes('master') || low.includes('料号') || low.includes('item')) return 'master';
+      if (low.includes('sched') || low.includes('排产') || low.includes('schedule')) return 'schedule';
+      if (low.includes('bal') || low.includes('boh') || low.includes('结存') || low.includes('balance')) return 'balance';
       return null;
     }
     for(let {file, wb} of workbooks){

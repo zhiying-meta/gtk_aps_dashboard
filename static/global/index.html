@@ -31,7 +31,7 @@
       <div class="nav-subcategory">Single</div>
       <a href="#" class="nav-item active" data-module="io-report">
         <span class="nav-icon">📈</span>
-        <span class="nav-text">I/O Report</span>
+        <span class="nav-text">IO and BOH</span>
       </a>
       <a href="#" class="nav-item" data-module="idle">
         <span class="nav-icon">⏸️</span>
@@ -76,56 +76,41 @@
       </div>
     </header>
 
-    <!-- ===== Upload Section (Packout) — Snapshot Only ===== -->
+    <!-- ===== Upload Section (Packout) — Folder Mode: Gated(5) + Ungated(1) + CTB(1) ===== -->
     <div class="section" id="upload-section">
       <div class="section-header">
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="section-title">📁 1. Upload Snapshot Data</span>
-          <span style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:2px 8px;border-radius:12px;font-size:11px">Snapshot Only · 7 files</span>
+          <span class="section-title">📁 Data Folder Selection - ExF vs ETD vs Packout vs CTB</span>
+          <span style="background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;padding:2px 8px;border-radius:12px;font-size:11px">Folder Mode: Gated(5) + Ungated(1) + CTB(1)</span>
         </div>
         <div class="section-actions">
-          <a href="/api/plan_merge/templates/template" class="btn btn-sm btn-outline">📦 Templates (zip)</a>
-          <a href="/api/plan_merge/templates/demo" class="btn btn-sm btn-outline">📦 Demo (snapshot zip)</a>
           <a href="/api/plan_merge/templates/schema" target="_blank" class="btn btn-sm btn-outline">📋 Schema</a>
         </div>
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:11px;color:#475569;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-        <span>💡 Accepts: 7 snapshot xlsx, a .zip file, or a folder. Auto-classify by filename. Pallet_Qty default 864.</span>
-        <span style="font-size:11px;color:#64748b">Upload first, then Generate below</span>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:11px;color:#475569">
+        <span>💡 Select 3 folders: <code>Gated</code> needs 5 files (Item, BOM, Gated Schedule, FCST Main, FCST Detail), <code>Ungated</code> needs 1 file (Ungated Schedule), <code>CTB</code> needs 1 file (CTB.xlsx). Only show report if corresponding files exist.</span>
       </div>
 
-      <!-- Quick Upload Card -->
-      <div class="upload-card" id="card_combined" style="border:2px dashed #8b5cf6;background:#faf5ff;margin-bottom:10px">
-        <div class="upload-label">⚡ Quick Upload <span style="font-size:10px;background:#8b5cf6;color:#fff;padding:1px 6px;border-radius:8px">Recommended · Snapshot</span></div>
-        <div class="upload-hint">Select all 7 snapshot files at once, or a .zip, or pick folder — auto-distributes to slots</div>
-        <input type="file" class="file-input" id="input_combined" accept=".xlsx,.zip" multiple style="display:none">
-        <input type="file" class="file-input" id="input_combined_folder" accept=".xlsx,.zip" multiple webkitdirectory style="display:none">
-        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
-          <button class="btn btn-sm" id="btn-select-files">📂 Select Files</button>
-          <button class="btn btn-sm btn-outline" id="btn-select-folder">📁 Select Folder</button>
-          <span style="font-size:11px;color:#6d28d9;display:flex;align-items:center">Supports: multi-file, zip, folder</span>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+        <div style="border:1px solid #f59e0b;background:#fffbeb;padding:8px;border-radius:6px">
+          <div style="font-weight:600;font-size:11px;margin-bottom:4px">🟡 Gated Folder (5 files: Item, BOM, Gated Schedule as 排产结果表, FCST Main, FCST Detail)</div>
+          <select id="select-gated-folder" class="filter-input" style="width:100%;padding:5px 8px;border:1px solid #f59e0b;border-radius:5px;font-size:12px;background:#fff"><option>Loading...</option></select>
         </div>
-        <div class="fname" id="fname_combined" style="font-size:11px;color:#6d28d9;margin-top:6px;min-height:16px"></div>
+        <div style="border:1px solid #10b981;background:#ecfdf5;padding:8px;border-radius:6px">
+          <div style="font-weight:600;font-size:11px;margin-bottom:4px">🟢 Ungated Folder (1 file: 排产结果表)</div>
+          <select id="select-ungated-folder" class="filter-input" style="width:100%;padding:5px 8px;border:1px solid #10b981;border-radius:5px;font-size:12px;background:#fff"><option>Loading...</option></select>
+        </div>
+        <div style="border:1px solid #3b82f6;background:#eff6ff;padding:8px;border-radius:6px">
+          <div style="font-weight:600;font-size:11px;margin-bottom:4px">🔵 CTB Folder (1 file: CTB.xlsx)</div>
+          <select id="select-ctb-folder" class="filter-input" style="width:100%;padding:5px 8px;border:1px solid #3b82f6;border-radius:5px;font-size:12px;background:#fff"><option>Loading...</option></select>
+        </div>
       </div>
 
-      <div style="font-size:11px;color:#94a3b8;margin:6px 0;text-align:center">— or upload individually (7 files) —</div>
-
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px">
-        <div style="font-weight:600;color:#065f46;margin-bottom:4px">📌 Required (4): Item Snapshot, BOM Snapshot, FCST Main, FCST Detail <span style="color:#dc2626">* All required</span></div>
-        <div style="color:#475569">○ Optional (3): Gated Schedule, Ungated Schedule, CTB — shows value if present, empty otherwise</div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button id="btn-refresh-packout-folders" class="btn btn-sm btn-outline">🔄 Refresh Folders</button>
+        <button id="btn-clear-packout" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444">🗑️ Clear Selection</button>
       </div>
-
-      <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-        <div class="upload-card" id="card_item" style="border-color:#f59e0b"><div class="upload-label">📁 Item Snapshot <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">Required</span></div><div class="upload-hint">Item_Snapshot.xlsx</div><input type="file" class="file-input" id="input_item" accept=".xlsx"><div class="fname" id="fname_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_bom" style="border-color:#f59e0b"><div class="upload-label">📁 BOM Snapshot <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">Required</span></div><div class="upload-hint">BOM_Snapshot.xlsx</div><input type="file" class="file-input" id="input_bom" accept=".xlsx"><div class="fname" id="fname_bom" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_fcst_main" style="border-color:#f59e0b"><div class="upload-label">📁 FCST Main <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">Required</span></div><div class="upload-hint">FCST_Main.xlsx</div><input type="file" class="file-input" id="input_fcst_main" accept=".xlsx"><div class="fname" id="fname_fcst_main" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_fcst_detail" style="border-color:#f59e0b"><div class="upload-label">📁 FCST Detail <span class="req">*</span> <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:4px">Required</span></div><div class="upload-hint">FCST_Detail.xlsx</div><input type="file" class="file-input" id="input_fcst_detail" accept=".xlsx"><div class="fname" id="fname_fcst_detail" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_gated"><div class="upload-label">📁 Gated Schedule <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">Gated_Schedule.xlsx</div><input type="file" class="file-input" id="input_gated" accept=".xlsx"><div class="fname" id="fname_gated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ungated"><div class="upload-label">📁 Ungated Schedule <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">Ungated_Schedule.xlsx</div><input type="file" class="file-input" id="input_ungated" accept=".xlsx"><div class="fname" id="fname_ungated" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-        <div class="upload-card" id="card_ctb"><div class="upload-label">📁 CTB <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 4px;border-radius:4px">Optional</span></div><div class="upload-hint">CTB.xlsx (2 sheets: ctb_sku_cum / ctb_gb_cum)</div><input type="file" class="file-input" id="input_ctb" accept=".xlsx"><div class="fname" id="fname_ctb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
-      </div>
-
-      <div style="margin-top:8px;font-size:11px;color:#64748b">💡 4 Required + 3 Optional — optional files will show as empty if missing</div>
+      <div id="upload-warnings" class="warnings" style="display:none;margin-top:8px"></div>
     </div>
 
     <!-- ===== MPM CTB Converter (Expandable) ===== -->
@@ -141,29 +126,29 @@
       </div>
       <div id="ctb-converter-body" style="display:none;padding:12px">
         <div style="background:#fff;border:1px solid #bbf7d0;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;color:#065f46">
-          <div style="font-weight:600;margin-bottom:4px">📌 上传 1. 料号表 2. MPM的CTB 2张表格，生成标准CTB格式</div>
-          <div>• <b>料号表</b>：`料号快照.xlsx` (含 GB-XXX 映射 Style/Color → GB PN)</div>
-          <div>• <b>GB CTB</b>：`Modelo GB CTB Publish 0722.xlsx` - 自动提取 MP FrameModule (下一个模块 MP Lens 之前的物料)，按 Style/Color 映射 GB</div>
-          <div>• <b>SKU CTB</b>：`Modelo SKU CTB Publish 0722.xlsx` - 有明确 SKU 料号</div>
-          <div>• 输出：`CTB.xlsx` (2 sheets: ctb_sku_cum / ctb_gb_cum) - 日期为列，PN为行，值为累计CTB</div>
-          <div style="margin-top:4px;color:#047857">💡 不需要在主流程支持MPM格式，通过此转换器生成标准CTB后再用于主流程。支持多文件/文件夹批量上传，自动分类。</div>
+          <div style="font-weight:600;margin-bottom:4px">📌 Upload 1. Item Master 2. MPM CTB (2 tables) to generate Standard CTB format</div>
+          <div>• <b>Item Master</b>: `Item_Snapshot.xlsx` (contains GB-XXX mapping Style/Color → GB PN)</div>
+          <div>• <b>GB CTB</b>: `Modelo GB CTB Publish 0722.xlsx` - Auto extracts MP FrameModule (materials before next module MP Lens), maps Style/Color to GB</div>
+          <div>• <b>SKU CTB</b>: `Modelo SKU CTB Publish 0722.xlsx` - Contains explicit SKU part numbers</div>
+          <div>• Output: `CTB.xlsx` (2 sheets: ctb_sku_cum / ctb_gb_cum) - Dates as columns, PN as rows, values are cumulative CTB</div>
+          <div style="margin-top:4px;color:#047857">💡 No need to support MPM format in main flow; use this converter to generate standard CTB first, then use in main flow. Supports multi-file/folder batch upload with auto classification.</div>
         </div>
         <!-- Quick Upload for Converter: multi-file + folder -->
         <div class="upload-card" id="card_conv_combined" style="border:2px dashed #10b981;background:#f0fdf4;margin-bottom:10px">
           <div class="upload-label">⚡ Quick Upload Converter <span style="font-size:10px;background:#065f46;color:#fff;padding:1px 6px;border-radius:8px">Recommended · Auto-classify</span></div>
-          <div class="upload-hint">Select 3 files at once, or pick folder containing them - auto-distributes to 料号表/GB CTB/SKU CTB</div>
+          <div class="upload-hint">Select 3 files at once, or pick folder containing them - auto-distributes to Item Master/GB CTB/SKU CTB</div>
           <input type="file" class="file-input" id="input_conv_combined" accept=".xlsx" multiple style="display:none">
           <input type="file" class="file-input" id="input_conv_combined_folder" accept=".xlsx" multiple webkitdirectory style="display:none">
           <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
             <button class="btn btn-sm" id="btn-conv-select-files" style="background:#065f46;border-color:#065f46">📂 Select Files</button>
             <button class="btn btn-sm btn-outline" id="btn-conv-select-folder">📁 Select Folder</button>
-            <span style="font-size:11px;color:#065f46;display:flex;align-items:center">Supports: multi-file, folder, auto-classify by keywords (料号, GB, SKU, CTB, Modelo)</span>
+            <span style="font-size:11px;color:#065f46;display:flex;align-items:center">Supports: multi-file, folder, auto-classify by keywords (Item, GB, SKU, CTB, Modelo)</span>
           </div>
           <div class="fname" id="fname_conv_combined" style="font-size:11px;color:#065f46;margin-top:6px;min-height:16px"></div>
         </div>
         <div style="font-size:11px;color:#94a3b8;margin:6px 0;text-align:center">— or upload individually —</div>
         <div class="upload-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
-          <div class="upload-card" id="card_conv_item" style="border-color:#f59e0b"><div class="upload-label">📁 料号表 <span class="req">*</span></div><div class="upload-hint">料号快照.xlsx - 用于 Style/Color→GB 映射</div><input type="file" class="file-input" id="input_conv_item" accept=".xlsx"><div class="fname" id="fname_conv_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
+          <div class="upload-card" id="card_conv_item" style="border-color:#f59e0b"><div class="upload-label">📁 Item Master <span class="req">*</span></div><div class="upload-hint">Item_Snapshot.xlsx - For Style/Color → GB mapping</div><input type="file" class="file-input" id="input_conv_item" accept=".xlsx"><div class="fname" id="fname_conv_item" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_conv_gb" style="border-color:#10b981"><div class="upload-label">📁 GB CTB (MPM Modelo) <span style="font-size:9px;background:#dcfce7;color:#065f46;padding:1px 4px;border-radius:4px">MP FrameModule</span></div><div class="upload-hint">Modelo GB CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_gb" accept=".xlsx"><div class="fname" id="fname_conv_gb" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
           <div class="upload-card" id="card_conv_sku" style="border-color:#3b82f6"><div class="upload-label">📁 SKU CTB (MPM Modelo)</div><div class="upload-hint">Modelo SKU CTB Publish 0722.xlsx</div><input type="file" class="file-input" id="input_conv_sku" accept=".xlsx"><div class="fname" id="fname_conv_sku" style="font-size:11px;color:#3b82f6;margin-top:6px"></div></div>
         </div>
@@ -224,13 +209,9 @@
       </div>
       <div class="config-actions" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:12px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
         <button id="btn-generate" class="btn btn-lg" style="background:#0f172a;border-color:#0f172a">▶ Generate Report</button>
-        <button id="btn-clear-packout" class="btn btn-sm btn-outline" style="border-color:#ef4444;color:#ef4444">🗑️ Clear (Not Ready)</button>
-        <div id="pm-generate-status" class="generate-status-area" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:200px">
-          <span id="pmStatusBadge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">Snapshot Only – Not Ready</span>
-          <span id="pmInlineSpinner" style="display:none;align-items:center;gap:6px;font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:3px 8px;border-radius:12px"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin:0"></span><span id="pmSpinnerText">Loading...</span></span>
-          <span id="upload-status" class="status-msg" style="font-size:12px"></span>
-          <span id="pmPersistentMsg" style="font-size:11px;color:#059669;font-weight:600"></span>
-        </div>
+        <span id="pmFileReadyBadge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">Files: Select 3 folders</span>
+        <span id="pmStatusBadge" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">Report: Not Ready</span>
+        <span id="pmInlineSpinner" style="display:none;align-items:center;gap:6px;font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:3px 8px;border-radius:12px"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin:0"></span><span id="pmSpinnerText">Loading...</span></span>
       </div>
       <div id="upload-warnings" class="warnings" style="display:none;margin-top:8px"></div>
     </div>
@@ -312,9 +293,9 @@
       </div>
     </div>
 
-    <!-- ===== I/O Report Section ===== -->
+    <!-- ===== IO and BOH Section ===== -->
     <div id="io-report-section" style="display:none">
-      <div style="text-align:center;padding:40px;color:#94a3b8">Loading I/O Report...</div>
+      <div style="text-align:center;padding:40px;color:#94a3b8">Loading IO and BOH...</div>
     </div>
 
     <!-- ===== Utilization ===== -->
@@ -498,11 +479,13 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/modules/plan_merge/engine.js?v=20260724_6_no_fr"></script>
-  <script src="/static/modules/io_report/engine.js?v=20260723_3"></script>
-  <script src="/static/global/app.js?v=20260724_9_fix_ctb_only_packout"></script>
-  <script src="/static/modules/plan_merge/app.js?v=20260724_6_download_hint"></script>
-  <script src="/static/modules/io_report/app.js?v=20260724_5_fix_html_error"></script>
-  <script src="/static/modules/utilization/app.js?v=20260723_7"></script>
+  <script src="/static/modules/io_report/engine.js?v=20260804_1_en"></script>
+  <script src="/static/modules/inventory_dashboard/renderer.js?v=20260725_2_fusion"></script>
+  <script src="/static/global/app.js?v=20260725_2_fusion"></script>
+  <script src="/static/modules/plan_merge/app.js?v=20260804_12_no_dup_loading"></script>
+  <script src="/static/modules/inventory_dashboard/renderer.js?v=20260804_1_en"></script>
+  <script src="/static/modules/io_report/app.js?v=20260804_7_concise"></script>
+  <script src="/static/modules/utilization/app.js?v=20260804_8_today_filter"></script>
   <script src="/static/modules/v2v/app.js?v=20260723_8_v2v_integrated"></script>
 </body>
 </html>
