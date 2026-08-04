@@ -148,42 +148,20 @@ async function render(){
 }
 
 function buildUploadSectionHTML(isCompact){
-  const title = '📂 IO and BOH - Data Folder Selection';
   const statusBadge = getStatusBadgeHTML();
-  return `<div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}">
-      <div class="section-header">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="section-title">${title}</span>
-          <span id="ioStatusBadge_header_${isCompact?'compact':'full'}" style="display:none">${statusBadge}</span>
-          <span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:8px">data/ folder mode</span>
-        </div>
-        <div class="section-actions">
-          <a href="/api/io/templates/schema" target="_blank" class="btn btn-sm btn-outline">📋 Schema</a>
-          ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar">▼ Collapse</button>' : ''}
-        </div>
+  return `<div class="section" id="${isCompact ? 'io-upload-bar' : 'io-upload-section'}" style="padding:12px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-weight:700;font-size:13px;color:#0f172a">📂 Data Folder</span>
+        <select id="ioFolderSelect_${isCompact?'compact':'full'}" class="filter-input" style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;min-width:220px;font-size:12px;background:#fff"><option>Loading...</option></select>
+        <button id="ioFolderRefresh_${isCompact?'compact':'full'}" class="btn btn-sm btn-outline" title="Refresh folder list">🔄</button>
+        <button id="ioFolderLoad_${isCompact?'compact':'full'}" class="btn btn-sm" disabled style="background:#0f172a;color:#fff;padding:5px 14px">▶ Load</button>
+        <span id="ioFolderStatus_${isCompact?'compact':'full'}" style="font-size:11px;color:#475569"></span>
+        <span id="ioStatusBadge_${isCompact?'compact':'full'}">${statusBadge}</span>
+        <span id="ioInlineSpinner_${isCompact?'compact':'full'}" style="display:none;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:2px 8px;border-radius:12px"><span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin:0"></span> Loading...</span>
+        <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:11px;color:#065f46"></span>
+        ${isCompact ? '<button class="btn btn-sm btn-outline" id="toggleUploadBar" style="margin-left:auto">▼</button>' : '<a href="/api/io/templates/schema" target="_blank" class="btn btn-sm btn-outline" style="margin-left:auto">📋 Schema</a>'}
       </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;margin-bottom:10px;font-size:11px;color:#475569;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-        <span>💡 Select a folder under <code>data/</code> that contains the 3 required files: <code>Item Master</code>, <code>Schedule</code>, <code>BOH Balance</code> (BOM optional for Inventory tree)</span>
-        <span id="ioPersistentMsg_${isCompact?'compact':'full'}" style="font-size:11px;color:#059669;font-weight:600"></span>
-      </div>
-      <div class="section" id="io-folder-section-${isCompact?'compact':'full'}" style="background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border:1px solid #bfdbfe;border-radius:8px;padding:12px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-weight:700;font-size:12px;color:#1e40af">📂 Server Data Folder</span>
-          <select id="ioFolderSelect_${isCompact?'compact':'full'}" class="filter-input" style="padding:6px 10px;border:1px solid #93c5fd;border-radius:6px;min-width:260px;font-size:12px;background:#fff"><option>Loading folders...</option></select>
-          <button id="ioFolderRefresh_${isCompact?'compact':'full'}" class="btn btn-sm btn-outline" style="padding:4px 8px">🔄 Refresh</button>
-          <button id="ioFolderLoad_${isCompact?'compact':'full'}" class="btn btn-sm" disabled style="background:#0f172a;color:#fff;border-color:#0f172a;padding:6px 14px">▶ Load from Folder</button>
-          <span id="ioFolderStatus_${isCompact?'compact':'full'}" style="font-size:11px;color:#475569"></span>
-        </div>
-        <div id="ioFolderDetails_${isCompact?'compact':'full'}" style="margin-top:10px;font-size:11px;color:#475569;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:10px;display:none"></div>
-        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
-          <div id="ioGenerateStatusArea_${isCompact?'compact':'full'}" class="generate-status-area" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:200px">
-            <span id="ioStatusBadge_${isCompact?'compact':'full'}">${statusBadge}</span>
-            <span id="ioInlineSpinner_${isCompact?'compact':'full'}" style="display:none;align-items:center;gap:6px;font-size:12px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;padding:3px 8px;border-radius:12px"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin:0"></span><span>Loading...</span></span>
-            <span id="uploadProgress_${isCompact?'compact':'full'}" style="font-size:12px"></span>
-          </div>
-          <button class="btn btn-outline btn-sm" id="btnRetryLoad_${isCompact?'compact':'full'}" style="margin-left:auto">↻ Recheck Status</button>
-        </div>
-      </div>
+      <div id="ioFolderDetails_${isCompact?'compact':'full'}" style="margin-top:8px;font-size:11px;color:#475569;display:none"></div>
     </div>`;
 }
 function attachUploadLogic(isCompact){
@@ -244,33 +222,14 @@ function attachUploadLogic(isCompact){
     const isReady = info.ready;
     if(loadBtn) loadBtn.disabled = !isReady;
 
-    let html = `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">`;
-    html += `<span style="font-weight:600">Folder: <code>${info.folder}</code> (${info.path})</span>`;
-    html += `<span style="background:${isReady?'#dcfce7':'#fef2f2'};color:${isReady?'#065f46':'#991b1b'};border:1px solid ${isReady?'#86efac':'#fecaca'};padding:2px 8px;border-radius:12px;font-size:11px">${isReady?'✅ Ready - All 3 files present':'❌ Not Ready - Missing files'}</span>`;
-    html += `</div>`;
-
-    html += `<div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">`;
-    const fileIcons = {master:'📄 Item Master', schedule:'📋 Schedule', balance:'📦 BOH Balance', bom:'📦 BOM'};
-    for(const [k,label] of Object.entries(fileIcons)){
-      const has = info.files && info.files[k];
-      if(k==='bom' && !has) continue; // BOM optional
-      const exists = k==='bom' ? info.has_bom : (k==='master'?info.has_master: k==='schedule'?info.has_schedule: info.has_balance);
-      html += `<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:${exists?'#eff6ff':'#fef2f2'};color:${exists?'#1e40af':'#991b1b'};border:1px solid ${exists?'#bfdbfe':'#fecaca'}">${exists?'✅':'❌'} ${label}: ${has||'Missing'}</span>`;
-    }
-    html += `</div>`;
-
-    if(info.missing && info.missing.length>0){
-      html += `<div style="margin-top:6px;padding:6px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#991b1b;font-size:11px">⚠️ Missing: ${info.missing.join(', ')} — Please put these 3 files in data/${info.folder}/</div>`;
+    if(isReady){
+      detailsEl.innerHTML = `<span style="color:#065f46">✅ Ready: ${info.files.master||'master'}, ${info.files.schedule||'schedule'}, ${info.files.balance||'balance'}${info.has_bom ? ` + BOM:${info.files.bom}` : ' (BOM optional)'}</span>`;
+      detailsEl.style.display='block';
+      if(statusEl) statusEl.textContent = '';
     }else{
-      html += `<div style="margin-top:6px;color:#065f46;font-size:11px">All required files present. Click "Load from Folder" to generate IO and Inventory reports.</div>`;
-    }
-
-    detailsEl.innerHTML = html;
-    detailsEl.style.display='block';
-
-    if(statusEl){
-      if(isReady) statusEl.textContent = `✅ ${info.folder} ready`;
-      else statusEl.textContent = `❌ ${info.folder} missing: ${info.missing.join(', ')}`;
+      detailsEl.innerHTML = `<span style="color:#991b1b">❌ Missing: ${info.missing.join(', ')}</span>`;
+      detailsEl.style.display='block';
+      if(statusEl) statusEl.textContent = `Missing: ${info.missing.join(', ')}`;
     }
   }
 
