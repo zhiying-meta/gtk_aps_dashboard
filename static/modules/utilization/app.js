@@ -661,42 +661,53 @@
     const lines = (meta && meta.lines) ? meta.lines : [];
     setupLineDropdown(lines);
 
-    // Set default date range to last 60 days to reduce initial payload from 371 cols / 7MB to ~60 cols / 1.2MB
+    // Default filtering: from today onwards per user request
     try{
       const fromEl = document.getElementById('util-filter-from');
       const toEl = document.getElementById('util-filter-to');
-      if(fromEl && toEl && (!fromEl.value && !toEl.value) && meta && meta.dates && meta.dates.length>0){
-        // meta.dates is sorted list, or date_min/date_max
-        const dates = meta.dates.length>0 ? meta.dates : [];
-        let dMin = meta.date_min || (dates[0] || "");
-        let dMax = meta.date_max || (dates[dates.length-1] || "");
-        if(dates.length>60){
-          // Show first 60 days by default (or last 60? Use first 60 to match earlier behavior, but better last 60)
-          // Use slice of middle or first 60 to avoid too much truncation message
-          // Choose last 60 days for recency
-          const startIdx = Math.max(0, dates.length-60);
-          dMin = dates[startIdx];
-          dMax = dates[dates.length-1];
-        }
-        if(dMin) fromEl.value = dMin;
-        if(dMax) toEl.value = dMax;
-      }else if(fromEl && toEl && (!fromEl.value && !toEl.value) && meta && meta.date_min && meta.date_max){
-        // Fallback using date_min/max: set range to 60 days from min
-        try{
-          const minD = new Date(meta.date_min);
-          const maxD = new Date(meta.date_max);
-          // If range > 60 days, set to first 60 days
-          const diffDays = (maxD - minD)/(1000*3600*24);
-          if(diffDays>60){
-            const toDate = new Date(minD);
-            toDate.setDate(toDate.getDate()+60);
-            fromEl.value = meta.date_min;
-            toEl.value = toDate.toISOString().slice(0,10);
-          }else{
-            fromEl.value = meta.date_min;
-            toEl.value = meta.date_max;
+      if(fromEl && toEl && (!fromEl.value && !toEl.value)){
+        const todayStr = new Date().toISOString().slice(0,10);
+        // If meta has dates, try to find today or next available date
+        if(meta && meta.dates && meta.dates.length>0){
+          const dates = meta.dates;
+          // Find first date >= today
+          let fromDate = todayStr;
+          // If today not in list, find next date >= today, or use today if before all, or last date if after all
+          const today = new Date(todayStr);
+          let found = null;
+          for(const d of dates){
+            try{
+              const dd = new Date(d);
+              if(dd >= today){
+                found = d;
+                break;
+              }
+            }catch{}
           }
-        }catch{}
+          if(found){
+            fromEl.value = found;
+          }else{
+            // If today after all dates, use last 30 days or today
+            // Check if today is after max date, then show from today (will be empty but user can adjust)
+            // For better UX, if today > max, set from to today and leave to empty to show from today onwards (may be empty, but per request)
+            // Alternatively, set from to today
+            fromEl.value = todayStr;
+          }
+          // To: leave empty to show from today onwards (no upper limit), or set to max date
+          // Per request: from today onwards, so to can be empty or max
+          // We leave to empty to mean no upper limit, but set to max if exists to avoid too many cols? Let's set to max to still have data
+          if(meta.date_max) toEl.value = meta.date_max;
+          else if(dates.length>0) toEl.value = dates[dates.length-1];
+          else toEl.value = '';
+        }else if(meta && meta.date_min){
+          // Fallback: from today, to date_max or empty
+          fromEl.value = new Date().toISOString().slice(0,10);
+          if(meta.date_max) toEl.value = meta.date_max;
+        }else{
+          // No meta, just set from today, to empty (today onwards)
+          fromEl.value = new Date().toISOString().slice(0,10);
+          toEl.value = '';
+        }
       }
     }catch{}
 
