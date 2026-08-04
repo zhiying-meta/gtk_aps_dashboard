@@ -807,14 +807,36 @@ renderTable();
 
 # ---------- Data Folder Selection Mode (NEW) ----------
 def _find_snapshot_file(data_dir: str, key: str):
-    """Find file for a given snapshot key in data_dir using fuzzy matching"""
+    """Find file for a given snapshot key in data_dir using fuzzy matching.
+
+    Per user latest request: gated and ungated only need file named '排产结果表'.
+    So for gated/ungated keys, we first look for exact '排产结果表.xlsx' or any file containing '排产结果表'.
+    """
     target = SNAPSHOT_TARGET_MAP.get(key)
     if not target:
         return None
-    # exact match
+    # exact match for target itself
     exact = os.path.join(data_dir, target)
     if os.path.exists(exact):
         return exact
+
+    # For gated/ungated, user says only need file named '排产结果表' - prioritize that exact name
+    if key in ("gated", "ungated"):
+        # Look for exact '排产结果表.xlsx' or '排产结果表' substring
+        for exact_name in ["排产结果表.xlsx", "排产结果表"]:
+            p = os.path.join(data_dir, exact_name)
+            if os.path.exists(p):
+                return p
+        # Also check any file containing '排产结果表'
+        try:
+            for f in os.listdir(data_dir):
+                if not f.lower().endswith(".xlsx"):
+                    continue
+                if "排产结果表" in f:
+                    return os.path.join(data_dir, f)
+        except Exception:
+            pass
+
     # fuzzy: try _classify_snapshot_upload logic via scanning directory
     try:
         for f in os.listdir(data_dir):
@@ -827,12 +849,21 @@ def _find_snapshot_file(data_dir: str, key: str):
             # Also check if target substring in f
             if target in f or key in f.lower():
                 return os.path.join(data_dir, f)
+            # For gated/ungated, also accept any file with 排产结果表 as fallback
+            if key in ("gated", "ungated") and "排产结果表" in f:
+                return os.path.join(data_dir, f)
     except Exception:
         pass
     return None
 
 def _scan_packout_folder(folder_path: str):
-    """Scan folder for packout snapshot files, return dict with existence info"""
+    """Scan folder for packout snapshot files.
+
+    New requirement from user: gated and ungated only need to find '排产结果表' to be considered ready.
+    So gated_ready and ungated_ready are based solely on existence of a schedule file (containing 排产结果表 or schedule).
+    CTB still needs CTB file.
+    For info, we still scan all 7 files.
+    """
     result = {
         "has_item": False,
         "has_bom": False,
@@ -852,23 +883,59 @@ def _scan_packout_folder(folder_path: str):
                 result["files"][key] = os.path.basename(fp)
             else:
                 result["missing"].append(f"{key} ({SNAPSHOT_TARGET_MAP[key]})")
+        # Also check for generic 排产结果表 file for gated/ungated readiness
+        # If folder has any file containing 排产结果表, consider it as having schedule
+        has_generic_schedule = False
+        try:
+            for f in os.listdir(folder_path):
+                if "排产结果表" in f or "排产" in f or "schedule" in f.lower():
+                    if f.lower().endswith(".xlsx"):
+                        has_generic_schedule = True
+                        break
+        except Exception:
+            pass
+        result["has_generic_schedule"] = has_generic_schedule
+
     except Exception as e:
         result["missing"].append(f"scan error: {e}")
 
-    # For new requirement: gated folder needs 5 files, ungated 1, ctb 1
+    # Per latest user clarification:
+    # - Gated folder still needs 5 files: item, bom, gated, fcst_main, fcst_detail (all required)
+    # - But gated schedule file can be simply named '排产结果表' (not necessarily gated排产结果表)
+    # - Ungated folder needs 1 file: ungated schedule, also can be named '排产结果表'
+    # - So readiness: gated requires all 5, but schedule detection allows generic '排产结果表'
+    # - Ungated requires 1 schedule file (named '排产结果表' is enough)
+    # - CTB requires ctb file
+
+    # Gated: requires item,bom,gated,fcst_main,fcst_detail (5 files)
+    # Note: has_gated already includes detection of '排产结果表' via _find_snapshot_file fallback
     gated_keys = ["item", "bom", "gated", "fcst_main", "fcst_detail"]
     result["gated_ready"] = all(result.get(f"has_{k}", False) for k in gated_keys)
     result["gated_missing"] = [f"{k} ({SNAPSHOT_TARGET_MAP[k]})" for k in gated_keys if not result.get(f"has_{k}", False)]
+    # If missing only because of name, but has generic schedule, consider ready for schedule part
+    # Actually has_gated already covers generic '排产结果表', so gated_ready above is accurate
 
+    # Ungated: requires 1 file - ungated schedule, file can be named '排产结果表'
+    # has_ungated already covers generic '排产结果表' via _find_snapshot_file
     ungated_keys = ["ungated"]
-    result["ungated_ready"] = all(result.get(f"has_{k}", False) for k in ungated_keys)
-    result["ungated_missing"] = [f"{k} ({SNAPSHOT_TARGET_MAP[k]})" for k in ungated_keys if not result.get(f"has_{k}", False)]
+    # Also allow generic schedule as ungated ready per user request "只需要找到排产结果表就行"
+    has_any_schedule = result.get("has_gated", False) or result.get("has_ungated", False) or result.get("has_generic_schedule", False)
+    result["ungated_ready"] = result.get("has_ungated", False) or has_any_schedule
+    if result["ungated_ready"]:
+        result["ungated_missing"] = []
+    else:
+        result["ungated_missing"] = ["排产结果表 (Schedule Result: 排产结果表.xlsx)"]
 
     ctb_keys = ["ctb"]
-    result["ctb_ready"] = all(result.get(f"has_{k}", False) for k in ctb_keys)
+    result["ctb_ready"] = result.get("has_ctb", False)
     result["ctb_missing"] = [f"{k} ({SNAPSHOT_TARGET_MAP[k]})" for k in ctb_keys if not result.get(f"has_{k}", False)]
 
     result["ready_all"] = result["gated_ready"] and result["ungated_ready"] and result["ctb_ready"]
+
+    # Keep full gated check for info
+    result["gated_ready_full"] = result["gated_ready"]
+    result["gated_missing_full"] = result["gated_missing"]
+
     return result
 
 @plan_merge_bp.route("/api/plan_merge/data_folders", methods=["GET"])
