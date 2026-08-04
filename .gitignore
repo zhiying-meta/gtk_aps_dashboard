@@ -51,3 +51,5 @@ snapshot/
 # V2V Report exports
 V2V_Report_*.html
 BTO-Dashboard-*.html
+# Unnecessary local design doc
+docs/PN_CONSUMPTION_DESIGN.md

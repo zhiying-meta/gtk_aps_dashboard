@@ -118,6 +118,7 @@ def api_status():
             try:
                 from app.modules.utilization_report.engine import reload_all, get_all_caches
                 reload_all(str(base_path))
+                _PIVOT_CACHE.clear()
                 # Rebuild cached_versions from _CACHES after reload
                 cached_versions = {}
                 for k in list(_CACHES.keys()):
@@ -241,6 +242,13 @@ def api_reports():
         traceback.print_exc()
         return _json_error(str(e))
 
+# Simple in-memory cache for pivot to speed up repeated requests
+_PIVOT_CACHE = {}
+_PIVOT_CACHE_MAX = 20
+
+def _pivot_cache_key(mode, version_param, version_filter, line_filter, date_from, date_to, include_detail):
+    return (mode, version_param, version_filter, line_filter, date_from, date_to, include_detail)
+
 @util_bp.route("/api/utilization/pivot", methods=["GET"])
 def api_pivot():
     """
@@ -250,6 +258,7 @@ def api_pivot():
     mode=day -> columns = date
     Returns rows with line_code + version_type, plus columns for dates.
     Includes color coding, thick line separation by line_code.
+    Optimized: supports include_detail=0 to skip heavy detail dict (reduces 7MB->2MB), and simple cache.
     """
     try:
         caches = get_all_caches(DEFAULT_DATA_DIR)
@@ -276,6 +285,16 @@ def api_pivot():
         line_filter = request.args.get("line_code", "") or request.args.get("line", "")
         date_from = request.args.get("date_from", "")
         date_to = request.args.get("date_to", "")
+        # New: include_detail param to reduce payload (0 = skip detail, 1 = include)
+        include_detail_raw = request.args.get("include_detail", request.args.get("detail", "1"))
+        include_detail = str(include_detail_raw).lower() not in ("0", "false", "no", "off")
+
+        # Check cache first (only for full detail or no-detail separately)
+        cache_key = _pivot_cache_key(mode, version_param, version_filter, line_filter, date_from, date_to, include_detail)
+        if cache_key in _PIVOT_CACHE:
+            # Return cached copy (shallow)
+            cached_resp = _PIVOT_CACHE[cache_key]
+            return jsonify(cached_resp)
 
         from app.modules.utilization_report.engine import build_report
 
@@ -370,33 +389,35 @@ def api_pivot():
             truncated = True
 
         # Build matrix keyed by (line_code, version_type) -> col -> util
-        # Also keep detail
+        # Also keep detail only if requested (saves ~60% payload)
         from collections import defaultdict
         matrix = {}  # key = (line, version_type) -> dict col->util
-        detail = {}  # key = (line, version_type) -> col -> detail
+        detail = {} if include_detail else None
         lines_set = set()
         for r in all_recs:
             key = (r['line_code'], r['version_type'])
             lines_set.add(r['line_code'])
             if key not in matrix:
                 matrix[key] = {}
-                detail[key] = {}
+                if include_detail:
+                    detail[key] = {}
             col = f"{r['plan_date']}|{r['shift_name']}" if mode == "shift" else r['plan_date']
             if col not in cols:
                 continue
             util_pct = r.get('utilization_pct', 0)
             capped = min(100.0, util_pct) if util_pct is not None else 0
             matrix[key][col] = capped
-            detail[key][col] = {
-                'util_raw': util_pct,
-                'util_capped': capped,
-                'load': r['load'],
-                'capacity': r['capacity'],
-                'uph': r['uph'],
-                'efficiency': r['efficiency'],
-                'working_hours': r['working_hours'],
-                'is_overload': r.get('is_overload', False),
-            }
+            if include_detail:
+                detail[key][col] = {
+                    'util_raw': util_pct,
+                    'util_capped': capped,
+                    'load': r['load'],
+                    'capacity': r['capacity'],
+                    'uph': r['uph'],
+                    'efficiency': r['efficiency'],
+                    'working_hours': r['working_hours'],
+                    'is_overload': r.get('is_overload', False),
+                }
 
         # Sort keys by line_code, then version_type (Gated before Ungated for consistency)
         def sort_key(k):
@@ -420,13 +441,16 @@ def api_pivot():
                 row[col] = matrix[(line, vtype)].get(col, None)
             rows.append(row)
 
-        # Convert detail to string keys for JSON (line|version_type)
-        detail_json = {}
-        for (line, vtype), col_map in detail.items():
-            key_str = f"{line}||{vtype}"
-            detail_json[key_str] = col_map
+        # Convert detail to string keys for JSON (line|version_type) only if requested
+        if include_detail:
+            detail_json = {}
+            for (line, vtype), col_map in detail.items():
+                key_str = f"{line}||{vtype}"
+                detail_json[key_str] = col_map
+        else:
+            detail_json = {}
 
-        return jsonify({
+        resp_data = {
             "mode": mode,
             "versions": versions_to_include,
             "columns": cols,
@@ -437,7 +461,20 @@ def api_pivot():
             "total_cols": len(cols),
             "total_cols_before": total_cols_before,
             "truncated": truncated,
-        })
+            "include_detail": include_detail,
+        }
+
+        # Cache result (simple LRU eviction)
+        try:
+            _PIVOT_CACHE[cache_key] = resp_data
+            if len(_PIVOT_CACHE) > _PIVOT_CACHE_MAX:
+                # remove oldest
+                oldest = next(iter(_PIVOT_CACHE))
+                _PIVOT_CACHE.pop(oldest, None)
+        except Exception:
+            pass
+
+        return jsonify(resp_data)
 
     except Exception as e:
         import traceback
@@ -828,6 +865,7 @@ def api_upload():
             return _json_error("No valid calendar/schedule files classified. Please upload 工作日历快照.xlsx and 排产结果表.xlsx, or zip containing them.", 400)
 
         reload_all(DEFAULT_DATA_DIR)
+        _PIVOT_CACHE.clear()
 
         # Build overall detected message like IO: "✅ Snapshot mode: detected N files — ..." – now with per-version breakdown
         overall_files = []
@@ -897,6 +935,7 @@ def api_demo_load():
         shutil.copyfile(str(cal), str(persist_dir / "工作日历快照.xlsx"))
         shutil.copyfile(str(sched), str(persist_dir / "排产结果表.xlsx"))
         reload_all(DEFAULT_DATA_DIR)
+        _PIVOT_CACHE.clear()
         caches = get_all_caches(DEFAULT_DATA_DIR)
         cache = caches.get('gated')
         if not cache:
@@ -974,6 +1013,7 @@ def api_clear():
         # After clearing, reload remaining caches (if any)
         try:
             reload_all(DEFAULT_DATA_DIR)
+            _PIVOT_CACHE.clear()
         except Exception:
             pass
 
@@ -1142,6 +1182,7 @@ def api_util_load_from_folder():
         # Reload caches
         from app.modules.utilization_report.engine import reload_all, get_all_caches
         reload_all(DEFAULT_DATA_DIR)
+        _PIVOT_CACHE.clear()
         caches = get_all_caches(DEFAULT_DATA_DIR)
         cache = caches.get(version)
 
